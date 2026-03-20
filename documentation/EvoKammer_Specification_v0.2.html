@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EvoKammer — Specification v0.2</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #21253a;
+      --border: #2e3350;
+      --accent: #4f7eff;
+      --accent2: #7c5cff;
+      --text: #dde2f3;
+      --muted: #8b93b8;
+      --code-bg: #161b2e;
+      --green: #3fd680;
+      --yellow: #f0c060;
+      --red: #ff6b7a;
+      --radius: 8px;
+      --font: 'Segoe UI', 'Helvetica Neue', 'Inter', sans-serif;
+      --mono: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.7;
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* Sidebar TOC */
+    #sidebar {
+      width: 270px;
+      min-width: 270px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 32px 16px 40px 20px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      font-size: 13px;
+    }
+    #sidebar .logo {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 24px;
+      letter-spacing: 0.5px;
+    }
+    #sidebar .logo span { color: var(--muted); font-weight: 400; font-size: 12px; }
+    #sidebar ul { list-style: none; padding: 0; }
+    #sidebar ul li { margin: 3px 0; }
+    #sidebar ul li a {
+      color: var(--muted);
+      text-decoration: none;
+      display: block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: all 0.15s;
+    }
+    #sidebar ul li a:hover {
+      color: var(--text);
+      background: var(--surface2);
+    }
+
+    /* Main content */
+    main {
+      flex: 1;
+      max-width: 860px;
+      padding: 48px 56px;
+      overflow-x: hidden;
+    }
+
+    /* Typography */
+    h1 {
+      font-size: 30px;
+      font-weight: 800;
+      color: #fff;
+      margin: 56px 0 18px 0;
+      padding-bottom: 12px;
+      border-bottom: 2px solid var(--border);
+      letter-spacing: -0.5px;
+    }
+    h1:first-of-type { margin-top: 0; }
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent);
+      margin: 40px 0 14px 0;
+      padding-left: 14px;
+      border-left: 3px solid var(--accent);
+    }
+    h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--yellow);
+      margin: 28px 0 10px 0;
+    }
+    p {
+      margin: 12px 0;
+      color: var(--text);
+    }
+    strong { color: #fff; font-weight: 600; }
+    em { color: #c9d1f5; font-style: italic; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 36px 0;
+    }
+    blockquote {
+      margin: 20px 0;
+      padding: 14px 18px;
+      background: var(--surface2);
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      color: var(--muted);
+      font-style: italic;
+    }
+    ul {
+      margin: 10px 0 10px 24px;
+    }
+    ul li { margin: 6px 0; }
+
+    /* Code */
+    code {
+      font-family: var(--mono);
+      font-size: 13px;
+      background: var(--code-bg);
+      color: var(--green);
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      overflow-x: auto;
+      margin: 18px 0;
+      font-size: 12.5px;
+      line-height: 1.5;
+    }
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      color: #a8c4ff;
+      font-size: 12.5px;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 14px;
+      background: var(--surface);
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    thead th {
+      background: var(--surface2);
+      color: var(--accent);
+      font-weight: 700;
+      padding: 12px 14px;
+      text-align: left;
+      border-bottom: 2px solid var(--border);
+    }
+    tbody td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: var(--surface2); }
+
+    /* Version badge */
+    .version-badge {
+      display: inline-block;
+      background: var(--accent2);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 10px;
+      border-radius: 20px;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    @media (max-width: 900px) {
+      #sidebar { display: none; }
+      main { padding: 28px 20px; }
+    }
+    @media print {
+      #sidebar { display: none; }
+      body { background: #fff; color: #222; }
+      main { max-width: 100%; padding: 0; }
+      h1, h2, h3 { color: #111; }
+      h2 { border-left-color: #4f7eff; }
+      h3 { color: #333; }
+      pre, code { background: #f5f5f5; color: #222; border-color: #ccc; }
+      table { border-color: #ccc; }
+      thead th { background: #eee; color: #333; }
+      a { color: #4f7eff; }
+      blockquote { background: #f5f5f5; border-left-color: #4f7eff; }
+    }
+  </style>
+</head>
+<body>
+
+<nav id="sidebar">
+  <div class="logo">EvoKammer <span>v0.2</span></div>
+  <ul>
+    <li><a href="#evokammer-specification-v02">Overview</a></li>
+    <li><a href="#1-philosophy-design-principles">1. Philosophy</a></li>
+    <li><a href="#2-system-overview">2. System Overview</a></li>
+    <li><a href="#3-genesis-council">3. Genesis Council</a></li>
+    <li><a href="#4-the-persistent-substrate">4. Persistent Substrate</a></li>
+    <li><a href="#5-lifecycle-manager-budget-protocol">5. Lifecycle & Budget</a></li>
+    <li><a href="#6-agent-execution-environment">6. Execution Env</a></li>
+    <li><a href="#7-constitutional-laws">7. Constitutional Laws</a></li>
+    <li><a href="#8-role-ecosystem">8. Role Ecosystem</a></li>
+    <li><a href="#9-multi-group-competition-layer">9. Multi-Group Competition</a></li>
+    <li><a href="#10-resource-map-territorial-nodes">10. Resource Map</a></li>
+    <li><a href="#11-inter-group-communication">11. Inter-Group Comms</a></li>
+    <li><a href="#12-asymmetric-group-profiles">12. Asymmetric Profiles</a></li>
+    <li><a href="#13-per-agent-fitness-epigenetic-inheritance">13. Epigenetic Inheritance</a></li>
+    <li><a href="#14-typed-knowledge-graph-layer">14. Knowledge Graph ★</a></li>
+    <li><a href="#15-grader-groups-evaluation-engine">15. Grader Groups</a></li>
+    <li><a href="#16-blind-tournament-scoring-check-ins">16. Scoring & Check-ins</a></li>
+    <li><a href="#17-progressive-task-disclosure">17. Task Disclosure</a></li>
+    <li><a href="#18-outlier-agents">18. Outlier Agents</a></li>
+    <li><a href="#19-global-watchdog-meta-planner">19. Watchdog</a></li>
+    <li><a href="#20-hierarchical-civilizations-delegated-budgets">20. Hierarchical ★</a></li>
+    <li><a href="#21-model-cognitive-diversity">21. Cognitive Diversity ★</a></li>
+    <li><a href="#22-differential-privacy-controlled-intelligence-leaks">22. Privacy Leaks ★</a></li>
+    <li><a href="#23-continuous-evaluation-feedback-loop">23. Eval Feedback ★</a></li>
+    <li><a href="#24-example-prompts">24. Example Prompts</a></li>
+    <li><a href="#25-cost-model">25. Cost Model</a></li>
+    <li><a href="#26-kotlin-poc-stack">26. Kotlin POC</a></li>
+    <li><a href="#27-future-extensions-speculative-directions">27. Future Extensions ★</a></li>
+  </ul>
+</nav>
+
+<main>
+  <div class="version-badge">v0.2</div>
+<h1 id="evokammer-specification-v0-2">EvoKammer — Specification v0.2</h1>
+<blockquote><em>A civilizational multi-agent system where intelligence compounds in the substrate, not in the agent.</em></blockquote>
+
+<hr>
+
+<h2 id="table-of-contents">Table of Contents</h2>
+
+<li>Philosophy &amp; Design Principles</li>
+<li>System Overview</li>
+<li>Genesis Council</li>
+<li>The Persistent Substrate</li>
+<li>Lifecycle Manager &amp; Budget Protocol</li>
+<li>Agent Execution Environment</li>
+<li>Constitutional Laws</li>
+<li>Role Ecosystem</li>
+<li>Multi-Group Competition Layer</li>
+<li>Resource Map &amp; Territorial Nodes</li>
+<li>Inter-Group Communication</li>
+<li>Asymmetric Group Profiles</li>
+<li>Per-Agent Fitness &amp; Epigenetic Inheritance</li>
+<li>Typed Knowledge Graph Layer</li>
+<li>Grader Groups &amp; Evaluation Engine</li>
+<li>Blind Tournament Scoring &amp; Check-ins</li>
+<li>Progressive Task Disclosure</li>
+<li>Outlier Agents</li>
+<li>Global Watchdog &amp; Meta-Planner</li>
+<li>Hierarchical Civilizations &amp; Delegated Budgets</li>
+<li>Model &amp; Cognitive Diversity</li>
+<li>Differential Privacy &amp; Controlled Intelligence Leaks</li>
+<li>Continuous Evaluation Feedback Loop</li>
+<li>Example Prompts</li>
+<li>Cost Model</li>
+<li>Kotlin POC Stack</li>
+<li>Future Extensions &amp; Speculative Directions</li>
+
+<hr>
+
+<h2 id="1-philosophy-design-principles">1. Philosophy & Design Principles</h2>
+
+<p>EvoKammer is built on a single core insight: <strong>the bottleneck to intelligence is not individual cognition — it is institutional memory quality</strong>. Every human generation since 1700 has had roughly the same brain, yet compounding written knowledge, scientific method, and tooling created exponential capability.</p>
+
+<p>This system operationalises that insight for AI agents:</p>
+
+<ul>
+<li><strong>The agent is disposable. The Substrate is not.</strong></li>
+<li>Agents do not accumulate memory. They read from and write to a shared civilisational substrate.</li>
+<li>Progress is measured not in agent capability but in substrate richness and robustness.</li>
+<li>Competition between isolated groups prevents monoculture and drives divergent exploration.</li>
+<li>Evaluation criteria co-evolve with deliverables — no static rubrics.</li>
+<li>Formal knowledge representations (typed graphs) coexist with narrative docs.</li>
+<li>The system is allowed to evolve its own institutions (roles, norms, even laws) under controlled conditions.</li>
+</ul>
+
+<h3 id="guiding-constraints">Guiding Constraints</h3>
+
+<table>
+<thead><tr>
+<th>Constraint</th>
+<th>Rationale</th>
+</tr></thead><tbody>
+<tr>
+<td>No agent memory across lifecycles</td>
+<td>Forces externalisation; prevents hoarding</td>
+</tr>
+<tr>
+<td>Hard budget termination (no exceptions)</td>
+<td>Incentivises efficiency-first reasoning</td>
+</tr>
+<tr>
+<td>Reads are always free</td>
+<td>Learning is never penalised</td>
+</tr>
+<tr>
+<td>All writes go through staging</td>
+<td>Prevents knowledge pollution</td>
+</tr>
+<tr>
+<td>Typed facts must respect logical consistency</td>
+<td>Formal correctness over rhetorical persuasiveness</td>
+</tr>
+<tr>
+<td>Constitutional laws enforced at syscall level</td>
+<td>Cannot be bypassed by any LLM output</td>
+</tr>
+<tr>
+<td>Blind scoring until all groups submit</td>
+<td>Eliminates Goodhart gaming during development</td>
+</tr>
+<tr>
+<td>Goals framed as constraints, not targets</td>
+<td>Robust generalisation over metric optimisation</td>
+</tr>
+<tr>
+<td>Delegated budgets allowed only within TTL</td>
+<td>Enables depth but preserves lifecycle boundaries</td>
+</tr>
+</tbody></table>
+
+<hr>
+
+<h2 id="2-system-overview">2. System Overview</h2>
+
+<pre><code class="language-text">
+┌──────────────────────────── EVOKAMMER ──────────────────────────────┐
+│                                                                      │
+│  [OBJECTIVE INPUT] ──► [GENESIS COUNCIL] ──► [STARTING FIELD]      │
+│                                                     │                │
+│         ┌───────────────────────────────────────────┤               │
+│         ▼               ▼               ▼           ▼               │
+│    [GROUP A]       [GROUP B]       [GROUP C]   [GROUP D]            │
+│    Own KB          Own KB          Own KB      Own KB               │
+│    Own KG          Own KG          Own KG      Own KG               │
+│    Own Tools       Own Tools       Own Tools   Own Tools            │
+│    Own Agents      Own Agents      Own Agents  Own Agents           │
+│         │               │               │           │               │
+│         └──────── INTER-GROUP BUS (ring topology) ──┘               │
+│                  Formal Dispatches (costly, latency)                 │
+│                  Differentially-private Intelligence Leaks           │
+│                                                                      │
+│    [GRADER A]     [GRADER B]   ← isolated, produce GradingSheets    │
+│                                                                      │
+│    [GLOBAL WATCHDOG]  ← deterministic rule engine                    │
+│    [META-PLANNER]     ← mortal LLM agent, triggered by Watchdog     │
+│                                                                      │
+│  CHECK-INs: blind submissions → score reveal → stage unlock         │
+│  FINAL SUBMISSION: full scoring → winner KB+KG seeds next task      │
+└──────────────────────────────────────────────────────────────────────┘
+</code></pre>
+
+<hr>
+
+<h2 id="3-genesis-council">3. Genesis Council</h2>
+
+<p><em>(Same roles as v0.1, but with two refinements: KG Architect + Model Ecologist.)</em></p>
+
+<h3 id="3-1-council-roles-extended">3.1 Council Roles (Extended)</h3>
+
+<table>
+<thead><tr>
+<th>Role</th>
+<th>Responsibility</th>
+<th>Key Output</th>
+</tr></thead><tbody>
+<tr>
+<td>Task Anatomist</td>
+<td>Decompose raw objective into knowledge node graph; identify prerequisites &amp; contested areas; propose check-ins</td>
+<td><code>knowledge_node_graph</code>, <code>checkin_schedule</code></td>
+</tr>
+<tr>
+<td>Incentive Designer</td>
+<td>Design action cost asymmetries, scoring weights, node yields tuned to task</td>
+<td><code>action_costs</code>, <code>scoring_weights</code>, <code>node_yields</code></td>
+</tr>
+<tr>
+<td>Ecologist</td>
+<td>Design group count, profiles, topology, communication costs</td>
+<td><code>group_profiles</code>, <code>topology</code>, <code>comm_costs</code></td>
+</tr>
+<tr>
+<td>Prompt Architect</td>
+<td>Generate role-specific system prompts, Death Note schema, Legacy Protocol template</td>
+<td><code>role_prompts</code>, <code>death_note_schema</code>, <code>legacy_protocol_template</code></td>
+</tr>
+<tr>
+<td>KG Architect (<strong>new</strong>)</td>
+<td>Define typed schema for facts in this domain (entities, relations, constraints, disjointness, units)</td>
+<td><code>kg_schema</code></td>
+</tr>
+<tr>
+<td>Model Ecologist (<strong>new</strong>)</td>
+<td>Assign LLM families/models to roles; define cognitive diversity layout per group</td>
+<td><code>model_assignment_map</code></td>
+</tr>
+<tr>
+<td>Seed Curator</td>
+<td>Assemble primordial KB+KG, seed tools, initial norms</td>
+<td><code>seed_kb</code>, <code>seed_kg</code>, <code>tool_registry_seeds</code></td>
+</tr>
+<tr>
+<td>Council Synthesis Agent</td>
+<td>Merge outputs, ensure global consistency</td>
+<td><code>StartingField</code></td>
+</tr>
+</tbody></table>
+
+<h3 id="3-2-kg-architect-output-example">3.2 KG Architect Output (Example)</h3>
+
+<pre><code class="language-json">
+{
+  "entities": [
+    { "type": "Service", "fields": { "name": "string", "latency_ms": "float", "owner_team": "string" }},
+    { "type": "APIEndpoint", "fields": { "path": "string", "method": "enum[GET,POST,PUT,DELETE]", "rate_limit_rps": "float" }},
+    { "type": "Vulnerability", "fields": { "cve_id": "string", "severity": "enum[LOW,MED,HI,CRIT]" }}
+  ],
+  "relations": [
+    { "name": "CALLS", "from": "Service", "to": "Service" },
+    { "name": "EXPOSES", "from": "Service", "to": "APIEndpoint" },
+    { "name": "HAS_VULN", "from": "Service", "to": "Vulnerability" }
+  ],
+  "constraints": [
+    "A Vulnerability.severity = 'CRIT' implies associated Service.latency_ms &lt; 500 is required",
+    "APIEndpoint.rate_limit_rps must be &gt; 0"
+  ]
+}
+</code></pre>
+
+<p>This schema is used by agents to emit and manipulate typed facts instead of only free-text.</p>
+
+<hr>
+
+<h2 id="4-the-persistent-substrate">4. The Persistent Substrate</h2>
+
+<h3 id="4-1-components-extended">4.1 Components (Extended)</h3>
+
+<table>
+<thead><tr>
+<th>Component</th>
+<th>Description</th>
+<th>Write Access</th>
+<th>Read Access</th>
+</tr></thead><tbody>
+<tr>
+<td>Knowledge Base (KB)</td>
+<td>Versioned, validated docs + embeddings</td>
+<td>Lifecycle Manager</td>
+<td>All agents</td>
+</tr>
+<tr>
+<td>Knowledge Graph (KG) (<strong>new</strong>)</td>
+<td>Typed facts (triples/quads) with constraints and confidence</td>
+<td>KG Writer agents &amp; Critics</td>
+<td>All agents</td>
+</tr>
+<tr>
+<td>Staging Area</td>
+<td>Unvalidated submissions (docs, tools, facts)</td>
+<td>Agents</td>
+<td>Critics, Lifecycle Manager</td>
+</tr>
+<tr>
+<td>Tool Registry</td>
+<td>Versioned, tested, sandboxed executables with metrics</td>
+<td>Lifecycle Manager</td>
+<td>All agents</td>
+</tr>
+<tr>
+<td>Plan Registry</td>
+<td>Current subgoal decomposition</td>
+<td>Planners (via staging)</td>
+<td>All agents</td>
+</tr>
+<tr>
+<td>Generation Event Log</td>
+<td>Behaviour logs per agent</td>
+<td>Lifecycle Manager</td>
+<td>Inspector, Auditor, Meta-Planner</td>
+</tr>
+<tr>
+<td>Dead Ends Registry</td>
+<td>Validated failure approaches and reasons</td>
+<td>Lifecycle Manager</td>
+<td>All agents</td>
+</tr>
+<tr>
+<td>Work-in-Progress Registry</td>
+<td>Task claims; distributed lock</td>
+<td>Agents</td>
+<td>All agents</td>
+</tr>
+<tr>
+<td>norms.md</td>
+<td>Evolving social norms</td>
+<td>Archivists</td>
+<td>All agents</td>
+</tr>
+<tr>
+<td>Legacy Protocol Store</td>
+<td>Behavioural protocols of elite agents</td>
+<td>Lifecycle Manager</td>
+<td>Lifecycle Manager</td>
+</tr>
+<tr>
+<td>Trust Score Table</td>
+<td>Per-source score for KB+KG entries</td>
+<td>Lifecycle Manager</td>
+<td>Critics, Inspector</td>
+</tr>
+</tbody></table>
+
+<h3 id="4-2-typed-knowledge-graph-semantics">4.2 Typed Knowledge Graph Semantics</h3>
+
+<p>Facts are stored as typed quads:</p>
+
+<pre><code class="language-text">
+(subject: EntityID, relation: RelationName, object: EntityID or Literal, meta: {confidence, source_agent, generation, provenance})
+</code></pre>
+
+<p>Consistency constraints come from the KG schema:</p>
+
+<ul>
+<li><strong>Hard constraints</strong>: must never be violated (e.g., value ranges, disjointness)</li>
+<li><strong>Soft constraints</strong>: can be violated but reduce trust score</li>
+</ul>
+
+<p>Before a fact leaves staging:</p>
+
+<li>The KG Consistency Checker runs constraint checks.</li>
+<li>Conflicts with higher-trust facts force either rejection or creation of a <strong>dispute</strong> entry requiring Critic arbitration.</li>
+<li>Once accepted, a fact increments or decrements trust scores of related entities and sources.</li>
+
+<p>Agents can query the KG directly (via a typed query interface) for high-precision questions — e.g. <em>“all Services with CALLS edges forming cycles and latency_ms &gt; 500”</em> — rather than relying only on text search.</p>
+
+<hr>
+
+<h2 id="5-lifecycle-manager-budget-protocol">5. Lifecycle Manager & Budget Protocol</h2>
+
+<p><em>(Core remains as v0.1, plus delegated budgets.)</em></p>
+
+<h3 id="5-1-delegated-budget-slices-within-ttl">5.1 Delegated Budget Slices (Within TTL)</h3>
+
+<p>Any agent can spawn <strong>sub-agents</strong> inside its own microVM with a delegated budget slice. These are not full EvoKammer lifecycles; their Death Notes roll into the parent.</p>
+
+<pre><code class="language-text">
+Parent budget B
+ └─ delegates b1 to SubAgent1, b2 to SubAgent2, …, where Σ(bi) ≤ B - floor_budget
+</code></pre>
+
+<p>Constraints:</p>
+<ul>
+<li>Sub-agents inherit role = parent role (no cross-role delegation)</li>
+<li>Sub-agents cannot spawn further sub-agents (one-level depth only in v0.2)</li>
+<li>Sub-agent lifetime ≤ parent TTL; if parent dies, sub-agents are killed</li>
+<li>Sub-agent outputs must go through the parent’s staging pipeline; parent is accountable</li>
+</ul>
+
+<p>Use cases:</p>
+<ul>
+<li>Builder spawning test-design sub-agents to generate edge-case tests for a tool</li>
+<li>Researcher spawning sub-agents to explore divergent hypotheses in parallel</li>
+</ul>
+
+<p>This increases <strong>depth within a lifecycle</strong> without violating the stateless-agents-across-generations principle.</p>
+
+<hr>
+
+<h2 id="6-agent-execution-environment">6. Agent Execution Environment</h2>
+
+<p><em>(As v0.1: Firecracker microVMs, nested tool sandboxes, role-gated network, web sanitisation.)</em></p>
+
+<hr>
+
+<h2 id="7-constitutional-laws">7. Constitutional Laws</h2>
+
+<p><em>(As v0.1, but now also apply to KG operations.)</em></p>
+
+<p>Additional ALWAYS_BLOCK entries:</p>
+
+<ul>
+<li>Any direct write to KG bypassing the staging + Checker + Critic pipeline</li>
+<li>Any attempt to modify KG constraints from within an agent lifecycle</li>
+</ul>
+
+<hr>
+
+<h2 id="8-role-ecosystem">8. Role Ecosystem</h2>
+
+<p><em>(Same baseline roles plus KG-specific capabilities.)</em></p>
+
+<p>New cross-cutting capability: <strong>KG Writer</strong> — not a separate role, but a capability flag. Certain roles (Researcher, Builder, Grader-Researcher) can emit typed facts when confident. Others (Outlier, Commune-style Archivists) may be restricted to free-text only to avoid low-precision fact spam.</p>
+
+<hr>
+
+<h2 id="9-multi-group-competition-layer">9. Multi-Group Competition Layer</h2>
+
+<p><em>(Unchanged structure, but groups now compete on KG quality as well as KB.)</em></p>
+
+<p>Additional competition dimension: <strong>KG coherence score</strong> — a group with a denser, more consistent KG gains an advantage even if its free-text KB is noisier. This favours groups that invest in formalisation.</p>
+
+<hr>
+
+<h2 id="10-resource-map-territorial-nodes">10. Resource Map & Territorial Nodes</h2>
+
+<p><em>(Unchanged core, but nodes gain typed KG hooks.)</em></p>
+
+<p>Each node optionally defines expected KG subgraphs (patterns) that high-quality solutions should create. Grader Groups can write tests over these patterns.</p>
+
+<hr>
+
+<h2 id="11-inter-group-communication">11. Inter-Group Communication</h2>
+
+<p><em>(Extended with differential privacy controls; see §22.)</em></p>
+
+<hr>
+
+<h2 id="12-asymmetric-group-profiles">12. Asymmetric Group Profiles</h2>
+
+<p><em>(As v0.1, but with one additional axis: KG vs. KB preference.)</em></p>
+
+<table>
+<thead><tr>
+<th>Profile</th>
+<th>KG Emphasis</th>
+<th>KB Emphasis</th>
+</tr></thead><tbody>
+<tr>
+<td>Library</td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>Factory</td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Commune</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Monastery</td>
+<td>High</td>
+<td>High</td>
+</tr>
+<tr>
+<td>Mercenary</td>
+<td>Adaptive</td>
+<td>Adaptive</td>
+</tr>
+</tbody></table>
+
+<p>Different cost multipliers apply to emitting KG facts vs. KB text, pushing profiles toward different formalisation strategies.</p>
+
+<hr>
+
+<h2 id="13-per-agent-fitness-epigenetic-inheritance">13. Per-Agent Fitness & Epigenetic Inheritance</h2>
+
+<p><em>(Same as v0.1, but fitness now also considers KG contributions.)</em></p>
+
+<p>Additional signal:</p>
+
+<ul>
+<li><strong>KG contribution quality</strong> (10–20% weight): number of accepted facts × average constraint-satisfaction score.</li>
+</ul>
+
+<p>Legacy Protocols gain a fourth section:</p>
+
+<pre><code class="language-json">
+{
+  "kg_habits": {
+    "when_to_emit_facts": "Only when evidence converges from ≥3 independent sources.",
+    "how_to_structure_entities": "Normalise service names; attach units to all numeric fields.",
+    "common_fact_errors_to_avoid": ["over-generalising from single examples", "missing units"]
+  }
+}
+</code></pre>
+
+<p>This guides future agents not just in <em>what</em> to do, but in <em>how</em> to responsibly formalise knowledge.</p>
+
+<hr>
+
+<h2 id="14-typed-knowledge-graph-layer">14. Typed Knowledge Graph Layer</h2>
+
+<h3 id="14-1-purpose">14.1 Purpose</h3>
+
+<p>The KG exists to make certain classes of reasoning:</p>
+<ul>
+<li><strong>Checkable</strong> instead of merely plausible</li>
+<li><strong>Composable</strong> across tasks (reused schemas and patterns)</li>
+<li><strong>Queryable</strong> at scale without full-text search</li>
+</ul>
+
+<h3 id="14-2-kg-operations">14.2 KG Operations</h3>
+
+<table>
+<thead><tr>
+<th>Operation</th>
+<th>Description</th>
+<th>Budget Cost</th>
+</tr></thead><tbody>
+<tr>
+<td>EmitFact</td>
+<td>Propose a new fact to staging</td>
+<td>1</td>
+</tr>
+<tr>
+<td>EmitConstraint</td>
+<td>Propose a new soft constraint</td>
+<td>2</td>
+</tr>
+<tr>
+<td>QueryPattern</td>
+<td>Fetch all subgraphs matching pattern</td>
+<td>0.5</td>
+</tr>
+<tr>
+<td>CheckConsistency</td>
+<td>Run constraint checks for affected facts</td>
+<td>0 (charged once per staging batch)</td>
+</tr>
+</tbody></table>
+
+<p>Critics have specialised KG-critic prompts to check: constraint violations, unit consistency, and contradiction patterns.</p>
+
+<h3 id="14-3-example-kg-use-cases">14.3 Example KG Use Cases</h3>
+
+<ul>
+<li>Security research: track service-call graphs, vulnerability propagation, patch status.</li>
+<li>Scientific discovery: track hypothesis relationships, experimental results, reproducibility links.</li>
+<li>Regulatory analysis: track obligations, jurisdictions, cross-references between statutes.</li>
+</ul>
+
+<hr>
+
+<h2 id="15-grader-groups-evaluation-engine">15. Grader Groups & Evaluation Engine</h2>
+
+<p><em>(Same as v0.1, now exploiting KG for rubric conditions.)</em></p>
+
+<p>GradingSheets can now specify KG-based evaluation criteria, e.g.:</p>
+
+<pre><code class="language-json">
+{
+  "kg_checks": [
+    {
+      "description": "All critical vulnerabilities must be attached to at least one mitigation fact.",
+      "pattern": "HAS_VULN(Service, Vulnerability[severity='CRIT'])",
+      "required_link": "HAS_MITIGATION(Vulnerability, Mitigation)"
+    }
+  ]
+}
+</code></pre>
+
+<hr>
+
+<h2 id="16-blind-tournament-scoring-check-ins">16. Blind Tournament Scoring & Check-ins</h2>
+
+<p><em>(Unchanged structurally.)</em></p>
+
+<hr>
+
+<h2 id="17-progressive-task-disclosure">17. Progressive Task Disclosure</h2>
+
+<p><em>(As v0.1.)</em></p>
+
+<hr>
+
+<h2 id="18-outlier-agents">18. Outlier Agents</h2>
+
+<p><em>(As v0.1, but we explicitly allow them to emit speculative KG facts into staging flagged as <code>origin: outlier, speculative: true</code>. Critics score them more harshly.)</em></p>
+
+<hr>
+
+<h2 id="19-global-watchdog-meta-planner">19. Global Watchdog & Meta-Planner</h2>
+
+<p><em>(As v0.1, but extended with KG-aware signals.)</em></p>
+
+<p>Additional signals:</p>
+
+<ul>
+<li>KG density vs. KB density — groups with extremely sparse KGs relative to KB get nudged to invest in formalisation.</li>
+<li>KG inconsistency rate — spikes trigger additional Grader attention.</li>
+</ul>
+
+<hr>
+
+<h2 id="20-hierarchical-civilizations-delegated-budgets">20. Hierarchical Civilizations & Delegated Budgets</h2>
+
+<h3 id="20-1-nested-groups-fractal-decomposition">20.1 Nested Groups (Fractal Decomposition)</h3>
+
+<p>A "group" at the outer level can itself be a full EvoKammer instance at the inner level. This enables hierarchical decomposition for very large tasks.</p>
+
+<p>Example:</p>
+
+<pre><code class="language-text">
+Global Task: End-to-end security posture for a cloud platform
+
+  Outer level groups: High-level architectural strategies
+    ├─ Inner level (per group) instances: identity, network, data, application layers
+    └─ Each inner instance runs its own multi-group competition on its subtask
+</code></pre>
+
+<p>Budget propagation:</p>
+
+<ul>
+<li>Outer group has budget B</li>
+<li>It allocates b_i to inner instances (Σ b_i ≤ B - safety margin)</li>
+<li>Inner instances run full EvoKammer cycles with their own generations</li>
+<li>Their winning Knowledge Bases (and KGs) roll up into the outer group’s KB/KG</li>
+</ul>
+
+<p>This allows <strong>fractal decomposition where depth is proportional to task complexity</strong>, not pre-baked.</p>
+
+<hr>
+
+<h2 id="21-model-cognitive-diversity">21. Model & Cognitive Diversity</h2>
+
+<h3 id="21-1-role-model-assignment">21.1 Role→Model Assignment</h3>
+
+<p>Rather than one model per group, roles are mapped to different model families.</p>
+
+<table>
+<thead><tr>
+<th>Role</th>
+<th>Model Type (example)</th>
+<th>Rationale</th>
+</tr></thead><tbody>
+<tr>
+<td>Planner</td>
+<td>Deep, slow reasoning model</td>
+<td>Durable plan quality</td>
+</tr>
+<tr>
+<td>Critic</td>
+<td>Evaluation-tuned, safety-tuned model</td>
+<td>Reliable gating</td>
+</tr>
+<tr>
+<td>Researcher</td>
+<td>Fast, broad-knowledge model</td>
+<td>High throughput</td>
+</tr>
+<tr>
+<td>Builder</td>
+<td>Code-specialist model</td>
+<td>Better tool generation</td>
+</tr>
+<tr>
+<td>Archivist</td>
+<td>Compact, summarisation-tuned model</td>
+<td>Efficient compression</td>
+</tr>
+<tr>
+<td>Grader</td>
+<td>Different family than main agents</td>
+<td>Independent blind spots</td>
+</tr>
+</tbody></table>
+
+<p>Assignment is part of <code>model_assignment_map</code> from the Genesis Council.</p>
+
+<h3 id="21-2-benefits">21.2 Benefits</h3>
+
+<ul>
+<li>Different failure modes across roles -&gt; fewer correlated blind spots.</li>
+<li>Grader Groups on different families cannot be Goodharted by the same tricks that fool main agents.</li>
+<li>Outlier agents can be explicitly assigned an oddball model to inject truly different cognition.</li>
+</ul>
+
+<hr>
+
+<h2 id="22-differential-privacy-controlled-intelligence-leaks">22. Differential Privacy & Controlled Intelligence Leaks</h2>
+
+<h3 id="22-1-problem">22.1 Problem</h3>
+
+<p>Raw intelligence leaks risk allowing one group to reconstruct another’s full strategy over enough generations.</p>
+
+<h3 id="22-2-differentially-private-leak-oracle">22.2 Differentially Private Leak Oracle</h3>
+
+<p>Instead of raw KB excerpts, the Leak Oracle emits <strong>semantically-preserving but detail-bounded summaries</strong>.</p>
+
+<p>Mechanism:</p>
+
+<ul>
+<li>Input: random KB sample from source group within some domain</li>
+<li>Process: summarise with an LLM under constraints:</li>
+</ul>
+<p>- No code identifiers, no exact API endpoints</p>
+<p>- No internal naming schemes</p>
+<p>- Only conceptual patterns &amp; discovered relationships</p>
+<ul>
+<li>Noise: add small stochastic paraphrasing; drop 1–2 details per summary</li>
+</ul>
+
+<p>This gives receiving groups <strong>signal about what directions are fruitful</strong> without allowing direct copying.</p>
+
+<p>Leak intensity is still tied to stasis: lagging groups receive more leaks as a catch-up mechanism.</p>
+
+<hr>
+
+<h2 id="23-continuous-evaluation-feedback-loop">23. Continuous Evaluation Feedback Loop</h2>
+
+<h3 id="23-1-check-in-failure-telemetry">23.1 Check-in Failure Telemetry</h3>
+
+<p>Every failed test case and rubric penalty from a check-in is anonymised and fed into Grader Groups’ KBs:</p>
+
+<pre><code class="language-json">
+{
+  "failure_telemetry": [
+    {
+      "domain": "http_client_implementation",
+      "failure_type": "edge_case_timeout",
+      "artifact_signature": "pattern hash only, no source",
+      "test_description": "request to slow server exceeds timeout"
+    }
+  ]
+}
+</code></pre>
+
+<p>Grader agents use this to:</p>
+<ul>
+<li>Strengthen existing GradingSheet dimensions</li>
+<li>Add new test cases where recurring failures appear</li>
+<li>Adjust weights to make under-tested areas more important</li>
+</ul>
+
+<p>Result: <strong>evaluation difficulty adapts exactly where builders are weak</strong>, making the whole system harder to game over time.</p>
+
+<hr>
+
+<h2 id="24-example-prompts">24. Example Prompts</h2>
+
+<p><em>(Same structure as v0.1, updated to mention KG + model diversity where relevant. For brevity, unchanged here.)</em></p>
+
+<hr>
+
+<h2 id="25-cost-model">25. Cost Model</h2>
+
+<p><em>(As in v0.1; typed KG operations add token overhead but are dominated by main LLM calls. Overall cost envelope remains roughly the same order — low single-digit USD for medium tasks with cheap backbones.)</em></p>
+
+<hr>
+
+<h2 id="26-kotlin-poc-stack">26. Kotlin POC Stack</h2>
+
+<p><em>(As v0.1, plus:)</em></p>
+
+<ul>
+<li>Add a thin KG layer using either:</li>
+</ul>
+<p>- A lightweight in-process graph (e.g. <code>TinkerGraph</code> via JVM interop) for POC</p>
+<p>- Or representing triples in SQLite with indexed <code>(subject, relation, object)</code> columns</p>
+<ul>
+<li>Expose a typed query API to agents via a <code>kgQuery</code> tool (select + constraints)</li>
+<li>Add a simple constraint engine: constraints stored as prefix patterns evaluated in Kotlin before committing facts</li>
+<li>Add <code>modelAssignment</code> config to map roles to specific OpenRouter models</li>
+</ul>
+
+<hr>
+
+<h2 id="27-future-extensions-speculative-directions">27. Future Extensions & Speculative Directions</h2>
+
+<p>This section collects potential further improvements — some practical, some intentionally speculative.</p>
+
+<h3 id="27-1-beyond-knowledge-tools-new-artifact-types">27.1 Beyond Knowledge & Tools — New Artifact Types</h3>
+
+<p>In addition to docs, tools, and facts, EvoKammer can accumulate:</p>
+
+<ul>
+<li><strong>Playbooks</strong>: reusable multi-step procedures (macro-actions) that encode sequences of tool calls + decision checkpoints. These are higher-level than tools and can be executed atomically.</li>
+<li><strong>Normative Contracts</strong>: formalised norms or policies that groups agree on, encoded as constraint sets (e.g. "never deploy a tool lacking tests"). These can be shared across tasks.</li>
+<li><strong>Scenario Libraries</strong>: for strategic tasks, stored partial-worlds (sets of assumptions) that future agents can reuse as simulation starting points.</li>
+</ul>
+
+<h3 id="27-2-making-it-faster">27.2 Making It Faster</h3>
+
+<ul>
+<li><strong>Asynchronous Check-ins</strong>: let groups move to the next stage as soon as they submit and are scored, rather than waiting for all groups. Final scoring still blind; stage progression is individual.</li>
+<li><strong>Hot-cache Retrieval</strong>: maintain per-role, per-domain hot caches of most frequently retrieved KB/KG slices to reduce RAG latency.</li>
+<li><strong>Speculative Generation</strong>: in generations where budget is under-spent, allow agents to precompute likely-needed tool variants (e.g. for new edge cases) so future generations can read rather than compute.</li>
+</ul>
+
+<h3 id="27-3-self-modifying-constitutional-laws-dangerous-long-term">27.3 Self-Modifying Constitutional Laws (Dangerous, Long-Term)</h3>
+
+<p>Introduce an <strong>Amendment Protocol</strong>:</p>
+
+<ul>
+<li>If 3 consecutive Meta-Planners propose the same law change (e.g. adjust action costs, add or relax a block), the Watchdog runs a retrospective simulation over recent logs to estimate impact.</li>
+<li>If simulation shows consistent improvement over a baseline (e.g. higher quality at same cost), the amendment is adopted for future runs.</li>
+</ul>
+
+<p>This gives the system a very slow, high-friction way to evolve its own physics.</p>
+
+<h3 id="27-4-cross-task-meta-learning">27.4 Cross-Task Meta-Learning</h3>
+
+<p>After N tasks:</p>
+
+<ul>
+<li>Build a <strong>Council Archive</strong>: mapping from task descriptors → successful StartingField patterns.</li>
+<li>The Genesis Council stops working from first principles and starts retrieving similar past tasks as priors.</li>
+<li>Prompt Architect uses previous high-fitness role prompts as templates; Incentive Designer uses past successful cost structures as starting points.</li>
+</ul>
+
+<p>This makes each new task cheaper and better initialised — the system learns not just <em>within</em> tasks but <em>across</em> tasks.</p>
+
+<h3 id="27-5-human-on-the-side-not-in-the-loop">27.5 Human-on-the-Side (Not in the Loop)</h3>
+
+<p>Even in a fully automated configuration, humans can:</p>
+
+<ul>
+<li>Subscribe to a read-only feed of Death Notes and Dead Ends Registry updates.</li>
+<li>Occasionally inject external facts into the KG (e.g. newly published research, discovered vulnerabilities) as high-trust entries.</li>
+<li>Provide <strong>post-hoc evaluation</strong> of the final outputs, which can be fed back into the Council Archive as additional meta-signal.</li>
+</ul>
+
+<h3 id="27-6-open-questions">27.6 Open Questions</h3>
+
+<ul>
+<li>How to formally balance exploration vs. exploitation across groups without overfitting to specific tasks?</li>
+<li>How to design KG schemas that are flexible enough to handle real-world messiness but strict enough to be meaningful?</li>
+<li>How to compress and transfer Knowledge Bases + KGs between tasks without smuggling in task-specific artefacts that bias future tasks?</li>
+</ul>
+
+<hr>
+
+<p><em>EvoKammer Specification v0.2 — including typed knowledge graphs, delegated budgets, cognitive diversity, and controlled leaks. Generated 2026-03-19.</em></p>
+
+</main>
+
+</body>
+</html>

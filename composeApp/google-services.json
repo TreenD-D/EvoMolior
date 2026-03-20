@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "PROJECT_NUMBER",
+    "project_id": "PROJECT_ID",
+    "storage_bucket": "STORAGE_BUCKET (PROJECT_ID.appspot.com)"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "MOBILESDK_APP_ID",
+        "android_client_info": {
+          "package_name": "com.achulkov.evomolior"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "API_KEY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
