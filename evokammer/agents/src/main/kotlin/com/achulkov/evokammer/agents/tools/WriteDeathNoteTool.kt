@@ -5,7 +5,6 @@ import ai.koog.serialization.typeToken
 import com.achulkov.evokammer.substrate.db.dao.StagingDao
 import com.achulkov.evokammer.substrate.db.entity.StagingSubmissionEntity
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
 
@@ -15,12 +14,16 @@ import java.util.UUID
  * Cost: 0 (always free, even when budget is at floor).
  * Death Notes are automatically promoted without Critic review.
  *
+ * After writing, calls [onWritten] (if provided) so the [com.achulkov.evokammer.agents.runner.DeathNoteProtocol]
+ * can cancel the hard-kill timer.  Pass `protocol::markDeathNoteWritten` from in-process runners.
+ *
  * @param stagingDao DAO for the current group's staging area.
  * @param runId The current run ID.
  * @param groupId The current group ID.
  * @param agentId The current agent ID.
  * @param role The agent's role name.
  * @param generation The current generation number.
+ * @param onWritten Optional callback invoked immediately after successful persistence.
  */
 class WriteDeathNoteTool(
     private val stagingDao: StagingDao,
@@ -28,7 +31,8 @@ class WriteDeathNoteTool(
     private val groupId: String,
     private val agentId: String,
     private val role: String,
-    private val generation: Int
+    private val generation: Int,
+    private val onWritten: (() -> Unit)? = null
 ) : SimpleTool<WriteDeathNoteTool.Args>(
     argsType = typeToken<Args>(),
     name = "write_death_note",
@@ -80,6 +84,9 @@ class WriteDeathNoteTool(
             reviewedAtMs = System.currentTimeMillis()
         )
         stagingDao.insert(entity)
+
+        // Notify the DeathNoteProtocol so it can cancel the hard-kill grace timer
+        onWritten?.invoke()
 
         return "Death Note written (ID: $submissionId). Your contributions are preserved."
     }

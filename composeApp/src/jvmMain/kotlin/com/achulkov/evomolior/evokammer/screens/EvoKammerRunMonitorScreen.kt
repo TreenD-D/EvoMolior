@@ -23,6 +23,7 @@ import com.achulkov.evomolior.evokammer.EvoKammerRoute
 import com.achulkov.evomolior.evokammer.LocalEvoKammerNavigator
 import com.achulkov.evomolior.evokammer.viewmodel.EvoKammerViewModel
 import com.achulkov.evomolior.evokammer.viewmodel.StubEvoKammerEngineService
+import kotlinx.coroutines.flow.collectLatest
 
 /**
  * Run Monitor screen — full live view of a running EvoKammer civilisation.
@@ -46,6 +47,7 @@ fun EvoKammerRunMonitorScreen(
     val gradingHistory by viewModel.gradingHistory.collectAsState()
 
     var selectedGroupId by remember { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // Auto-select first group when groups load
     LaunchedEffect(state.groupSummaries) {
@@ -54,7 +56,21 @@ fun EvoKammerRunMonitorScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    // Collect and display errors from the engine via snackbar
+    LaunchedEffect(viewModel) {
+        viewModel.error.collectLatest { errorMessage ->
+            snackbarHostState.showSnackbar(
+                message = errorMessage,
+                duration = SnackbarDuration.Long
+            )
+        }
+    }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { innerPadding ->
+    Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
         // ── Top status bar ────────────────────────────────────────────────────
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer,
@@ -236,6 +252,7 @@ fun EvoKammerRunMonitorScreen(
             }
         }
     }
+    } // end Scaffold
 }
 
 @Composable

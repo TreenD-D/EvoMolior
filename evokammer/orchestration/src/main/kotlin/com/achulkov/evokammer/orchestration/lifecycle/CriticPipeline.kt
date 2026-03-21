@@ -10,12 +10,14 @@ import ai.koog.prompt.llm.LLMProvider
 import com.achulkov.evokammer.core.contract.CriticOutcome
 import com.achulkov.evokammer.core.contract.CriticReview
 import com.achulkov.evokammer.substrate.db.EvoKammerDatabase
+import com.achulkov.evokammer.core.embedding.EmbeddingEngine
 import com.achulkov.evokammer.substrate.db.entity.EventLogEntryEntity
 import com.achulkov.evokammer.substrate.db.entity.EventTypes
 import com.achulkov.evokammer.substrate.db.entity.KnowledgeBaseEntryEntity
+import com.achulkov.evokammer.substrate.db.entity.KnowledgeGraphFactEntity
 import com.achulkov.evokammer.substrate.db.entity.ToolRegistryEntryEntity
+import com.achulkov.evokammer.substrate.db.entity.StagingSubmissionEntity
 import io.github.aakira.napier.Napier
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -45,7 +47,7 @@ class CriticPipeline(
     private val groupId: String,
     private val generation: Int,
     private val openRouterApiKey: String,
-    private val criticModel: String = "anthropic/claude-3-5-sonnet"
+    private val criticModel: String = "anthropic/claude-sonnet-4.6"
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -89,11 +91,12 @@ class CriticPipeline(
         return count
     }
 
-    private suspend fun reviewSubmission(submission: com.achulkov.evokammer.substrate.db.entity.StagingSubmissionEntity): CriticReview {
+    private suspend fun reviewSubmission(submission: StagingSubmissionEntity): CriticReview {
         val criticId = "critic-${UUID.randomUUID().toString().take(8)}"
         val prompt = buildCriticPrompt(submission)
 
         val model: LLModel = when (criticModel) {
+            "anthropic/claude-sonnet-4.6" -> LLModel(provider = LLMProvider.OpenRouter, id = criticModel)
             "anthropic/claude-3-5-sonnet" -> OpenRouterModels.Claude3_5Sonnet
             "anthropic/claude-3-haiku"    -> OpenRouterModels.Claude3Haiku
             "openai/gpt-4o"               -> OpenRouterModels.GPT4o
@@ -114,7 +117,7 @@ class CriticPipeline(
         return parseCriticResponse(responseText, criticId, submission.id)
     }
 
-    private fun buildCriticPrompt(submission: com.achulkov.evokammer.substrate.db.entity.StagingSubmissionEntity): String = """
+    private fun buildCriticPrompt(submission: StagingSubmissionEntity): String = """
         Review the following ${submission.type} submission from a ${submission.role} agent.
         
         Submission ID: ${submission.id}
@@ -146,8 +149,9 @@ class CriticPipeline(
 
     private fun parseCriticResponse(responseText: String, criticId: String, submissionId: String): CriticReview {
         return try {
-            // Try to extract JSON from response
-            val jsonStr = responseText.substringAfter("{").substringBeforeLast("}").let { "{$it}" }
+            // Extract the outermost JSON object using DOT_MATCHES_ALL regex to handle nested objects
+            val jsonStr = Regex("""\{.*\}""", RegexOption.DOT_MATCHES_ALL)
+                .find(responseText)?.value ?: "{}"
             val obj = json.parseToJsonElement(jsonStr) as JsonObject
             val outcome = obj["outcome"]?.jsonPrimitive?.content?.let {
                 CriticOutcome.valueOf(it)
@@ -174,7 +178,7 @@ class CriticPipeline(
     }
 
     private suspend fun applyReview(
-        submission: com.achulkov.evokammer.substrate.db.entity.StagingSubmissionEntity,
+        submission: StagingSubmissionEntity,
         review: CriticReview
     ) {
         val newStatus = when (review.outcome) {
@@ -212,10 +216,13 @@ class CriticPipeline(
         when (submission.type) {
             "DOC", "DEATH_NOTE" -> {
                 val isDeadEnd = submission.type == "DEATH_NOTE"
+                // Compute TF-IDF embedding for semantic search (SearchKBTool)
+                val embedding = runCatching { EmbeddingEngine.embed(submission.content) }.getOrNull()
                 db.knowledgeBaseDao().insert(
                     KnowledgeBaseEntryEntity(
                         id = UUID.randomUUID().toString(),
                         content = submission.content,
+                        embedding = embedding,
                         sourceAgentId = submission.agentId,
                         generation = submission.generation,
                         trustScore = trustScore,
@@ -232,16 +239,73 @@ class CriticPipeline(
                 // that parses the tool JSON and creates ToolRegistryEntryEntity
                 promoteToolSubmission(submission, trustScore)
             }
+            "KG_FACT" -> {
+                // Parse and promote typed KG fact to the knowledge_graph_facts table
+                promoteKgFactSubmission(submission, trustScore)
+            }
+            "KG_CONSTRAINT" -> {
+                // KG constraints update the schema; log for now — full KGSchemaDao wiring in Phase 3+
+                Napier.i { "[$groupId] KG_CONSTRAINT promoted (schema update): ${submission.id}" }
+            }
             else -> {
-                // FACT, KG_CONSTRAINT, PLAN_UPDATE, DISPATCH handled by respective services
+                // PLAN_UPDATE, DISPATCH handled by respective services
                 Napier.d { "[$groupId] Non-KB submission promoted: ${submission.type} ${submission.id}" }
             }
         }
     }
 
-    private suspend fun promoteToolSubmission(
-        submission: com.achulkov.evokammer.substrate.db.entity.StagingSubmissionEntity,
+    /**
+     * Parses a [StagingSubmissionEntity] of type KG_FACT and inserts it into the typed KG table.
+     *
+     * Expects content in `SUBJECT:/RELATION:/OBJECT:/CONFIDENCE:/DOMAIN:` line format
+     * as written by [com.achulkov.evokammer.agents.tools.EmitFactTool].
+     *
+     * @param submission The staging submission to promote.
+     * @param trustScore The trust score assigned by the Critic.
+     */
+    private suspend fun promoteKgFactSubmission(
+        submission: StagingSubmissionEntity,
         trustScore: Double
+    ) {
+        try {
+            val subject = extractField(submission.content, "SUBJECT")
+            val relation = extractField(submission.content, "RELATION")
+            val obj = extractField(submission.content, "OBJECT")
+            val confidence = extractField(submission.content, "CONFIDENCE")?.toDoubleOrNull() ?: 0.7
+            val provenance = extractField(submission.content, "PROVENANCE") ?: ""
+
+            if (subject == null || relation == null || obj == null) {
+                Napier.w { "[$groupId] KG_FACT ${submission.id} missing required fields — cannot promote to KG" }
+                return
+            }
+
+            db.knowledgeGraphFactDao().insert(
+                KnowledgeGraphFactEntity(
+                    id = UUID.randomUUID().toString(),
+                    subject = subject,
+                    relation = relation,
+                    objectNode = obj,
+                    confidence = confidence,
+                    sourceAgentId = submission.agentId,
+                    generation = submission.generation,
+                    trustScore = trustScore,
+                    provenanceJson = if (provenance.isNotBlank()) """["$provenance"]""" else "[]",
+                    status = "active",
+                    speculative = submission.speculative,
+                    groupId = groupId,
+                    runId = runId,
+                    createdAtMs = System.currentTimeMillis()
+                )
+            )
+            Napier.i { "[$groupId] KG fact promoted: ($subject, $relation, $obj) trust=$trustScore" }
+        } catch (e: Exception) {
+            Napier.e(e) { "[$groupId] Failed to promote KG_FACT submission ${submission.id}" }
+        }
+    }
+
+    private suspend fun promoteToolSubmission(
+        submission: StagingSubmissionEntity,
+        @Suppress("UNUSED_PARAMETER") trustScore: Double
     ) {
         try {
             val toolPayload = json.parseToJsonElement(submission.content) as? JsonObject ?: return
@@ -266,10 +330,29 @@ class CriticPipeline(
         }
     }
 
-    private fun extractDomain(content: String): String {
-        // Simple heuristic domain extraction — in Phase 3+ this uses KG schema tags
-        return "general"
-    }
+    /**
+     * Extracts the DOMAIN field from structured content (e.g., written by EmitFactTool).
+     * Falls back to "general" if no DOMAIN tag is present.
+     *
+     * @param content The submission content string.
+     * @return The domain string, or "general" if absent.
+     */
+    private fun extractDomain(content: String): String =
+        extractField(content, "DOMAIN") ?: "general"
+
+    /**
+     * Extracts a named field from content written in `FIELDNAME: value` line format.
+     *
+     * @param content The submission content string.
+     * @param fieldName The field name to look for (case-sensitive prefix match).
+     * @return The trimmed field value, or null if not found.
+     */
+    private fun extractField(content: String, fieldName: String): String? =
+        content.lines()
+            .firstOrNull { it.startsWith("$fieldName:") }
+            ?.removePrefix("$fieldName:")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
 
     private suspend fun emitEvent(type: String, payload: String) {
         db.eventLogDao().insert(

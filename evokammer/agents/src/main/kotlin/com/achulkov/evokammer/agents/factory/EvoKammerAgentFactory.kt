@@ -14,9 +14,12 @@ import com.achulkov.evokammer.agents.tools.ExecuteToolTool
 import com.achulkov.evokammer.agents.tools.QueryPatternTool
 import com.achulkov.evokammer.agents.tools.ReadKBTool
 import com.achulkov.evokammer.agents.tools.ReadKGTool
+import com.achulkov.evokammer.agents.tools.SearchKBTool
 import com.achulkov.evokammer.agents.tools.SendMessageTool
 import com.achulkov.evokammer.agents.tools.WriteDeathNoteTool
 import com.achulkov.evokammer.agents.tools.WriteStagingTool
+import com.achulkov.evokammer.sandbox.network.ContentSanitiser
+import com.achulkov.evokammer.agents.runner.DeathNoteProtocol
 import com.achulkov.evokammer.core.budget.BudgetConfig
 import com.achulkov.evokammer.core.budget.BudgetLedger
 import com.achulkov.evokammer.core.contract.AgentBootContext
@@ -54,7 +57,8 @@ class EvoKammerAgentFactory(
     private val db: EvoKammerDatabase,
     private val toolSubSandbox: ToolSubSandbox,
     private val budgetConfig: BudgetConfig,
-    private val toolsMountPath: String = "/tools"
+    private val toolsMountPath: String = "/tools",
+    private val contentSanitiser: ContentSanitiser = ContentSanitiser()
 ) {
     private val executor by lazy { simpleOpenRouterExecutor(openRouterApiKey) }
 
@@ -64,9 +68,16 @@ class EvoKammerAgentFactory(
      * @param bootContext The agent's boot context.
      * @param existingBudgetLedger If provided, use this ledger instead of creating a new one.
      *   Used by the sub-agent delegation flow to inject the carved budget slice.
+     * @param deathNoteProtocol Optional [DeathNoteProtocol] for in-process agent runs.
+     *   When provided, [WriteDeathNoteTool] will call [DeathNoteProtocol.markDeathNoteWritten]
+     *   so the grace-period hard-kill timer is cancelled on successful Death Note write.
      * @return An [AgentContext] ready to run.
      */
-    fun create(bootContext: AgentBootContext, existingBudgetLedger: BudgetLedger? = null): AgentContext {
+    fun create(
+        bootContext: AgentBootContext,
+        existingBudgetLedger: BudgetLedger? = null,
+        deathNoteProtocol: DeathNoteProtocol? = null
+    ): AgentContext {
         val initialBudget = budgetConfig.profile.spawnBudget
         val floor = budgetConfig.floorFor(initialBudget)
 
@@ -83,7 +94,8 @@ class EvoKammerAgentFactory(
         val toolRegistry = ToolRegistry {
             // Always-available tools
             tool(ReadKBTool(db.knowledgeBaseDao(), bootContext.runId, bootContext.groupId))
-            tool(ReadKGTool(db.knowledgeBaseDao(), bootContext.runId, bootContext.groupId))
+            tool(SearchKBTool(db.knowledgeBaseDao(), bootContext.runId, bootContext.groupId))
+            tool(ReadKGTool(db.knowledgeGraphFactDao(), bootContext.runId, bootContext.groupId))
             tool(
                 QueryPatternTool(
                     knowledgeGraphFactDao = db.knowledgeGraphFactDao(),
@@ -119,7 +131,8 @@ class EvoKammerAgentFactory(
                     groupId = bootContext.groupId,
                     agentId = bootContext.agentId,
                     role = bootContext.role.name,
-                    generation = bootContext.generation
+                    generation = bootContext.generation,
+                    onWritten = deathNoteProtocol?.let { protocol -> { protocol.markDeathNoteWritten() } }
                 )
             )
             tool(
@@ -151,7 +164,8 @@ class EvoKammerAgentFactory(
                     budgetLedger = budgetLedger,
                     runId = bootContext.runId,
                     groupId = bootContext.groupId,
-                    toolsMountPath = toolsMountPath
+                    toolsMountPath = toolsMountPath,
+                    contentSanitiser = contentSanitiser
                 )
             )
             tool(
@@ -202,14 +216,25 @@ class EvoKammerAgentFactory(
      */
     private fun resolveModel(modelId: String): LLModel {
         return when (modelId) {
+            // Gemini models
+            "google/gemini-3-flash-preview"    -> LLModel(provider = ai.koog.prompt.llm.LLMProvider.OpenRouter, id = modelId)
             "google/gemini-2.5-flash"          -> OpenRouterModels.Gemini2_5Flash
             "google/gemini-2.5-flash-lite"     -> OpenRouterModels.Gemini2_5FlashLite
             "google/gemini-2.5-pro"            -> OpenRouterModels.Gemini2_5Pro
+            // Anthropic models
+            "anthropic/claude-sonnet-4.6"      -> LLModel(provider = ai.koog.prompt.llm.LLMProvider.OpenRouter, id = modelId)
             "anthropic/claude-3-haiku"         -> OpenRouterModels.Claude3Haiku
             "anthropic/claude-3-5-sonnet"      -> OpenRouterModels.Claude3_5Sonnet
             "anthropic/claude-3-7-sonnet"      -> OpenRouterModels.Claude3_7Sonnet
+            // OpenAI models
+            "openai/gpt-oss-120b"              -> OpenRouterModels.GPT_OSS_120b
             "openai/gpt-4o"                    -> OpenRouterModels.GPT4o
             "openai/gpt-4o-mini"               -> OpenRouterModels.GPT4oMini
+            // DeepSeek models
+            "deepseek/deepseek-v3.2"           -> LLModel(provider = ai.koog.prompt.llm.LLMProvider.OpenRouter, id = modelId)
+            // MiniMax models
+            "minimax/minimax-m2.5"             -> LLModel(provider = ai.koog.prompt.llm.LLMProvider.OpenRouter, id = modelId)
+            // Other models
             "microsoft/phi-4-reasoning:free"   -> OpenRouterModels.Phi4Reasoning
             else                               -> LLModel(
                 provider = ai.koog.prompt.llm.LLMProvider.OpenRouter,

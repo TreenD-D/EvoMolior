@@ -26,6 +26,9 @@ import kotlinx.serialization.Serializable
  * @param openRouterApiKey API key for LLM calls.
  * @param agentJarPath Path to the AgentRunner JAR.
  * @param safetyMarginFraction Fraction of allocated budget held in reserve (not handed to inner group).
+ * @param modelAssignment Per-role model overrides (role name → OpenRouter model string).
+ *   If empty, [LifecycleManager] falls back to the default model map.
+ *   Set from [com.achulkov.evokammer.core.contract.StartingField.modelAssignment] when available.
  */
 @Serializable
 data class NestedGroupConfig(
@@ -38,7 +41,8 @@ data class NestedGroupConfig(
     val profileType: GroupProfileType = GroupProfileType.Library,
     val openRouterApiKey: String,
     val agentJarPath: String,
-    val safetyMarginFraction: Double = 0.1
+    val safetyMarginFraction: Double = 0.1,
+    val modelAssignment: Map<String, String> = emptyMap()
 ) {
     /** Budget actually given to the inner instance (after safety margin deduction). */
     val effectiveBudget: Double get() = budgetAllocation * (1.0 - safetyMarginFraction)

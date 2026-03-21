@@ -55,7 +55,29 @@ interface EvoKammerEngineService {
      * Returns a snapshot of the current engine state.
      */
     suspend fun getState(): EngineState
+
+    /**
+     * Returns a summary of meta-archive entries for a completed [runId].
+     *
+     * Queries the meta-archive DAO for total count and per-type breakdown.
+     * Returns null if no archive data is available (e.g., run not yet complete or no DB).
+     *
+     * @param runId The ID of the completed run.
+     */
+    suspend fun getMetaArchiveSummary(runId: String): MetaArchiveSummary?
 }
+
+/**
+ * Summary of meta-archive entries for a completed run.
+ *
+ * @param total Total number of archived entries across all types.
+ * @param byType Count of entries per archive type (e.g., "WINNING_KB", "DEAD_ENDS", "GRADING_SHEET").
+ */
+@Serializable
+data class MetaArchiveSummary(
+    val total: Int,
+    val byType: Map<String, Int>
+)
 
 /**
  * Snapshot of the current EvoKammer engine state.

@@ -25,7 +25,7 @@ import io.github.aakira.napier.Napier
  */
 class CouncilRunner(
     private val openRouterApiKey: String,
-    private val councilModelId: String = "anthropic/claude-3-7-sonnet",
+    private val councilModelId: String = "anthropic/claude-sonnet-4.6",
     private val maxIterations: Int = 1
 ) {
 

@@ -1,7 +1,7 @@
 package com.achulkov.evokammer.orchestration.kg
 
 import com.achulkov.evokammer.core.contract.CriticOutcome
-import com.achulkov.evokammer.substrate.db.dao.KnowledgeBaseDao
+import com.achulkov.evokammer.substrate.db.dao.KnowledgeGraphFactDao
 import com.achulkov.evokammer.substrate.db.entity.StagingSubmissionEntity
 import io.github.aakira.napier.Napier
 import kotlinx.serialization.Serializable
@@ -19,13 +19,13 @@ import kotlinx.serialization.Serializable
  * This checker is invoked by the Critic pipeline before the LLM-based Critic review.
  * Death Notes and non-KG submissions bypass this checker.
  *
- * @param knowledgeBaseDao For querying existing promoted KG entries.
+ * @param knowledgeGraphFactDao For querying existing typed KG facts (conflict detection).
  * @param allowedRelations Optional set of relation types from KG schema. Empty = allow all.
  * @param allowedEntityTypes Optional set of entity types from KG schema. Empty = allow all.
  * @param softConstraints Named soft constraints: id → (description, penaltyReduction).
  */
 class KGConsistencyChecker(
-    private val knowledgeBaseDao: KnowledgeBaseDao,
+    private val knowledgeGraphFactDao: KnowledgeGraphFactDao,
     private val allowedRelations: Set<String> = emptySet(),
     private val allowedEntityTypes: Set<String> = emptySet(),
     private val softConstraints: Map<String, SoftConstraint> = emptyMap()
@@ -97,25 +97,17 @@ class KGConsistencyChecker(
             }
         }
 
-        // ── 5. Conflict detection ─────────────────────────────────────────────────────
-        val existingFacts = knowledgeBaseDao.search(runId, groupId, "$subject $relation", 10)
-            .filter { it.domain == "kg" && it.trustScore > confidence }
-
-        val conflictingIds = existingFacts
-            .filter { existingEntry ->
-                val existingObj = extractField(existingEntry.content, "OBJECT")
-                val existingRelation = extractField(existingEntry.content, "RELATION")
-                existingRelation == relation &&
-                    existingObj != null &&
-                    existingObj != obj
-            }
-            .map { it.id }
-
-        if (conflictingIds.isNotEmpty()) {
-            Napier.i("KGConsistencyChecker: DISPUTE — ${submission.id} conflicts with ${conflictingIds.size} higher-trust facts")
+        // ── 5. Conflict detection — use typed KG table for exact subject+relation lookup ──────
+        val conflictingFact = knowledgeGraphFactDao.findConflict(runId, groupId, subject, relation)
+        if (conflictingFact != null && conflictingFact.trustScore > confidence && conflictingFact.objectNode != obj) {
+            Napier.i(
+                "KGConsistencyChecker: DISPUTE — ${submission.id} conflicts with KG fact ${conflictingFact.id} " +
+                    "(same subject+relation, different object, higher trust=${conflictingFact.trustScore})"
+            )
             return ConsistencyResult.Dispute(
-                conflictingFactIds = conflictingIds,
-                reason = "Proposed fact contradicts ${conflictingIds.size} higher-trust fact(s) with the same subject+relation."
+                conflictingFactIds = listOf(conflictingFact.id),
+                reason = "Proposed fact contradicts a higher-trust fact with the same (subject, relation): " +
+                    "existing object='${conflictingFact.objectNode}' trust=${conflictingFact.trustScore}."
             )
         }
 
@@ -153,10 +145,17 @@ data class SoftConstraint(
     val requiredRelations: Set<String> = emptySet(),
     val forbiddenRelations: Set<String> = emptySet()
 ) {
-    /** Returns true if this constraint is violated by the given (subject, relation, obj) triple. */
+    /**
+     * Returns true if this constraint is violated by the given (subject, relation, obj) triple.
+     *
+     * - **forbiddenRelations**: fires if the relation is in the forbidden set.
+     * - **requiredRelations**: fires if non-empty and the relation is NOT in the set
+     *   (i.e., this constraint declares which relations are mandatory for the affected facts).
+     */
     fun matches(subject: String, relation: String, obj: String): Boolean {
         if (forbiddenRelations.isNotEmpty() && relation in forbiddenRelations) return true
-        return false // Additional heuristic checks can be added here
+        if (requiredRelations.isNotEmpty() && relation !in requiredRelations) return true
+        return false
     }
 }
 

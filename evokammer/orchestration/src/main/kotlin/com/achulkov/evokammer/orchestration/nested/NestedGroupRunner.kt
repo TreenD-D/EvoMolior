@@ -16,6 +16,7 @@ import java.util.UUID
 
 /**
  * Runs a nested EvoKammer group instance inside an outer group's budget envelope.
+ * Instantiated by the outer group's [com.achulkov.evokammer.orchestration.lifecycle.LifecycleManager].
  *
  * Lifecycle:
  * 1. Creates an isolated Room DB for the nested group (sibling directory).
@@ -33,9 +34,10 @@ import java.util.UUID
  * @param substrateDatabaseFactory Factory for per-group DB access.
  * @param lifecycleManagerFactory Factory for creating LifecycleManager instances.
  */
+@Suppress("unused") // instantiated dynamically by LifecycleManager when a group spawns a nested group
 class NestedGroupRunner(
     private val config: NestedGroupConfig,
-    private val shuruVmManager: ShuruVmManager,
+    @Suppress("unused") private val shuruVmManager: ShuruVmManager, // reserved for VM-level teardown of nested agents
     private val substrateDatabaseFactory: SubstrateDatabaseFactory,
     private val lifecycleManagerFactory: (
         runId: String,
@@ -92,11 +94,11 @@ class NestedGroupRunner(
                 val budgetCeiling = remainingBudget / (config.maxGenerations - generation).coerceAtLeast(1)
                 val allocation = selector.computeAllocation(generation, budgetCeiling)
 
-                // Spawn generation
+                // Spawn generation — use model assignments from config (from StartingField.modelAssignment)
                 lifecycleManager.spawnGeneration(
                     allocation = allocation,
                     stageDisclosure = config.objective,
-                    modelAssignments = emptyMap(),
+                    modelAssignments = config.modelAssignment,
                     rolePrompts = emptyMap(),
                     scope = scope
                 )

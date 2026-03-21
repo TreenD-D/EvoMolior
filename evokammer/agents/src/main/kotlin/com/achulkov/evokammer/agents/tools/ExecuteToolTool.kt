@@ -5,6 +5,7 @@ import ai.koog.serialization.typeToken
 import com.achulkov.evokammer.core.budget.BudgetDeductResult
 import com.achulkov.evokammer.core.budget.BudgetLedger
 import com.achulkov.evokammer.core.model.ActionType
+import com.achulkov.evokammer.sandbox.network.ContentSanitiser
 import com.achulkov.evokammer.sandbox.toolsandbox.ToolSubSandbox
 import com.achulkov.evokammer.substrate.db.dao.ToolRegistryDao
 import kotlinx.serialization.Serializable
@@ -27,7 +28,9 @@ class ExecuteToolTool(
     private val budgetLedger: BudgetLedger,
     private val runId: String,
     private val groupId: String,
-    private val toolsMountPath: String = "/tools"
+    private val toolsMountPath: String = "/tools",
+    /** Sanitises tool stdout/stderr before returning to agent context (prevents prompt injection). */
+    private val contentSanitiser: ContentSanitiser = ContentSanitiser()
 ) : SimpleTool<ExecuteToolTool.Args>(
     argsType = typeToken<Args>(),
     name = "execute_tool",
@@ -69,19 +72,27 @@ class ExecuteToolTool(
 
         val deductResult = budgetLedger.deduct(actionType, toolKey = toolKey)
 
+        // Sanitise stdout/stderr to prevent prompt injection from external tool output
+        val sanitisedStdout = contentSanitiser.sanitise(result.stdout, sourceUrl = "tool:${tool.name}")
+        val sanitisedStderr = if (result.stderr.isNotBlank()) {
+            contentSanitiser.sanitise(result.stderr, sourceUrl = "tool-stderr:${tool.name}")
+        } else null
+
         val response = buildString {
             appendLine("Tool: ${tool.name} v${tool.version}")
             appendLine("Status: ${if (result.success) "SUCCESS" else "FAILURE"}")
             if (result.timedOut) appendLine("WARNING: Timed out after 30s")
             if (result.truncated) appendLine("WARNING: Output truncated to 50KB")
+            if (sanitisedStdout.injectionDetected) appendLine("WARNING: Potential prompt injection detected in tool output — content sanitised.")
+            if (sanitisedStdout.truncated) appendLine("WARNING: Tool output truncated by content sanitiser.")
             appendLine("Exit code: ${result.exitCode}")
-            if (result.stderr.isNotBlank()) appendLine("Stderr: ${result.stderr}")
+            if (sanitisedStderr != null) appendLine("Stderr: ${sanitisedStderr.content}")
             appendLine("Output:")
-            appendLine(result.stdout)
+            appendLine(sanitisedStdout.content)
         }
 
         return if (deductResult == BudgetDeductResult.FLOOR_REACHED) {
-            response + "\nWARNING: Budget floor reached."
+            "$response\nWARNING: Budget floor reached."
         } else {
             response
         }

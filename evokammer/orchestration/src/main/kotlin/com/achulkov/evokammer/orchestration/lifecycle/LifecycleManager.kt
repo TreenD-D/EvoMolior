@@ -18,9 +18,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -53,7 +53,7 @@ class LifecycleManager(
     private val shuruVmManager: ShuruVmManager,
     private val substrateDatabaseFactory: SubstrateDatabaseFactory,
     private val agentJarPath: String,
-    private val openRouterApiKey: String,
+    @Suppress("unused") private val openRouterApiKey: String, // reserved for future IPC-based key injection
     private val gracePeriodSeconds: Int = 30,
     private val budgetPollingIntervalMs: Long = 5_000L,
     private val ipcPortBase: Int = 10_000
@@ -65,6 +65,7 @@ class LifecycleManager(
     private val ipcPortCounter = AtomicInteger(ipcPortBase)
 
     private val _agentStates = MutableStateFlow<Map<String, AgentState>>(emptyMap())
+    @Suppress("unused") // consumed by UI / Watchdog via the public StateFlow
     val agentStates: StateFlow<Map<String, AgentState>> = _agentStates.asStateFlow()
 
     private var budgetMonitorJob: Job? = null
@@ -102,8 +103,7 @@ class LifecycleManager(
                             ?: DEFAULT_MODELS[entry.role]
                             ?: "openai/gpt-4o-mini",
                         rolePrompt = rolePrompts[entry.role.name] ?: defaultRolePrompt(entry.role),
-                        forceOutlier = entry.forceOutlier,
-                        scope = scope
+                        forceOutlier = entry.forceOutlier
                     )
                 } catch (e: Exception) {
                     Napier.e(e) { "[$groupId] Failed to spawn agent for role ${entry.role}" }
@@ -129,7 +129,8 @@ class LifecycleManager(
         }
     }
 
-    /** Waits for all agents to complete their lifecycles. */
+    /** Returns the number of currently live (active) agents. */
+    @Suppress("unused") // called by orchestration layer to gate round advancement
     fun getLiveAgentCount(): Int = liveAgents.size
 
     // ---- Private ----
@@ -141,8 +142,7 @@ class LifecycleManager(
         stageDisclosure: String,
         modelAssignment: String,
         rolePrompt: String,
-        forceOutlier: Boolean,
-        scope: CoroutineScope
+        forceOutlier: Boolean
     ) {
         val agentId = "agent-${role.name.lowercase()}-${UUID.randomUUID().toString().take(8)}"
         val ipcPort = ipcPortCounter.getAndIncrement()
@@ -171,6 +171,19 @@ class LifecycleManager(
             }
         } else null
 
+        // Load evolving social norms from KB (domain = "system:norms")
+        val dynamicNorms: String? = runCatching {
+            val normsEntries = db.knowledgeBaseDao().queryByDomain(
+                runId = runId,
+                groupId = groupId,
+                domain = "system:norms",
+                limit = 5
+            )
+            if (normsEntries.isNotEmpty()) {
+                normsEntries.joinToString("\n\n") { it.content }.takeIf { it.isNotBlank() }
+            } else null
+        }.getOrNull()
+
         val bootContext = AgentBootContext(
             agentId = agentId,
             runId = runId,
@@ -186,7 +199,8 @@ class LifecycleManager(
             modelAssignment = modelAssignment,
             ipcBaseUrl = "http://10.0.0.1:$ipcPort",
             generation = generation,
-            gracePeriodSeconds = gracePeriodSeconds
+            gracePeriodSeconds = gracePeriodSeconds,
+            dynamicNorms = dynamicNorms
         )
 
         val dbDir = substrateDatabaseFactory.dbFilePath(runId, groupId).parentFile
@@ -223,7 +237,7 @@ class LifecycleManager(
     }
 
     private suspend fun monitorBudgets() {
-        while (true) {
+        while (currentCoroutineContext().isActive) {
             delay(budgetPollingIntervalMs)
             val agentIds = liveAgents.keys.toList()
             for (agentId in agentIds) {
@@ -272,7 +286,6 @@ class LifecycleManager(
     }
 
     private suspend fun handleAgentExit(agentId: String, entry: LiveAgentEntry, wasKilled: Boolean) {
-        val finalStatus = if (wasKilled) AgentStatus.Killed else AgentStatus.Completed
         liveAgents.remove(agentId)
         updateAgentStates()
         emitEvent(
@@ -318,13 +331,13 @@ class LifecycleManager(
 
     companion object {
         private val DEFAULT_MODELS = mapOf(
-            Role.Planner to "deepseek/deepseek-r1",
-            Role.Critic to "anthropic/claude-3-5-sonnet",
-            Role.Researcher to "google/gemini-flash-1.5",
-            Role.Builder to "qwen/qwen-2.5-coder-32b",
-            Role.Archivist to "google/gemini-flash-1.5",
-            Role.Outlier to "meta-llama/llama-3.1-70b",
-            Role.MetaPlanner to "anthropic/claude-3-5-sonnet"
+            Role.Planner to "deepseek/deepseek-v3.2",
+            Role.Critic to "anthropic/claude-sonnet-4.6",
+            Role.Researcher to "google/gemini-3-flash-preview",
+            Role.Builder to "minimax/minimax-m2.5",
+            Role.Archivist to "google/gemini-3-flash-preview",
+            Role.Outlier to "openai/gpt-oss-120b",
+            Role.MetaPlanner to "anthropic/claude-sonnet-4.6"
         )
     }
 }

@@ -4,6 +4,8 @@ import com.achulkov.evokammer.core.model.ActionType
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * Thread-safe budget ledger for a single agent instance.
@@ -19,12 +21,17 @@ import kotlinx.serialization.Serializable
  * @param initialBudget The starting budget.
  * @param floor The balance threshold at or below which a kill signal is emitted.
  * @param config The [BudgetConfig] used to compute action costs.
+ * @param runSecret A per-run secret key for HMAC-SHA256 signing of staging tokens.
+ *   Should be generated once per run by `EvoKammerRunService` and threaded through
+ *   `LifecycleManager` → `EvoKammerAgentFactory` → `BudgetLedger`. Defaults to a
+ *   random UUID if not provided (sufficient for single-process deployments).
  */
 class BudgetLedger(
     val agentId: String,
     val initialBudget: Double,
     val floor: Double,
-    private val config: BudgetConfig
+    private val config: BudgetConfig,
+    private val runSecret: String = java.util.UUID.randomUUID().toString()
 ) {
     private val mutex = Mutex()
     private var _balance: Double = initialBudget
@@ -95,11 +102,16 @@ class BudgetLedger(
      * In the JVM engine, this is verified by the StagingRepository before accepting a submission.
      */
     suspend fun generateStagingToken(submissionType: String): String = mutex.withLock {
-        // Simple HMAC-style token encoding agent ID, submission type, balance snapshot, and timestamp
-        // In production this would use HMAC-SHA256 with a per-run key from the LifecycleManager
-        val data = "$agentId:$submissionType:${_balance}:${System.currentTimeMillis()}"
-        // Base64 encode as a placeholder — real implementation uses HMAC
-        java.util.Base64.getEncoder().encodeToString(data.toByteArray())
+        // Compose the message: agentId, submissionType, balance snapshot, and timestamp
+        val timestamp = System.currentTimeMillis()
+        val message = "$agentId:$submissionType:${_balance}:$timestamp"
+        // Sign with HMAC-SHA256 using the per-run secret key
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(runSecret.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+        val signature = mac.doFinal(message.toByteArray(Charsets.UTF_8))
+        val sigHex = signature.joinToString("") { "%02x".format(it) }
+        // Return as "message.signature" — verifiable by the StagingRepository using the same secret
+        "${java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(message.toByteArray())}.$sigHex"
     }
 
     /**
@@ -112,7 +124,7 @@ class BudgetLedger(
      * @param reason Human-readable reason label for the action log.
      * @return [BudgetDeductResult.OK] or [BudgetDeductResult.FLOOR_REACHED].
      */
-    suspend fun deductRaw(amount: Double, reason: String): BudgetDeductResult = mutex.withLock {
+    suspend fun deductRaw(amount: Double, @Suppress("UNUSED_PARAMETER") reason: String): BudgetDeductResult = mutex.withLock {
         if (_balance <= floor) return@withLock BudgetDeductResult.BELOW_FLOOR
         val newBalance = _balance - amount
         _balance = newBalance
@@ -174,7 +186,7 @@ internal class RetryTracker(private val windowSize: Int) {
 
     fun register(key: String) {
         if (recentKeys.size >= windowSize) {
-            val removed = recentKeys.removeFirst()
+            recentKeys.removeFirst()
             // Rebuild seenKeys when evicting from window
             seenKeys.clear()
             seenKeys.addAll(recentKeys)

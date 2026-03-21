@@ -17,6 +17,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.achulkov.evokammer.api.model.RunConfig
+import com.achulkov.evomolior.common.BuildConfig
 import com.achulkov.evokammer.core.model.GroupProfileType
 import com.achulkov.evokammer.core.model.ScoringDimension
 import com.achulkov.evomolior.evokammer.EvoKammerRoute
@@ -43,7 +44,8 @@ fun EvoKammerRunSetupScreen(
     val navigate = LocalEvoKammerNavigator.current
 
     var objective by remember { mutableStateOf("Design a distributed, fault-tolerant knowledge synthesis system") }
-    var apiKey by remember { mutableStateOf("") }
+    // Pre-fill with the key baked in at build time from local.properties; user can override at runtime
+    var apiKey by remember { mutableStateOf(BuildConfig.OPENROUTER_API_KEY) }
     var groupCount by remember { mutableStateOf(3) }
     var groupProfiles by remember {
         mutableStateOf(listOf(GroupProfileType.Library, GroupProfileType.Factory, GroupProfileType.Commune))
@@ -98,7 +100,7 @@ fun EvoKammerRunSetupScreen(
                     value = apiKey,
                     onValueChange = { apiKey = it },
                     label = { Text("OpenRouter API Key") },
-                    placeholder = { Text("sk-or-v1-...") },
+                    placeholder = { Text(if (BuildConfig.OPENROUTER_API_KEY.isNotEmpty()) "Pre-filled from build config" else "sk-or-v1-...") },
                     modifier = Modifier.fillMaxWidth(),
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)

@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.achulkov.evokammer.api.service.MetaArchiveSummary
 import com.achulkov.evokammer.core.model.GradingResult
 import com.achulkov.evokammer.core.model.RoundScore
 import com.achulkov.evomolior.evokammer.LocalEvoKammerNavigator
@@ -30,6 +31,7 @@ fun EvoKammerPostRunAnalysisScreen(viewModel: EvoKammerViewModel) {
     val navigator = LocalEvoKammerNavigator.current
     val gradingHistory by viewModel.gradingHistory.collectAsState()
     val engineState by viewModel.engineState.collectAsState()
+    val metaArchiveSummary by viewModel.metaArchiveSummary.collectAsState()
 
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("Final Scores", "Round History", "Group Comparison", "Meta-Archive")
@@ -85,7 +87,7 @@ fun EvoKammerPostRunAnalysisScreen(viewModel: EvoKammerViewModel) {
             0 -> FinalScoresTab(gradingHistory)
             1 -> RoundHistoryTab(gradingHistory)
             2 -> GroupComparisonTab(gradingHistory)
-            3 -> MetaArchiveTab()
+            3 -> MetaArchiveTab(summary = metaArchiveSummary)
         }
     }
 }
@@ -443,7 +445,7 @@ private fun DimensionBar(dimensionId: String, avg: Double) {
 // ── Meta-Archive tab ─────────────────────────────────────────────────────────
 
 @Composable
-private fun MetaArchiveTab() {
+private fun MetaArchiveTab(summary: MetaArchiveSummary?) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -461,17 +463,28 @@ private fun MetaArchiveTab() {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (summary != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Total archived entries: ${summary.total}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
 
+        // Map each archive category to its DB entryType key and icon
+        data class ArchiveCategory(val icon: androidx.compose.ui.graphics.vector.ImageVector, val title: String, val desc: String, val typeKey: String)
         val archiveCategories = listOf(
-            Triple(Icons.Default.Star, "Winning KB Snapshots", "Compressed snapshots of winning group knowledge bases"),
-            Triple(Icons.Default.Warning, "Dead Ends Registry", "Approaches proven unproductive — shared as negative priors"),
-            Triple(Icons.Default.Settings, "StartingFields", "Genesis Council outputs used for each run"),
-            Triple(Icons.Default.CheckCircle, "GradingSheets", "Sealed evaluation rubrics from Grader civilisations"),
-            Triple(Icons.Default.Share, "Legacy Protocols", "Top-fitness agent reasoning postures for epigenetic injection"),
+            ArchiveCategory(Icons.Default.Star, "Winning KB Snapshots", "Compressed snapshots of winning group knowledge bases", "WINNING_KB"),
+            ArchiveCategory(Icons.Default.Warning, "Dead Ends Registry", "Approaches proven unproductive — shared as negative priors", "DEAD_ENDS"),
+            ArchiveCategory(Icons.Default.Settings, "StartingFields", "Genesis Council outputs used for each run", "STARTING_FIELD"),
+            ArchiveCategory(Icons.Default.CheckCircle, "GradingSheets", "Sealed evaluation rubrics from Grader civilisations", "GRADING_SHEET"),
+            ArchiveCategory(Icons.Default.Share, "Legacy Protocols", "Top-fitness agent reasoning postures for epigenetic injection", "LEGACY_PROTOCOL"),
         )
 
-        items(archiveCategories) { (icon, title, desc) ->
+        items(archiveCategories) { category ->
+            val count = summary?.byType?.get(category.typeKey)
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -483,21 +496,25 @@ private fun MetaArchiveTab() {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        icon,
+                        category.icon,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(28.dp)
                     )
                     Spacer(Modifier.width(12.dp))
                     Column {
-                        Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                        Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(category.title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                        Text(category.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(Modifier.weight(1f))
-                    // Placeholder badge showing "0 entries" until real meta-archive is wired
                     SuggestionChip(
                         onClick = {},
-                        label = { Text("0 entries", style = MaterialTheme.typography.labelSmall) }
+                        label = {
+                            Text(
+                                if (summary == null) "—" else "${count ?: 0} entries",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
                     )
                 }
             }

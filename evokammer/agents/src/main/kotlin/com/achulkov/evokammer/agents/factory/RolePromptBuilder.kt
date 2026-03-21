@@ -68,9 +68,10 @@ object RolePromptBuilder {
             }
         }
 
-        // 5. Universal EvoKammer norms
+        // 5. Operating norms — prefer dynamically-evolved norms from KB, fall back to universal defaults
         appendLine("=== OPERATING NORMS ===")
-        appendLine(UNIVERSAL_NORMS)
+        val norms = bootContext.dynamicNorms?.takeIf { it.isNotBlank() } ?: UNIVERSAL_NORMS
+        appendLine(norms)
         appendLine()
         appendLine("=== TOOLS REMINDER ===")
         appendLine(TOOLS_REMINDER)
@@ -89,12 +90,18 @@ object RolePromptBuilder {
 
     private val TOOLS_REMINDER = """
         Available tools (most common):
-        - read_kb(query, domain?, maxResults?): Search KB — FREE
+        - read_kb(query, domain?, maxResults?): Keyword search KB — FREE
+        - search_kb(query, domain?, maxResults?): Semantic (vector) search KB — costs 0.1
+        - read_kg(subject?, relation?, object?, limit?): Query KG typed facts — FREE
+        - emit_fact(subject, relation, object, confidence?, domain?): Add a KG fact — costs 1
         - write_staging(type, content, wipTaskRef?, speculative?): Submit work — costs 1
         - execute_tool(toolName, argsJson, toolVersion?): Run a tool — costs 2-8
         - claim_task(nodeId?): Claim a WiP task — FREE
         - write_death_note(summary, whatWorked, whatFailed, recommendations): MANDATORY on exit — FREE
-        
+
+        Use search_kb for conceptual queries (finds related docs even without exact keyword match).
+        Use read_kb for exact keyword/phrase lookups.
+        To propose new norms, write a DOC to KB with domain="system:norms" via write_staging.
         Always check the KB for Dead Ends before starting an approach.
         Always write your Death Note as your last action.
     """.trimIndent()

@@ -165,20 +165,21 @@ object CouncilRolePrompts {
         Use cognitive diversity: different architectures for different roles where possible.
         
         Available models (use these exact model ID strings):
-        - "google/gemini-2.5-flash" — fast, good for search/read tasks
-        - "google/gemini-2.5-flash-lite" — very fast, very cheap
-        - "anthropic/claude-3-5-sonnet" — strong reasoning, good for critics
-        - "anthropic/claude-3-7-sonnet" — best reasoning, use for MetaPlanner/Synthesis
-        - "openai/gpt-4o" — strong general purpose
-        - "openai/gpt-4o-mini" — fast, good for archiving/routine tasks
-        - "microsoft/phi-4-reasoning:free" — good for Outliers (different architecture)
+        - "google/gemini-3-flash-preview" — fast multimodal, ideal for Researcher and Archivist roles
+        - "deepseek/deepseek-v3.2" — strong analytical reasoning, ideal for Planner
+        - "minimax/minimax-m2.5" — efficient general-purpose, ideal for Builder
+        - "anthropic/claude-sonnet-4.6" — best reasoning and critique, ideal for Critic and MetaPlanner
+        - "openai/gpt-oss-120b" — large open-weight model, ideal for Outlier (different architecture)
+        - "google/gemini-2.5-flash" — fast, good fallback for search/read tasks
+        - "openai/gpt-5.4" — strong general purpose fallback
+        - "openai/gpt-4o-mini" — fast, cheap fallback for routine tasks
         
         Output format (JSON):
         {
           "modelAssignments": {
-            "Researcher": "google/gemini-2.5-flash",
-            "Builder": "openai/gpt-4o",
-            "Critic": "anthropic/claude-3-5-sonnet"
+            "Researcher": "google/gemini-3-flash-preview",
+            "Builder": "minimax/minimax-m2.5",
+            "Critic": "anthropic/claude-sonnet-4.6"
           }
         }
         

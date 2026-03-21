@@ -164,6 +164,12 @@ kotlin {
             // EvoKammer control panel — engine IPC bridge + events
             implementation(project(":evokammer:api"))
             implementation(project(":evokammer:core"))
+            // EvoKammer engine modules — wired in-process for the JVM desktop target
+            implementation(project(":evokammer:substrate"))
+            implementation(project(":evokammer:agents"))
+            implementation(project(":evokammer:orchestration"))
+            implementation(project(":evokammer:competition"))
+            implementation(project(":evokammer:sandbox"))
         }
 
         val nonWebMain by getting {
@@ -298,6 +304,12 @@ buildConfig {
     )
 
     setupAdmobAdsIds()
+
+    // OpenRouter API key — injected from local.properties at build time; empty string if absent
+    buildConfigField(
+        "OPENROUTER_API_KEY",
+        getRequiredProperty(key = "OPENROUTER_API_KEY", defaultValue = "")
+    )
 }
 
 private fun BuildConfigExtension.setupAdmobAdsIds() {

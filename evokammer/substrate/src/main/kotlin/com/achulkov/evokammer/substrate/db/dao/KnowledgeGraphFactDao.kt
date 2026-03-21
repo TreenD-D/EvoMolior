@@ -143,4 +143,20 @@ interface KnowledgeGraphFactDao {
           AND trustScore < :threshold
     """)
     suspend fun archiveBelowTrust(runId: String, groupId: String, threshold: Double): Int
+
+    /**
+     * Count the number of conflicting (subject, relation) pairs — i.e., pairs where
+     * multiple distinct objects are asserted as active at the same time.
+     * Used by [com.achulkov.evokammer.orchestration.watchdog.Watchdog] for the KG inconsistency rate signal.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM (
+            SELECT subject, relation
+            FROM knowledge_graph_facts
+            WHERE runId = :runId AND groupId = :groupId AND status = 'active'
+            GROUP BY subject, relation
+            HAVING COUNT(DISTINCT `object`) > 1
+        )
+    """)
+    suspend fun countConflicts(runId: String, groupId: String): Int
 }

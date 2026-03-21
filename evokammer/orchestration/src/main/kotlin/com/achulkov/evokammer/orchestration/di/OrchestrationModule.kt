@@ -81,7 +81,7 @@ val evokammerOrchestrationModule = module {
         val dbFactory: SubstrateDatabaseFactory = get()
         val provider: KGConsistencyCheckerProvider = { runId, groupId ->
             val db = dbFactory.get(runId, groupId)
-            KGConsistencyChecker(knowledgeBaseDao = db.knowledgeBaseDao())
+            KGConsistencyChecker(knowledgeGraphFactDao = db.knowledgeGraphFactDao())
         }
         provider
     }

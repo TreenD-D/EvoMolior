@@ -51,7 +51,16 @@ data class AgentBootContext(
      * True if this is a sub-agent (spawned via [SubAgentCoordinator], not by the LifecycleManager).
      * Sub-agents cannot spawn further sub-agents.
      */
-    val isSubAgent: Boolean = false
+    val isSubAgent: Boolean = false,
+    /**
+     * Evolving social norms for this group, loaded from the Knowledge Base at spawn time.
+     *
+     * If null, [com.achulkov.evokammer.agents.factory.RolePromptBuilder] falls back to the
+     * hardcoded universal norms.  Norms can evolve: any agent can submit a
+     * `write_staging(type="DOC", ...)` with domain `system:norms` to propose norm updates,
+     * which go through Critic review like any other KB entry.
+     */
+    val dynamicNorms: String? = null
 )
 
 /**
