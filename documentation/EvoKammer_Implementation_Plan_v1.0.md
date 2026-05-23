@@ -796,3 +796,253 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 
 *EvoKammer Implementation Plan v1.0 — generated 2026-03-19*
 *Phase 10 represents full production readiness. Phase 1 represents a meaningful first POC.*
+
+---
+
+## 10. Implementation Status & Spec Misalignments
+
+> *Audit as of 2026-03-22. Each item is tagged:*
+> - ✅ **Implemented** — matches spec
+> - ⚠️ **Partial** — present but diverges from spec in a meaningful way
+> - ❌ **Not implemented** — spec-required behaviour is absent
+
+---
+
+### 10.1 Genesis Council (§3.1)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | 8 council roles | ✅ | All 8 roles present in `GenesisCouncil.councilRoles` |
+| 2 | Non-synthesis roles run **in parallel**; Synthesis runs last sequentially | ❌ | All 8 roles run **strictly sequentially** in a for-loop. No concurrent execution. |
+| 3 | Synthesis emits a `consistency_report` alongside `StartingField` | ❌ | `StartingField` has no `consistencyReport` field. No report emitted. |
+| 4 | On consistency failure, re-run the relevant role with conflict as context | ❌ | No re-run logic. Failed JSON parse falls back to `StartingField.default()`. |
+| 5 | Sealed test suite finalised and locked before any group spawns | ❌ | `StartingField.sealedTestSuiteHash` field exists but is always `""`. No test suite content is produced or stored. |
+| 6 | Council KB is transient and discarded post-output | ✅ | Council context is in-memory only; not persisted to any group DB. |
+| 7 | Council timeout | ⚠️ | Code is 8 minutes (correct). The `@param` KDoc on `genesisCouncilRunner` in `EvoKammerRunService` still says "3 minutes" — stale comment. |
+
+---
+
+### 10.2 Lifecycle Manager (§3.2)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | Spawns agents from Evolutionary Selector signal | ✅ | `EvolutionarySelector.computeAllocation()` → `LifecycleManager.spawnGeneration()` |
+| 2 | Injects role prompt, budget token, WiP task claim, Legacy Protocol at spawn | ✅ | All four injected via `AgentBootContext` |
+| 3 | Injects Legacy Protocol if fitness threshold exceeded | ⚠️ | Protocol is injected from DB if present. Fitness threshold extraction is implemented in `LegacyProtocolExtractor` but the extractor is **not called** from `EvoKammerRunService.runLoop()` — no post-generation fitness scoring pass fires. |
+| 4 | Monitors budget in real time; initiates kill on floor | ⚠️ | Budget polling loop exists (`monitorBudgets`). However kill-on-floor is not triggered from within the lifecycle; round termination kills all agents at round end regardless. `BudgetLedger.floor` is tracked but no `floor-reached → kill` event path is wired. |
+| 5 | Kill sequence: SIGTERM → grace → SIGKILL | ✅ | Fully implemented for Shuru VM mode |
+| 6 | Captures Staging Area output post-kill for Critic routing | ✅ | Staging is persistent; CriticPipeline reads it post-round |
+| 7 | Sub-agent budget delegation | ❌ | Not implemented. No sub-agent spawning from within an agent lifecycle. |
+| 8 | Emits structured lifecycle event for every spawn and death | ✅ | `emitEvent(EventTypes.AGENT_SPAWN / AGENT_KILLED / AGENT_DEATH, ...)` |
+
+---
+
+### 10.3 Budget Ledger (§3.3)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | Per-agent budget instance allocated at spawn | ✅ | `BudgetLedger` created per agent |
+| 2 | Atomic decrements — concurrent tool calls cannot race past zero | ❌ | No mutex or atomic-compare-and-swap on `balance`. Concurrent calls from the same coroutine context could theoretically overspend. |
+| 3 | Failed tool execution costs double | ❌ | Not implemented. All actions cost their flat configured rate. |
+| 4 | Retry with identical args costs quadruple (detected via argument hashing) | ❌ | No argument hashing or retry detection. |
+| 5 | Budget history exported to event log on death | ✅ | `handleAgentExit` logs `BudgetLedger.snapshot()` |
+
+---
+
+### 10.4 Persistent Substrate (§3.4)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | KB: versioned docs, trust score, source agent, generation | ✅ | `KnowledgeBaseEntryEntity` has all fields |
+| 2 | KB: docs are immutable after promotion; new version creates new doc | ✅ | Insertion-only; no in-place update |
+| 3 | KB: low-trust docs archived, not deleted | ✅ | `archiveBelowTrust()` used in `applyTrustDecayForRound` |
+| 4 | KB: Dead Ends Registry is first-class; always returned in retrieval regardless of trust | ⚠️ | `isDeadEnd = true` flag exists. No special always-return path in retrieval queries — dead ends can be filtered by trust decay like regular entries. |
+| 5 | KG: typed fact quads validated against schema constraints before commit | ❌ | No `KGConsistencyChecker`. Facts go directly to `CriticPipeline` review with no schema type check. |
+| 6 | KG constraint violation → dispute raised → KG-Critic Arbitration Agent spawned | ❌ | Not implemented. Disputes from `CriticPipeline` sit permanently in `"disputed"` state. |
+| 7 | Tool Registry: success rate / failure log tracked | ✅ | `successRate` field in `ToolRegistryEntryEntity` |
+| 8 | Staging Area: submissions carry `budget_signature` from Budget Ledger | ❌ | `StagingSubmissionEntity` has no `budgetSignature` field. Staging Area never validates one. |
+| 9 | Primordial KB docs seeded for each group | ✅ | `seedPrimordialData` seeds KB docs |
+| 10 | Primordial KG facts seeded for each group | ✅ | `seedPrimordialData` seeds KG facts |
+| 11 | Primordial Tools seeded for each group | ❌ | `StartingField.primordialTools` field exists and is populated by council, but `seedPrimordialData` does **not** insert them into the Tool Registry. |
+| 12 | Grader Groups seeded with primordial data | ❌ | `seedPrimordialData` is called only for `groupIds`. Grader group IDs (`graderGroupIds`) are excluded. |
+
+---
+
+### 10.5 Critics & Validation Pipeline (§3.5)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | PROMOTE / REJECT / DISPUTE outcomes | ✅ | All three outcomes implemented |
+| 2 | DISPUTE → Arbitration Agent spawned to resolve | ❌ | Disputed submissions remain permanently in `"disputed"` DB status. No arbitration agent is ever spawned. |
+| 3 | Critic cannot approve its own prior submissions | ❌ | No check comparing submitting `agentId` to the `criticId`. |
+| 4 | Critic evaluates tools for runnable code / test coverage / schema compliance | ❌ | CriticPipeline uses an LLM prompt only. No actual tool execution or schema validation occurs. |
+| 5 | Critic is a lifecycle-bound agent (TTL, budget, Death Note) | ❌ | `CriticPipeline` is a plain class with LLM calls. No budget, no WiP task, no Death Note. |
+| 6 | KG facts evaluated against hard constraint satisfaction | ❌ | Not checked. KG_FACT submissions get the same generic LLM review as documents. |
+
+---
+
+### 10.6 Evolutionary Selector (§3.6)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | Reads KB density, staging backlog, tool failure rate, stasis signal | ✅ | All four signals gathered in `gatherSignals()` |
+| 2 | At least 1 Critic per generation | ✅ | Hard constraint in `buildAllocationEntries` |
+| 3 | Outlier every 5 gens (every 3 if stasis) | ✅ | Implemented in allocation logic |
+| 4 | Stasis detected from Watchdog/Inspector and passed to selector | ❌ | `stasisDetected = false` is **hardcoded** in `spawnAgentsForRound`. Watchdog signals are never read and passed here. |
+| 5 | Plan Registry freshness signal | ❌ | No Plan Registry DAO or plan freshness signal used. |
+| 6 | Emits allocation decision to event log | ✅ | Logged via `Napier.i` but not as a structured `EventLogEntry` |
+
+---
+
+### 10.7 Inspector & Auditor (§3.7)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | Inspector runs as passive continuous process | ❌ | Inspector class may exist but `EvoKammerRunService.startRun()` never starts it. |
+| 2 | Inspector emits anomaly flags to Watchdog | ❌ | Not wired. Watchdog.start() is also never called from `startRun()`. |
+| 3 | Auditor spawned by Watchdog on high-severity flags | ❌ | Not implemented. |
+
+---
+
+### 10.8 Multi-Group Coordinator (§3.8)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | Ring topology managed per StartingField | ⚠️ | `GroupCoordinator` exists and receives group IDs. Ring topology from `StartingField.ringTopology` is not threaded through to the coordinator. |
+| 2 | Formal Dispatch Relay with configured lag | ❓ | `GroupCoordinator` has dispatch infrastructure; actual lag enforcement not verified. |
+| 3 | Leak Oracle with differential privacy transform | ⚠️ | `DifferentialPrivacyTransform` class exists. Whether it's invoked in the active run loop is not confirmed. |
+| 4 | Source group anonymised in all leaked content | ⚠️ | Transform strips identifiers by design; wiring to active run loop unverified. |
+| 5 | Migration rate ceiling (15% per generation) | ❓ | Not confirmed as enforced. |
+| 6 | Per-group dispatch trust score table | ❓ | Unverified. |
+
+---
+
+### 10.9 Resource Map Engine (§3.9)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | Maintains knowledge node graph from Genesis Council | ⚠️ | `nodeGraph` JSON is parsed and WIP tasks are seeded from it. No `ResourceMapEngine` class managing live node state and captures. |
+| 2 | Claim registered when Critic promotes artifact meeting quality threshold | ❌ | Not implemented. WIP task status flips to `"completed"` on claim+finish but there is no node capture/recapture logic. |
+| 3 | Recapture when a different group's artifact scores higher | ❌ | Not implemented. |
+| 4 | Budget bonuses from held nodes applied by Budget Ledger | ❌ | Not implemented. |
+
+---
+
+### 10.10 Grader Groups (§3.10)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | Grader Groups run a complete EvoKammer civilisation cycle | ❌ | Only 2 criteria agents + 1 RoundJudge per round. No evolutionary selection, no multi-generation KB accumulation, no Critic pipeline for grader staging. |
+| 2 | Grader agents have no access to competing group KBs | ✅ | Criteria agents have no competing-group snapshot. RoundJudge receives anonymised text snapshots only. |
+| 3 | GradingSheet includes automated test cases | ❌ | `automatedTests = emptyList()` in all registered sheets. |
+| 4 | Meta-Judge Consensus Detection pass | ❌ | Not implemented. |
+| 5 | Cross-grader Arbitration round | ❌ | Not implemented. |
+| 6 | GradingSheet quality self-scored by Meta-Judge | ❌ | Not implemented. |
+| 7 | Grader Groups receive anonymised failure telemetry from previous check-ins | ❌ | Not implemented. |
+| 8 | Criteria from criteria phase reviewed by Critic before use | ❌ | Criteria staging entries go directly from `write_staging` to RoundJudge context — no Critic review of grader staging. |
+
+---
+
+### 10.11 Scoring Engine (§3.11)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | Scoring Engine isolated from all agent systems | ❌ | `computeAndSubmitSubstrateScores` runs in the same process and coroutine context as all agents. |
+| 2 | Deterministic test suite executed against each submission | ❌ | No test harness. Scores are heuristic substrate metrics (KB count, KG fact count, etc.). |
+| 3 | Scores held in sealed ledger until all groups submit (blind seal) | ❌ | Scores are computed and submitted immediately per group, not sealed. |
+| 4 | Simultaneous reveal after all groups submit | ❌ | No reveal gate. Scores are visible as soon as computed. |
+| 5 | GradingSheet rubric applied to each submission | ⚠️ | GradingSheet is registered but only the heuristic substrate scores are used in practice. |
+| 6 | Score normalisation from StartingField | ❌ | Normalisation constants are hardcoded (`20 KB entries = full score`, etc.) — not from `StartingField.actionCosts` or any council-defined config. |
+
+---
+
+### 10.12 Progressive Disclosure Engine (§3.12)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | Stage N unlocks when group passes Check-in N | ✅ | `ProgressiveDisclosureEngine.onCheckinComplete()` gated |
+| 2 | Check-in result carries actual dimension scores and test pass rate | ❌ | `processDisclosureCheckIns` passes `dimensionScores = emptyMap()` and `failedTestCount = 0`. Only the heuristic `overallScore` is real. |
+| 3 | Stage content pre-written by Genesis Council and sealed | ❌ | `StartingField.stageContents` is an empty list in default; Genesis Council does not populate it. No sealing mechanism. |
+| 4 | Groups below threshold receive no stage advance and increased Leak Oracle frequency | ⚠️ | Stage advance correctly blocked. Leak Oracle frequency increase on failure not wired. |
+
+---
+
+### 10.13 Epigenetic Inheritance Engine (§3.13)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | Post-mortem fitness scoring after each generation | ❌ | `LegacyProtocolExtractor` exists but is **never called** from `runLoop`. No fitness scoring pass fires. |
+| 2 | Top-20% fitness → Legacy Protocol extracted | ❌ | Not triggered (see above). |
+| 3 | Crossover Engine merges two protocols for same role | ❌ | No `CrossoverEngine` class. |
+| 4 | Legacy Protocol expires after 2 generations | ⚠️ | `expiresAtGeneration` field stored in DB. Expiry checked at spawn time via DAO query. But no process actively expires and archives them. |
+| 5 | Failure maps promoted to Dead Ends Registry on expiry | ❌ | Not implemented. |
+| 6 | Preliminary scores updated retrospectively with citation signals | ❌ | Not implemented. |
+
+---
+
+### 10.14 Global Watchdog (§3.14)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | Watchdog class with stasis, budget-critical, and KG anomaly detection | ✅ | `Watchdog` class fully implemented |
+| 2 | Watchdog started and running during a run | ❌ | `Watchdog.start()` is **never called** from `EvoKammerRunService.startRun()`. |
+| 3 | Watchdog opens and closes check-in gates | ❌ | Not wired. Check-in logic is round-based, not Watchdog-triggered. |
+| 4 | Watchdog triggers Meta-Planner spawn on global stasis | ❌ | Not implemented. |
+| 5 | Watchdog pauses spawning on global cost ceiling | ❌ | Not implemented. |
+| 6 | Watchdog triggers Auditor on high-severity Inspector flags | ❌ | Not implemented. |
+
+---
+
+### 10.15 Meta-Planner (§3.15)
+
+| # | Spec requirement | Status | Notes |
+|---|---|---|---|
+| 1 | Meta-Planner spawnable LLM agent | ❌ | `Role.MetaPlanner` exists in the Role enum and `DEFAULT_MODELS` map, but no spawn path or trigger exists. |
+
+---
+
+### 10.16 Integration Contracts (§4)
+
+| # | Contract | Status | Notes |
+|---|---|---|---|
+| 1 | Agent → Staging: `budget_signature` required, validated by Staging Area | ❌ | `StagingSubmissionEntity` has no `budgetSignature` field. |
+| 2 | Agent → Staging: `wip_task_reference` required for doc/tool submissions | ❌ | Not enforced in staging validation. |
+| 3 | Lifecycle Manager → Agent: `substrate_read_credential` and `staging_write_credential` | ⚠️ | `AgentBootContext` has `substrateDbPath` and `stagingMountPath`, not typed scoped tokens. Direct DB path sharing is not the credential model described. |
+
+---
+
+### 10.17 Cross-cutting Observations
+
+| # | Observation |
+|---|---|
+| 1 | **`stasisDetected` hardcoded to `false`** — `spawnAgentsForRound` always calls `EvolutionarySelector.computeAllocation(stasisDetected = false)`. The Watchdog/Inspector stasis signal is never propagated. |
+| 2 | **Run ceiling mismatch** — `runLoop` iterates `config.rounds` (from `RunConfig`). `StartingField.generationCeiling` is produced by the Genesis Council but never used to override the run's actual round count. |
+| 3 | **Scoring dimension IDs hardcoded** — `computeAndSubmitSubstrateScores` has string-matching for `"kb_density"`, `"kg_coherence"`, `"tool_utility"`, `"plan_execution"`. Any council-designed dimension IDs outside this set score `0.0` with a warning. |
+| 4 | **`CriticPipeline` reports promoted count incorrectly** — `CriticPipelineCompleted` event emits `promoted = processed` (total processed), `rejected = 0`. Actual per-outcome counts are not surfaced. |
+| 5 | **`GenesisCouncilCompleted.usedDefault`** is `modelAssignment.isEmpty() && primordialKb.isEmpty()`. A council that deliberately chose no model overrides and empty KB would incorrectly set `usedDefault = true`. |
+| 6 | **`KG_CONSTRAINT` submission type** — `promoteStagingToSubstrate` logs it as "schema update" but does not apply the constraint to any schema table or DAO. KG schema constraints are thus never enforced. |
+| 7 | **`primordialTools` not seeded** — `StartingField.primordialTools` field is populated by the council but `seedPrimordialData` never writes to `ToolRegistryDao`. Seed tools are silently dropped. |
+| 8 | **Grader Group primordial seeding skipped** — `seedPrimordialData` seeds only `groupIds`, not `graderGroupIds`. Grader group DBs start empty even when the council emits primordial data. |
+
+---
+
+### 10.18 Current Phase Estimate
+
+Based on the above, the implementation most closely corresponds to **Phase 1–2** of §5, with partial Phase 3 and Phase 4 scaffolding:
+
+| Phase | Status |
+|---|---|
+| Phase 0 — Foundation | ✅ Complete (Substrate, BudgetLedger, Shuru VMs, Agent execution) |
+| Phase 1 — Single group, single generation | ✅ Complete |
+| Phase 2 — Multi-generation, single group | ⚠️ Partial (Evolutionary Selector ✅; Legacy Protocol pipeline ❌ not wired; Epigenetic Inheritance ❌; Outlier ✅) |
+| Phase 3 — KG Integration | ⚠️ Partial (KG facts stored ✅; KG Consistency Checker ❌; KG-Critic ❌) |
+| Phase 4 — Multi-group competition | ⚠️ Partial (GroupCoordinator ✅; Leak Oracle unverified; Resource Map ❌) |
+| Phase 5 — Differential Privacy | ⚠️ Class exists; wiring unverified |
+| Phase 6 — Grader Groups | ⚠️ Partial (2-phase agents ✅; not a full civilisation; Meta-Judge ❌; blind seal ❌) |
+| Phase 7 — Progressive Disclosure | ⚠️ Partial (engine wired ✅; real check-in scores ❌; stage sealing ❌) |
+| Phase 8 — Genesis Council Automation | ⚠️ Partial (8-role pipeline ✅; sequential only ❌; consistency check ❌) |
+| Phases 9–10 | ❌ Not started |
+
+---
+
+*Misalignment audit — 2026-03-22*

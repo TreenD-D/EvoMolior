@@ -66,7 +66,8 @@ class AgentRunner(
             profile = groupProfile
         )
 
-        // 4. Create agent via factory
+        // 4. Create agent via factory — pass DeathNoteProtocol so that WriteDeathNoteTool
+        //    can call markDeathNoteWritten() and cancel the grace-period emergency fallback.
         val factory = EvoKammerAgentFactory(
             openRouterApiKey = openRouterApiKey,
             db = db,
@@ -74,7 +75,7 @@ class AgentRunner(
             budgetConfig = budgetConfig,
             toolsMountPath = "/tools"
         )
-        val agentContext = factory.create(bootContext)
+        val agentContext = factory.create(bootContext, deathNoteProtocol = deathNoteProtocol)
 
         Napier.i("AgentRunner: ${bootContext.agentId} budget=${agentContext.budgetLedger.balance} floor=${agentContext.budgetLedger.floor}")
 
@@ -84,14 +85,28 @@ class AgentRunner(
             Napier.i("AgentRunner: ${bootContext.agentId} completed. result=${result.take(200)}")
         } catch (e: Exception) {
             Napier.e("AgentRunner: ${bootContext.agentId} agent error: ${e.message}", e)
+            // Write an emergency death note only if the agent didn't already write its own.
+            if (!deathNoteProtocol.isWritten) {
+                factory.writeEmergencyDeathNote(
+                    bootContext = bootContext,
+                    reason = e.javaClass.simpleName,
+                    errorMessage = e.message ?: "unknown error"
+                )
+            }
         }
 
-        // 6. Trigger grace period for Death Note
+        // 6. If the agent wrote its own Death Note, skip the grace wait entirely.
+        if (deathNoteProtocol.isWritten) {
+            Napier.i("AgentRunner: ${bootContext.agentId} Death Note already written — exiting immediately")
+            return
+        }
+
+        // 7. Trigger grace period for Death Note (agent finished without writing one)
         val finalBalance = agentContext.budgetLedger.balance
-        Napier.i("AgentRunner: ${bootContext.agentId} final balance=$finalBalance — entering grace period")
+        Napier.i("AgentRunner: ${bootContext.agentId} final balance=$finalBalance — entering grace period for Death Note")
         deathNoteProtocol.signalGrace(scope, reason = "agent_loop_complete")
 
-        // 7. Wait for Death Note to be confirmed written (or grace period to expire)
+        // 8. Wait for Death Note to be confirmed written (or grace period to expire)
         val deadline = System.currentTimeMillis() + (bootContext.gracePeriodSeconds + 5L) * 1000
         while (!deathNoteProtocol.isWritten && System.currentTimeMillis() < deadline) {
             kotlinx.coroutines.delay(200)

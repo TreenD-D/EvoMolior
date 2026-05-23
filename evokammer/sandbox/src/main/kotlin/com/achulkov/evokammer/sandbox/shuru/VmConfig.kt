@@ -12,7 +12,10 @@ package com.achulkov.evokammer.sandbox.shuru
  * @param mounts Filesystem mount configuration.
  * @param network Network allowlist configuration.
  * @param agentJarPath Path to the AgentRunner JAR on the host filesystem.
- * @param bootContextJson Serialised [AgentBootContext] passed to the agent via stdin.
+ * @param bootContextJson Serialised [AgentBootContext] passed to the agent via the
+ *   `EVOKAMMER_BOOT_CONTEXT` environment variable.
+ * @param openRouterApiKey OpenRouter API key injected as `OPENROUTER_API_KEY` env var.
+ * @param groupProfile Group profile name injected as `EVOKAMMER_GROUP_PROFILE` env var.
  * @param ipcPort Port for IPC between the agent VM and the LifecycleManager.
  */
 data class VmConfig(
@@ -26,6 +29,8 @@ data class VmConfig(
     val network: NetworkAllowlistConfig,
     val agentJarPath: String,
     val bootContextJson: String,
+    val openRouterApiKey: String,
+    val groupProfile: String,
     val ipcPort: Int
 )
 

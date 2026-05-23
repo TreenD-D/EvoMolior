@@ -24,6 +24,7 @@ import com.achulkov.evomolior.evokammer.EvoKammerRoute
 import com.achulkov.evomolior.evokammer.LocalEvoKammerNavigator
 import com.achulkov.evomolior.evokammer.viewmodel.EvoKammerViewModel
 import com.achulkov.evomolior.evokammer.viewmodel.StubEvoKammerEngineService
+import java.util.Locale
 
 /**
  * EvoKammer Dashboard — the main control panel screen.
@@ -42,6 +43,7 @@ fun EvoKammerDashboardScreen(
     val state by viewModel.engineState.collectAsState()
     val events by viewModel.recentEvents.collectAsState()
     val history by viewModel.gradingHistory.collectAsState()
+    val graderGroupIds by viewModel.activeGraderGroupIds.collectAsState()
 
     Row(modifier = Modifier.fillMaxSize()) {
         // ── Left Panel: Status + Groups ──────────────────────────────────────
@@ -90,6 +92,11 @@ fun EvoKammerDashboardScreen(
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(4.dp))
                             Text("New Run")
+                        }
+                        OutlinedButton(onClick = { navigate(EvoKammerRoute.TestRunSetup) }) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Test Run")
                         }
                         if (state.status == EngineStatus.COMPLETED) {
                             OutlinedButton(
@@ -154,6 +161,63 @@ fun EvoKammerDashboardScreen(
                 }
             }
 
+            // Grader groups section (shown once the first grader round has started)
+            if (graderGroupIds.isNotEmpty()) {
+                HorizontalDivider()
+                Text(
+                    "Grader Groups",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                val graderEvents = remember(events, graderGroupIds) {
+                    events.filter { e ->
+                        e is EvoKammerEvent.GraderRoundStarted ||
+                            e is EvoKammerEvent.GraderRoundCompleted
+                    }
+                }
+                graderGroupIds.forEach { graderId ->
+                    // Find the latest completed round for this grader group
+                    val lastCompleted = graderEvents
+                        .filterIsInstance<EvoKammerEvent.GraderRoundCompleted>()
+                        .firstOrNull { it.graderGroupId == graderId }
+                    val lastStarted = graderEvents
+                        .filterIsInstance<EvoKammerEvent.GraderRoundStarted>()
+                        .firstOrNull { it.graderGroupId == graderId }
+                    val statusText = when {
+                        lastCompleted != null ->
+                            "R${lastCompleted.roundIndex} done — ${lastCompleted.totalScoresCollected} scores"
+                        lastStarted != null ->
+                            "R${lastStarted.roundIndex} evaluating…"
+                        else -> "pending"
+                    }
+                    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    "⚖️ $graderId",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    statusText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Text(
+                                "GRADER",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                    }
+                }
+            }
+
             // Grading history
             if (history.isNotEmpty()) {
                 HorizontalDivider()
@@ -162,7 +226,7 @@ fun EvoKammerDashboardScreen(
                     items(history) { result ->
                         Text(
                             "Round ${result.roundIndex}: winner=${result.winnerId} " +
-                                "(${result.scores.joinToString { "${it.groupId}=${String.format("%.1f", it.weightedTotal)}" }})",
+                                "(${result.scores.joinToString { "${it.groupId}=${String.format(Locale.US, "%.1f", it.weightedTotal)}" }})",
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace
                         )
@@ -196,6 +260,9 @@ fun EvoKammerDashboardScreen(
                     TextButton(onClick = { navigate(EvoKammerRoute.RunMonitor(it)) }) {
                         Text("Open Monitor →")
                     }
+                }
+                TextButton(onClick = { navigate(EvoKammerRoute.SubstrateBrowser()) }) {
+                    Text("Browse Substrate →")
                 }
             }
 
@@ -268,12 +335,12 @@ private fun GroupSummaryCard(summary: GroupSummary, onClick: () -> Unit) {
                 }
                 Column {
                     Text("Budget", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(String.format("%.0f", summary.remainingBudget), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Text(String.format(Locale.US, "%.0f", summary.remainingBudget), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                 }
                 summary.currentRoundScore?.let { score ->
                     Column {
                         Text("Score", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(String.format("%.1f", score), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(String.format(Locale.US, "%.1f", score), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -295,7 +362,7 @@ internal fun EventLogRow(event: EvoKammerEvent) {
             val icon = if (event.isToolCall) "🔧" else "💬"
             icon to "[${event.groupId}/${event.role.name}] ${event.content.take(120)}"
         }
-        is EvoKammerEvent.GroupBudgetChanged -> "💰" to "[${event.groupId}] budget=${String.format("%.1f", event.remainingBudget)}"
+        is EvoKammerEvent.GroupBudgetChanged -> "💰" to "[${event.groupId}] budget=${String.format(Locale.US, "%.1f", event.remainingBudget)}"
         is EvoKammerEvent.ResourceNodeClaimed -> "📦" to "[${event.groupId}] claimed node ${event.nodeId}"
         is EvoKammerEvent.LeakSent -> {
             val corruptedTag = if (event.wasCorrupted) " [CORRUPTED]" else ""
@@ -308,7 +375,36 @@ internal fun EventLogRow(event: EvoKammerEvent) {
         is EvoKammerEvent.ToolRegistered -> "🔨" to "[${event.groupId}] tool '${event.toolName}' v${event.version} registered"
         is EvoKammerEvent.DeadEndRecorded -> "🚫" to "[${event.groupId}] dead end: ${event.approach.take(60)}"
         is EvoKammerEvent.LegacyProtocolExtracted -> "🧬" to "[${event.groupId}] legacy protocol extracted for ${event.role.name}"
-        is EvoKammerEvent.StageAdvanced -> "📈" to "[${event.groupId}] stage ${event.fromStage}→${event.toStage} (score=${String.format("%.2f", event.checkinScore)})"
+        is EvoKammerEvent.StageAdvanced -> "📈" to "[${event.groupId}] stage ${event.fromStage}→${event.toStage} (score=${String.format(Locale.US, "%.2f", event.checkinScore)})"
+        // New engine visibility events
+        is EvoKammerEvent.EngineProgress -> {
+            val icon = when (event.phase) {
+                "spawning" -> "⚙️"
+                "round_end", "round_start" -> "🔄"
+                "round_wait" -> "⏳"
+                "spawn_error" -> "❗"
+                "shuru_unavailable" -> "🚫"
+                "critic" -> "🔬"
+                else -> "📡"
+            }
+            icon to "[ENGINE] ${event.message.take(120)}"
+        }
+        is EvoKammerEvent.AgentSpawnFailed -> "❗" to "[${event.groupId}] spawn FAILED ${event.role.name} (${event.agentId.take(6)}): ${event.error.take(80)}"
+        is EvoKammerEvent.CriticPipelineCompleted -> "🔬" to "[${event.groupId}] critic r${event.roundIndex}: +${event.promoted} promoted, -${event.rejected} rejected"
+        is EvoKammerEvent.WatchdogAlert -> "⚠️" to "[${event.groupId}] watchdog ${event.signalType}: ${event.details.take(80)}"
+        is EvoKammerEvent.ShuruStatus -> {
+            val icon = if (event.available) "✅" else "❌"
+            icon to "[SHURU] ${event.message.take(120)}"
+        }
+        is EvoKammerEvent.GenesisCouncilCompleted -> {
+            val summary = "${event.groupCount} groups, ${event.stageCount} stages" +
+                if (event.usedDefault) " [DEFAULTS]" else ""
+            "🌱" to "[GENESIS] $summary"
+        }
+        is EvoKammerEvent.GraderRoundStarted ->
+            "⚖️" to "[GRADER ${event.graderGroupId}] R${event.roundIndex} evaluating ${event.competingGroupIds.size} groups"
+        is EvoKammerEvent.GraderRoundCompleted ->
+            "⚖️" to "[GRADER ${event.graderGroupId}] R${event.roundIndex} complete — ${event.totalScoresCollected} scores"
     }
 
     Row(

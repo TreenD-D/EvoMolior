@@ -5,8 +5,9 @@ import ai.koog.agents.core.agent.singleRunStrategy
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.prompt.executor.clients.openrouter.OpenRouterModels
 import ai.koog.prompt.executor.llms.all.simpleOpenRouterExecutor
-import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
+import ai.koog.prompt.llm.LLModel
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -112,6 +113,17 @@ class DifferentialPrivacyTransform(
         id.contains("gemini-2.5-pro")        -> OpenRouterModels.Gemini2_5Pro
         id.contains("gpt-4o-mini")           -> OpenRouterModels.GPT4oMini
         id.contains("claude-3-5-sonnet")     -> OpenRouterModels.Claude3_5Sonnet
-        else -> LLModel(provider = LLMProvider.OpenRouter, id = id)
+        id.contains("claude-sonnet-4")       -> OpenRouterModels.Claude4Sonnet
+        // Fallback with standard capabilities so Koog accepts the model
+        else -> LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = id,
+            capabilities = listOf(
+                LLMCapability.Temperature,
+                LLMCapability.Speculation,
+                LLMCapability.Tools,
+                LLMCapability.Completion
+            )
+        )
     }
 }

@@ -182,4 +182,158 @@ sealed class EvoKammerEvent {
         val severity: String,
         val description: String
     ) : EvoKammerEvent()
+
+    // ── Genesis Council events ─────────────────────────────────────────────────
+
+    /**
+     * Genesis Council completed successfully and produced a StartingField configuration.
+     *
+     * @param runId Active run identifier.
+     * @param groupCount Number of groups designed by the council.
+     * @param modelAssignment Role → model ID assignments (e.g. "Researcher" → "google/gemini-2.5-flash").
+     * @param rolePromptSummary Short summary of role prompts (first 120 chars each, truncated).
+     * @param stageCount Number of disclosure stages designed.
+     * @param scoringDimensionIds IDs of the scoring dimensions chosen.
+     * @param kgSchemaNodeCount Number of node types in the designed KG schema.
+     * @param primordialKbCount Number of seed KB documents seeded by the council.
+     * @param primordialFactCount Number of seed KG facts seeded by the council.
+     * @param usedDefault True if the default StartingField was used (council timed out or failed).
+     * @param consistencyReport Human-readable consistency report from CouncilSynthesis (B-3).
+     *   Empty string if the council was not invoked or did not produce one.
+     */
+    @Serializable
+    data class GenesisCouncilCompleted(
+        val runId: String,
+        val groupCount: Int,
+        val modelAssignment: Map<String, String>,
+        val rolePromptSummary: Map<String, String>,
+        val stageCount: Int,
+        val scoringDimensionIds: List<String>,
+        val kgSchemaNodeCount: Int,
+        val primordialKbCount: Int,
+        val primordialFactCount: Int,
+        val usedDefault: Boolean,
+        val consistencyReport: String = ""
+    ) : EvoKammerEvent()
+
+    // ── Grader Group events ────────────────────────────────────────────────────
+
+    /**
+     * A Grader Group started evaluating all competing groups for a round.
+     *
+     * @param runId Active run identifier.
+     * @param graderGroupId The grader group performing the evaluation.
+     * @param roundIndex The round being evaluated.
+     * @param competingGroupIds IDs of all competing groups being evaluated.
+     */
+    @Serializable
+    data class GraderRoundStarted(
+        val runId: String,
+        val graderGroupId: String,
+        val roundIndex: Int,
+        val competingGroupIds: List<String>
+    ) : EvoKammerEvent()
+
+    /**
+     * A Grader Group completed evaluating all competing groups for a round.
+     *
+     * @param runId Active run identifier.
+     * @param graderGroupId The grader group that completed evaluation.
+     * @param roundIndex The round that was evaluated.
+     * @param scoresPerGroup Map of groupId → list of dimension score summaries (dimensionId=score).
+     * @param totalScoresCollected Total number of DimensionScore entries collected.
+     */
+    @Serializable
+    data class GraderRoundCompleted(
+        val runId: String,
+        val graderGroupId: String,
+        val roundIndex: Int,
+        val scoresPerGroup: Map<String, String>,
+        val totalScoresCollected: Int
+    ) : EvoKammerEvent()
+
+    // ── Engine progress / debug events ────────────────────────────────────────
+
+    /**
+     * Generic engine progress heartbeat — emitted periodically during long-running
+     * operations so the UI never looks frozen.
+     *
+     * @param runId Active run identifier.
+     * @param phase Short label for the current phase (e.g., "round_wait", "spawning", "critic").
+     * @param message Human-readable progress description.
+     * @param progressFraction Optional 0.0–1.0 fraction if deterministic progress is known.
+     */
+    @Serializable
+    data class EngineProgress(
+        val runId: String,
+        val phase: String,
+        val message: String,
+        val progressFraction: Double? = null
+    ) : EvoKammerEvent()
+
+    /**
+     * An attempt to spawn an agent VM failed.
+     *
+     * @param runId Active run identifier.
+     * @param groupId Group this agent belongs to.
+     * @param agentId Attempted agent ID.
+     * @param role Intended role of the agent.
+     * @param error Error description.
+     */
+    @Serializable
+    data class AgentSpawnFailed(
+        val runId: String,
+        val groupId: String,
+        val agentId: String,
+        val role: Role,
+        val error: String
+    ) : EvoKammerEvent()
+
+    /**
+     * CriticPipeline finished reviewing all pending submissions for a group.
+     *
+     * @param runId Active run identifier.
+     * @param groupId Group whose submissions were reviewed.
+     * @param roundIndex Round in which the pipeline ran.
+     * @param promoted Number of submissions promoted to the canonical substrate.
+     * @param rejected Number of submissions rejected.
+     */
+    @Serializable
+    data class CriticPipelineCompleted(
+        val runId: String,
+        val groupId: String,
+        val roundIndex: Int,
+        val promoted: Int,
+        val rejected: Int
+    ) : EvoKammerEvent()
+
+    /**
+     * A Watchdog KG anomaly signal was raised.
+     *
+     * @param runId Active run identifier.
+     * @param groupId Affected group.
+     * @param signalType Type of anomaly (e.g., "kg_density_low", "kg_inconsistency_high", "budget_critical").
+     * @param details Human-readable details.
+     */
+    @Serializable
+    data class WatchdogAlert(
+        val runId: String,
+        val groupId: String,
+        val signalType: String,
+        val details: String
+    ) : EvoKammerEvent()
+
+    /**
+     * Result of the Shuru availability check at engine startup.
+     *
+     * @param available Whether Shuru is installed and functional.
+     * @param version Shuru version string, or null if unavailable.
+     * @param message Human-readable status message.
+     */
+    @Serializable
+    data class ShuruStatus(
+        val available: Boolean,
+        val version: String?,
+        val message: String
+    ) : EvoKammerEvent()
 }

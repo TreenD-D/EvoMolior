@@ -24,6 +24,9 @@ import kotlinx.serialization.Serializable
  * @param ipcBaseUrl The base URL for IPC communication with the Lifecycle Manager.
  * @param generation The current generation number for this agent.
  * @param gracePeriodSeconds How long the agent has to write Death Note after receiving SIGTERM.
+ * @param allocatedBudget The exact budget amount allocated to this agent by the EvolutionarySelector.
+ *   Used by [AgentRunner] to initialise the [BudgetLedger] with the correct initial balance,
+ *   which may differ from [GroupProfile.spawnBudget] when the selector adjusts per-role allocations.
  */
 @Serializable
 data class AgentBootContext(
@@ -42,6 +45,8 @@ data class AgentBootContext(
     val ipcBaseUrl: String,
     val generation: Int,
     val gracePeriodSeconds: Int = 30,
+    /** Exact budget allocated to this agent by the EvolutionarySelector. */
+    val allocatedBudget: Double = 0.0,
     /**
      * If this agent was spawned by a parent agent (sub-agent delegation), the parent's agentId.
      * Null for top-level agents.

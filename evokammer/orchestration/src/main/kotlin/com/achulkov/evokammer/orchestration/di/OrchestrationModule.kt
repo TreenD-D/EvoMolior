@@ -109,18 +109,24 @@ val evokammerOrchestrationModule = module {
     }
 
     /**
-     * Factory lambda that creates a [LifecycleManager] for a specific (runId, groupId).
+     * Factory lambda that creates a [LifecycleManager] for a specific (runId, groupId, profile).
+     *
+     * This Koin-provided factory runs agents in **Shuru VM mode** (no in-process runner).
+     * For the desktop JVM target, [LifecycleManager] is created directly in `main.kt`
+     * with a `localAgentRunner` that uses [com.achulkov.evokammer.agents.factory.EvoKammerAgentFactory].
      *
      * Usage:
      * ```kotlin
      * val factory: LifecycleManagerProvider = get()
-     * val lm = factory(runId, groupId, openRouterApiKey, agentJarPath)
+     * val lm = factory(runId, groupId, openRouterApiKey, agentJarPath, groupProfile)
      * ```
      */
     single<LifecycleManagerProvider> {
         val shuruManager: ShuruVmManager = get()
         val dbFactory: SubstrateDatabaseFactory = get()
-        val provider: LifecycleManagerProvider = { runId, groupId, openRouterApiKey, agentJarPath ->
+        val provider: LifecycleManagerProvider = { runId, groupId, openRouterApiKey, agentJarPath, _ ->
+            // `groupProfile` is accepted but unused in Shuru VM mode — the profile is
+            // propagated to agents via their boot context's budgetToken / allocation.
             LifecycleManager(
                 runId = runId,
                 groupId = groupId,
@@ -128,6 +134,7 @@ val evokammerOrchestrationModule = module {
                 substrateDatabaseFactory = dbFactory,
                 agentJarPath = agentJarPath,
                 openRouterApiKey = openRouterApiKey
+                // localAgentRunner = null → Shuru VM mode
             )
         }
         provider
@@ -145,12 +152,16 @@ typealias EvolutionarySelectorProvider = (
 
 /**
  * Type alias for the [LifecycleManager] provider lambda.
+ *
+ * Parameters: `(runId, groupId, openRouterApiKey, agentJarPath, groupProfile) -> LifecycleManager`
+ * The `groupProfile` carries budget and cost multiplier configuration for the group.
  */
 typealias LifecycleManagerProvider = (
     runId: String,
     groupId: String,
     openRouterApiKey: String,
-    agentJarPath: String
+    agentJarPath: String,
+    groupProfile: GroupProfile
 ) -> LifecycleManager
 
 /** Type alias for the [FitnessScorer] provider lambda. */

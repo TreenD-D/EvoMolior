@@ -196,6 +196,34 @@ class Watchdog(
             WatchdogSignal.InspectorFlag(groupId, severity, description, suggestedRole)
         )
     }
+
+    /**
+     * B-5: Opens the check-in gate for the given round.
+     *
+     * Emits [WatchdogSignal.CheckInGateOpen] to signal that
+     * `processDisclosureCheckIns` should now run. Called by `EvoKammerRunService`
+     * just before invoking the disclosure check-in step.
+     *
+     * @param roundIndex The round for which the gate is opened.
+     */
+    suspend fun openCheckInGate(roundIndex: Int) {
+        Napier.d("Watchdog: check-in gate OPEN for round $roundIndex")
+        _signals.emit(WatchdogSignal.CheckInGateOpen(roundIndex))
+    }
+
+    /**
+     * B-5: Closes the check-in gate for the given round.
+     *
+     * Emits [WatchdogSignal.CheckInGateClosed] to signal that the disclosure
+     * check-in window is now over. Called by `EvoKammerRunService` immediately
+     * after `processDisclosureCheckIns` completes.
+     *
+     * @param roundIndex The round for which the gate is closed.
+     */
+    suspend fun closeCheckInGate(roundIndex: Int) {
+        Napier.d("Watchdog: check-in gate CLOSED for round $roundIndex")
+        _signals.emit(WatchdogSignal.CheckInGateClosed(roundIndex))
+    }
 }
 
 /** Severity levels for Watchdog flags raised by Inspector agents. */
@@ -229,4 +257,21 @@ sealed class WatchdogSignal {
         val anomalyType: String,
         val details: String
     ) : WatchdogSignal()
+
+    /**
+     * B-5: The check-in gate is now open for [roundIndex].
+     *
+     * `EvoKammerRunService.processDisclosureCheckIns` listens for this signal
+     * before running progressive-disclosure check-ins. Only submissions from the
+     * current round are evaluated while the gate is open.
+     */
+    data class CheckInGateOpen(val roundIndex: Int) : WatchdogSignal()
+
+    /**
+     * B-5: The check-in gate is now closed for [roundIndex].
+     *
+     * Emitted by [Watchdog.closeCheckInGate] immediately after check-ins complete
+     * so downstream consumers know the evaluation window is over.
+     */
+    data class CheckInGateClosed(val roundIndex: Int) : WatchdogSignal()
 }

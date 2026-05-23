@@ -74,4 +74,12 @@ object EventTypes {
     const val INSPECTOR_FLAG = "INSPECTOR_FLAG"
     const val META_PLANNER_SPAWN = "META_PLANNER_SPAWN"
     const val FINAL_SUBMISSION = "FINAL_SUBMISSION"
+    /** Emitted by EvolutionarySelector after each generation allocation decision. */
+    const val SELECTOR_DECISION = "SELECTOR_DECISION"
+    /** Emitted by KGConsistencyChecker when a KG_FACT submission violates the schema. */
+    const val KG_SCHEMA_VIOLATION = "KG_SCHEMA_VIOLATION"
+    /** Emitted when a legacy protocol expires and failure maps are promoted to Dead Ends. */
+    const val LEGACY_PROTOCOL_EXPIRED = "LEGACY_PROTOCOL_EXPIRED"
+    /** Emitted when a KG_CONSTRAINT submission is promoted and applied to the schema table. */
+    const val KG_CONSTRAINT_APPLIED = "KG_CONSTRAINT_APPLIED"
 }

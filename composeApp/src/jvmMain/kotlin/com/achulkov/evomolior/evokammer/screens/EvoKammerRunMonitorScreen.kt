@@ -6,13 +6,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -21,9 +24,20 @@ import com.achulkov.evokammer.api.events.EvoKammerEvent
 import com.achulkov.evokammer.api.service.EngineStatus
 import com.achulkov.evomolior.evokammer.EvoKammerRoute
 import com.achulkov.evomolior.evokammer.LocalEvoKammerNavigator
+import com.achulkov.evomolior.evokammer.copyToClipboard
+import com.achulkov.evomolior.evokammer.debug.DebugLogBridge
+import com.achulkov.evomolior.evokammer.debug.DebugLogEntry
+import com.achulkov.evomolior.evokammer.saveTextToFile
+import com.achulkov.evomolior.evokammer.toLogLine
 import com.achulkov.evomolior.evokammer.viewmodel.EvoKammerViewModel
 import com.achulkov.evomolior.evokammer.viewmodel.StubEvoKammerEngineService
+import io.github.aakira.napier.LogLevel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Run Monitor screen — full live view of a running EvoKammer civilisation.
@@ -48,6 +62,13 @@ fun EvoKammerRunMonitorScreen(
 
     var selectedGroupId by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Debug log panel state — default to visible since bridge is always-on
+    var debugLogsEnabled by remember { mutableStateOf(true) }
+    val debugLogs by DebugLogBridge.logs.collectAsState()
+
+    // NOTE: DebugLogBridge.enabled is always true (set at startup); the toggle only
+    // controls the visibility of the debug panel in the UI, not capture of logs.
 
     // Auto-select first group when groups load
     LaunchedEffect(state.groupSummaries) {
@@ -95,6 +116,34 @@ fun EvoKammerRunMonitorScreen(
                     Text("│ Round $round", style = MaterialTheme.typography.bodyMedium)
                 }
                 Spacer(Modifier.weight(1f))
+
+                // ── Debug logs toggle ────────────────────────────────────────
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(
+                        Icons.Filled.Info,
+                        contentDescription = "Debug logs",
+                        modifier = Modifier.size(16.dp),
+                        tint = if (debugLogsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Debug",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (debugLogsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Switch(
+                        checked = debugLogsEnabled,
+                        onCheckedChange = { debugLogsEnabled = it },
+                        modifier = Modifier.height(20.dp)
+                    )
+                }
+
+                Spacer(Modifier.width(8.dp))
+
+                TextButton(
+                    onClick = { navigate(EvoKammerRoute.SubstrateBrowser(selectedGroupId)) }
+                ) {
+                    Text("Substrate →")
+                }
                 when (state.status) {
                     EngineStatus.RUNNING, EngineStatus.GENESIS -> {
                         OutlinedButton(onClick = { viewModel.pauseRun() }) { Text("Pause") }
@@ -151,7 +200,7 @@ fun EvoKammerRunMonitorScreen(
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Text("${group.activeAgents} agents", style = MaterialTheme.typography.labelSmall)
-                                Text("${String.format("%.0f", group.remainingBudget)} budget", style = MaterialTheme.typography.labelSmall)
+                                Text("${String.format(Locale.US, "%.0f", group.remainingBudget)} budget", style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
@@ -176,7 +225,7 @@ fun EvoKammerRunMonitorScreen(
                                         ) {
                                             Text(score.groupId.take(10), style = MaterialTheme.typography.labelSmall)
                                             Text(
-                                                "#${score.rank} — ${String.format("%.1f", score.weightedTotal)}",
+                                                "#${score.rank} — ${String.format(Locale.US, "%.1f", score.weightedTotal)}",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = if (score.rank == 1) FontWeight.Bold else FontWeight.Normal,
                                                 color = if (score.rank == 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
@@ -192,14 +241,15 @@ fun EvoKammerRunMonitorScreen(
 
             VerticalDivider()
 
-            // ── Right panel: live message stream ──────────────────────────────
+            // ── Right panel: live message stream + optional debug log ─────────
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                val filteredEvents = remember(events, selectedGroupId) {
+                val scope = rememberCoroutineScope()
+            val filteredEvents = remember(events, selectedGroupId) {
                     if (selectedGroupId == null) events
                     else events.filter { event ->
                         when (event) {
@@ -210,12 +260,18 @@ fun EvoKammerRunMonitorScreen(
                             is EvoKammerEvent.ConstitutionalViolation -> event.groupId == selectedGroupId
                             is EvoKammerEvent.InspectorFlag -> event.groupId == selectedGroupId
                             is EvoKammerEvent.ResourceNodeClaimed -> event.groupId == selectedGroupId
+                            is EvoKammerEvent.WatchdogAlert -> event.groupId == selectedGroupId
+                            is EvoKammerEvent.AgentSpawnFailed -> event.groupId == selectedGroupId
                             else -> true // show run-level events always
                         }
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Text(
                         "Agent Stream ${selectedGroupId?.let { "— $it" } ?: "(all)"}",
                         style = MaterialTheme.typography.titleSmall,
@@ -226,7 +282,38 @@ fun EvoKammerRunMonitorScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(Modifier.weight(1f))
+                    // ── Copy / export actions ────────────────────────────────
+                    OutlinedButton(
+                        onClick = {
+                            val text = filteredEvents.joinToString("\n") { it.toLogLine() }
+                            copyToClipboard(text)
+                        },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("Copy All", style = MaterialTheme.typography.labelSmall)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                // Build text on IO thread to keep the work off the EDT,
+                                // but show JFileChooser on the Main (EDT) thread after.
+                                val text = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                    filteredEvents.joinToString("\n") { it.toLogLine() }
+                                }
+                                val groupTag = selectedGroupId?.take(8) ?: "all"
+                                saveTextToFile(text, "evokammer-stream-$groupTag.txt")
+                            }
+                        },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("Export…", style = MaterialTheme.typography.labelSmall)
+                    }
                 }
+
+                val eventListWeight = if (debugLogsEnabled) 0.55f else 1f
 
                 val listState = rememberLazyListState()
                 LaunchedEffect(filteredEvents.size) {
@@ -235,24 +322,162 @@ fun EvoKammerRunMonitorScreen(
 
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .fillMaxWidth()
+                        .weight(eventListWeight)
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize().padding(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        items(filteredEvents) { event ->
-                            EventLogRow(event = event)
+                    SelectionContainer(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize().padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            items(filteredEvents) { event ->
+                                EventLogRow(event = event)
+                            }
                         }
                     }
+                }
+
+                // ── Debug log panel (shown when toggle is ON) ─────────────────
+                if (debugLogsEnabled) {
+                    HorizontalDivider()
+                    DebugLogPanel(
+                        logs = debugLogs,
+                        modifier = Modifier.fillMaxWidth().weight(0.45f)
+                    )
                 }
             }
         }
     }
     } // end Scaffold
+}
+
+@Composable
+private fun DebugLogPanel(
+    logs: List<DebugLogEntry>,
+    modifier: Modifier = Modifier
+) {
+    var levelFilter by remember { mutableStateOf<LogLevel?>(null) }
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Header with filter chips
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(Icons.Filled.Info, contentDescription = null, modifier = Modifier.size(14.dp))
+            Text("Debug Logs", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text("(${logs.size})", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.weight(1f))
+
+            // Level filter chips
+            listOf(null to "ALL", LogLevel.ERROR to "ERROR", LogLevel.WARNING to "WARN", LogLevel.INFO to "INFO").forEach { (level, label) ->
+                val selected = levelFilter == level
+                FilterChip(
+                    selected = selected,
+                    onClick = { levelFilter = level },
+                    label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                    modifier = Modifier.height(28.dp)
+                )
+            }
+
+            // Copy + Export buttons
+            val scope = rememberCoroutineScope()
+            // Copy All — copies currently visible logs to clipboard for easy pasting
+            TextButton(
+                onClick = {
+                    val filteredSnapshot = if (levelFilter == null) logs else logs.filter { it.level == levelFilter }
+                    val text = filteredSnapshot.joinToString("\n") { it.toLogLine() }
+                    copyToClipboard(text)
+                },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Text("Copy All", style = MaterialTheme.typography.labelSmall)
+            }
+            // Export to file
+            TextButton(
+                onClick = {
+                    val filteredSnapshot = if (levelFilter == null) logs else logs.filter { it.level == levelFilter }
+                    scope.launch {
+                        val text = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                            filteredSnapshot.joinToString("\n") { it.toLogLine() }
+                        }
+                        saveTextToFile(text, "evokammer-debug.txt")
+                    }
+                },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Text("Export…", style = MaterialTheme.typography.labelSmall)
+            }
+            // Clear button
+            TextButton(
+                onClick = { DebugLogBridge.clear() },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Text("Clear", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+
+        val filtered = remember(logs, levelFilter) {
+            if (levelFilter == null) logs
+            else logs.filter { it.level == levelFilter }
+        }
+
+        val debugListState = rememberLazyListState()
+        LaunchedEffect(filtered.size) {
+            if (filtered.isNotEmpty()) debugListState.animateScrollToItem(0)
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF1A1A2E))
+        ) {
+            // Note: SelectionContainer does NOT work reliably with LazyColumn (items are
+            // recycled, selection state is lost). Each row instead wraps its text content
+            // in an individual SelectionContainer for per-row selection. Use "Copy All"
+            // or "Export…" to copy the full log.
+            LazyColumn(
+                state = debugListState,
+                modifier = Modifier.fillMaxSize().padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
+            ) {
+                items(filtered) { entry ->
+                    DebugLogRow(entry)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DebugLogRow(entry: DebugLogEntry) {
+    val timeStr = remember(entry.timestamp) {
+        SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(entry.timestamp))
+    }
+    val (levelLabel, levelColor) = when (entry.level) {
+        LogLevel.ERROR -> "E" to Color(0xFFFF6B6B)
+        LogLevel.WARNING -> "W" to Color(0xFFFFD93D)
+        LogLevel.INFO -> "I" to Color(0xFF6BCB77)
+        LogLevel.DEBUG -> "D" to Color(0xFF9E9E9E)
+        LogLevel.VERBOSE -> "V" to Color(0xFF757575)
+        LogLevel.ASSERT -> "A" to Color(0xFFFF6B6B)
+    }
+    val tagText = entry.tag?.let { "[$it] " } ?: ""
+    // Wrap in SelectionContainer so each row's text is independently selectable via mouse drag.
+    // Full message is shown (no maxLines truncation) so nothing is hidden from selection.
+    SelectionContainer {
+        Text(
+            text = "$timeStr $levelLabel $tagText${entry.message}",
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp),
+            color = levelColor.copy(alpha = 0.9f),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }
 
 @Composable

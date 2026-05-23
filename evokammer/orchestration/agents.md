@@ -62,10 +62,19 @@ com.achulkov.evokammer.orchestration/
    - Claim a `WipTask` atomically (skip for Outliers)
    - Retrieve applicable `LegacyProtocol` from `LegacyProtocolRepository`
    - Build `AgentBootContext` with role prompt, budget token, credentials, WiP claim, Legacy Protocol
-   - Call `ShuruVmManager.spawnVm(VmConfig)` — gets `VmHandle`
-   - Write `AgentBootContext` to VM stdin pipe
+     — **`allocatedBudget` is set to `RoleAllocationEntry.budgetPerAgent`** (not profile.spawnBudget)
+   - **In-process mode**: invoke `localAgentRunner(bootContext)` as a coroutine
+   - **Shuru VM mode**: call `ShuruVmManager.spawnVm(VmConfig)` — gets `VmHandle`
+     — `VmConfig` injects boot context as `EVOKAMMER_BOOT_CONTEXT` env var (not stdin)
+     — Also injects `OPENROUTER_API_KEY` and `EVOKAMMER_GROUP_PROFILE` env vars
    - Register agent in `BudgetRepository` and emit `AGENT_SPAWN` event
 3. Track all live agents in a `MutableStateFlow<Map<AgentId, VmHandle>>`
+
+### LifecycleManager Constructor Fields
+
+Key fields added/changed:
+- `openRouterApiKey: String` — no longer suppressed; injected into Shuru VM env
+- `groupProfile: GroupProfile` — the group's cost profile, injected as `EVOKAMMER_GROUP_PROFILE`
 
 ### Budget Monitoring
 

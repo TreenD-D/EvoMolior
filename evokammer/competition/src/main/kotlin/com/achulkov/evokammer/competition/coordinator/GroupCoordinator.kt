@@ -1,5 +1,6 @@
 package com.achulkov.evokammer.competition.coordinator
 
+import com.achulkov.evokammer.competition.dispatch.DispatchMessage
 import com.achulkov.evokammer.competition.dispatch.DispatchRelay
 import com.achulkov.evokammer.competition.grader.GraderGroup
 import com.achulkov.evokammer.competition.leaks.DifferentialPrivacyTransform
@@ -80,4 +81,49 @@ class GroupCoordinator(
      * Returns whether Phase 5 privacy transformation is active for this run.
      */
     val isPrivacyTransformEnabled: Boolean get() = privacyTransform != null
+
+    /**
+     * B-6: Updates the inter-group migration ceiling for [sourceGroupId] for the current round.
+     *
+     * The ceiling is computed as `ceil(kbEntryCount * 0.15)` by the orchestration layer
+     * and passed here so the [LeakOracle] can enforce the spec §8 15% migration rate cap.
+     *
+     * Should be called during `spawnAgentsForRound` — after the KB entry count is read
+     * from the substrate DB and before agents start leaking knowledge.
+     *
+     * @param sourceGroupId The group whose outbound migration is being capped.
+     * @param kbEntryCount The current count of active KB entries in that group.
+     */
+    fun updateMigrationCeiling(sourceGroupId: String, kbEntryCount: Int) {
+        val ceiling = maxOf(1, kotlin.math.ceil(kbEntryCount * 0.15).toInt())
+        leakOracle.patchGroupCeiling(sourceGroupId, ceiling)
+        Napier.d("GroupCoordinator: migration ceiling for $sourceGroupId = $ceiling (kbEntries=$kbEntryCount)")
+    }
+
+    /**
+     * Dispatches a [DispatchMessage] from [sourceGroupId], applying [DifferentialPrivacyTransform]
+     * to [DispatchMessage.Leak] packets when Phase 5 is enabled (A-8).
+     *
+     * The privacy transform is applied BEFORE the [LeakOracle] processes quota and
+     * corruption — so the oracle sees an already-anonymised payload.
+     *
+     * For non-leak messages, delegates directly to [dispatchRelay].
+     *
+     * @param sourceGroupId The originating group ID.
+     * @param message The message to relay.
+     */
+    suspend fun dispatchLeak(sourceGroupId: String, message: DispatchMessage) {
+        val finalMessage = if (message is DispatchMessage.Leak && privacyTransform != null) {
+            // Apply LLM-based differential privacy before handing to the LeakOracle.
+            Napier.d("GroupCoordinator: applying privacy transform to leak from $sourceGroupId domain=${message.packet.domain}")
+            val transformedContent = privacyTransform.transform(
+                rawContent = message.packet.content,
+                domain = message.packet.domain
+            )
+            message.copy(packet = message.packet.copy(content = transformedContent))
+        } else {
+            message
+        }
+        dispatchRelay.dispatch(sourceGroupId, finalMessage)
+    }
 }

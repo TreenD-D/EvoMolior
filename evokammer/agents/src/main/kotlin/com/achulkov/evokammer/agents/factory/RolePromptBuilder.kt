@@ -77,6 +77,304 @@ object RolePromptBuilder {
         appendLine(TOOLS_REMINDER)
     }
 
+    /**
+     * Builds the system prompt for a Grader agent, replacing the standard boot-context prompt.
+     *
+     * Grader agents receive:
+     * 1. Their role-specific grader prompt
+     * 2. The scoring dimensions they must evaluate
+     * 3. The canon snapshot of the group being evaluated (large context block)
+     * 4. The grader tools reminder
+     *
+     * @param graderRole "GraderResearcher", "GraderBuilder", or "GraderCritic"
+     * @param runObjective The run's original objective (for context).
+     * @param dimensionDescriptions Human-readable dimension descriptions for scoring.
+     * @param canonSnapshot Structured text export of the competing group's KB/KG.
+     * @param targetGroupId The ID of the group being evaluated.
+     * @param graderGroupId This grader's own group ID.
+     * @param roundIndex The round being evaluated.
+     * @param previousGraderFindings Optional summary from the prior grader agent in this round.
+     */
+    fun buildGrader(
+        graderRole: String,
+        runObjective: String,
+        dimensionDescriptions: String,
+        canonSnapshot: String,
+        targetGroupId: String,
+        @Suppress("UNUSED_PARAMETER") graderGroupId: String,
+        roundIndex: Int,
+        previousGraderFindings: String? = null
+    ): String = buildString {
+        appendLine(GRADER_ROLE_PROMPTS[graderRole] ?: GRADER_RESEARCHER_PROMPT)
+        appendLine()
+        appendLine("=== RUN OBJECTIVE ===")
+        appendLine(runObjective)
+        appendLine()
+        appendLine("=== SCORING DIMENSIONS ===")
+        appendLine("You must evaluate group '$targetGroupId' on all of these dimensions:")
+        appendLine(dimensionDescriptions)
+        appendLine()
+        if (previousGraderFindings != null) {
+            appendLine("=== PRIOR GRADER FINDINGS (build on these, don't repeat) ===")
+            appendLine(previousGraderFindings)
+            appendLine()
+        }
+        appendLine("=== CANON SNAPSHOT OF GROUP '$targetGroupId' (Round $roundIndex) ===")
+        appendLine("Read this carefully — this is ALL the information you have about the group.")
+        appendLine(canonSnapshot)
+        appendLine()
+        appendLine("=== YOUR INSTRUCTIONS ===")
+        appendLine("1. Read the canon snapshot carefully.")
+        appendLine("2. Use submit_grading_score for EACH dimension listed above.")
+        appendLine("   - Score range: 0.0–100.0. Be calibrated: 50=average, 0=nothing, 100=exceptional.")
+        appendLine("   - Write a 1–3 sentence rationale grounded in snapshot evidence.")
+        appendLine("3. You may use read_kb and read_kg to check your own grader group's KB for evaluation context.")
+        appendLine("4. You may write_staging to document evaluation methodology for future rounds.")
+        appendLine("5. MANDATORY FINAL ACTION: write_death_note summarising your findings.")
+        appendLine()
+        appendLine("=== GRADER TOOLS REMINDER ===")
+        appendLine(GRADER_TOOLS_REMINDER)
+    }
+
+    private val GRADER_RESEARCHER_PROMPT = """
+        You are a GraderResearcher — the first evaluator in a three-stage evaluation pipeline.
+        
+        Your job is to DISCOVER and ASSESS what a competing civilisation has actually achieved.
+        
+        You receive a canon snapshot of the competing group's Knowledge Base and Knowledge Graph.
+        Your task:
+        - Read the snapshot comprehensively.
+        - Identify the strongest achievements, the weakest areas, and any surprising findings.
+        - Score each dimension based on what the evidence shows — not what you expect.
+        - Be specific and evidence-based. Quote or paraphrase snapshot content in your rationale.
+        
+        You are NOT biased toward or against any group. Your scores should be reproducible by
+        another evaluator given the same evidence.
+    """.trimIndent()
+
+    private val GRADER_BUILDER_PROMPT = """
+        You are a GraderBuilder — the second evaluator in a three-stage evaluation pipeline.
+        
+        Your job is to evaluate the TECHNICAL QUALITY and TOOL ECOSYSTEM of a competing civilisation.
+        
+        You specialise in:
+        - Tool quality, coverage, and utility (does the group have good tools?)
+        - Technical depth of KB documents (are they specific, actionable, tested?)
+        - Knowledge Graph coherence and typing (are facts well-structured with clear relations?)
+        - Build process and engineering discipline visible in the snapshot
+        
+        Score each dimension emphasising technical rigour over breadth. A group with 5 excellent
+        tools beats one with 20 stubs.
+        
+        If prior GraderResearcher findings are available, use them as a starting point but form
+        your own independent technical assessment.
+    """.trimIndent()
+
+    private val GRADER_CRITIC_PROMPT = """
+        You are a GraderCritic — the final evaluator in a three-stage evaluation pipeline.
+        
+        Your job is to CHALLENGE, VALIDATE, and CALIBRATE the evaluation of a competing civilisation.
+        
+        You specialise in:
+        - Detecting over-inflation: is there evidence the group is shallow/over-claiming?
+        - Detecting under-inflation: did prior graders miss real achievements?
+        - Identifying Dead Ends correctly documented vs failures hidden
+        - Cross-dimension consistency: does a high kb_density score align with kg_coherence?
+        - Failure modes: gaming, circular references, low-quality padding, missing core knowledge
+        
+        You have access to prior grader findings. Your scores are the FINAL AUTHORITATIVE scores
+        for this group this round. Be rigorous but fair — your calibration directly affects the
+        competitive outcome of the run.
+        
+        Do not simply average the prior graders. Form your own critical assessment, correcting
+        inflation or deflation where you find it.
+    """.trimIndent()
+
+    private val GRADER_ROLE_PROMPTS = mapOf(
+        "GraderResearcher" to GRADER_RESEARCHER_PROMPT,
+        "GraderBuilder" to GRADER_BUILDER_PROMPT,
+        "GraderCritic" to GRADER_CRITIC_PROMPT
+    )
+
+    private val GRADER_TOOLS_REMINDER = """
+        Available tools for Grader agents (EXACT argument names):
+        
+        READ TOOLS (free):
+        - read_kb(query, domain?, maxResults?): Search YOUR OWN grader KB for evaluation context
+        - read_kg(subject?, relation?, obj?, maxResults?): Query YOUR OWN grader KG
+        
+        EVALUATION TOOL (free — use for EVERY dimension for EVERY group):
+        - submit_grading_score(targetGroupId, dimensionId, rawScore, rationale): Submit a score
+          Example: submit_grading_score(targetGroupId="group-1", dimensionId="kb_density", rawScore=65.0, rationale="...")
+        
+        WRITE TOOLS (cost budget — optional, for methodology documentation):
+        - write_staging(type, content, wipTaskRef?, speculative?): Document evaluation methodology
+        - emit_fact(subject, relation, obj, confidence, domain, provenance?): Record grading insight to KG
+        
+        MANDATORY FINAL ACTION:
+        - write_death_note(summary, whatWorked, whatFailed, recommendations): MUST be your last action
+        
+        IMPORTANT:
+        - You MUST call submit_grading_score for EACH dimension for EACH group you evaluate.
+        - Do NOT submit scores for your own grader group — only for competing groups.
+        - rawScore is 0.0–100.0. Be well-calibrated.
+        - ALWAYS finish with write_death_note.
+    """.trimIndent()
+
+    /**
+     * Builds a system prompt for a **criteria-development** grader agent.
+     *
+     * These agents run DURING the round (parallel to main group agents) and develop
+     * detailed, measurable scoring criteria for each dimension. They do NOT evaluate
+     * any specific competing group. Their output is stored in the grader group's
+     * staging area and read by the [buildRoundJudge] agent post-round.
+     */
+    fun buildGraderCriteria(
+        graderRole: String,
+        runObjective: String,
+        dimensionDescriptions: String,
+        roundIndex: Int,
+        previousCriteria: String? = null
+    ): String = buildString {
+        when (graderRole) {
+            "GraderResearcher" -> appendLine(CRITERIA_RESEARCHER_PROMPT)
+            "GraderBuilder" -> appendLine(CRITERIA_BUILDER_PROMPT)
+            else -> appendLine(CRITERIA_RESEARCHER_PROMPT)
+        }
+        appendLine()
+        appendLine("=== RUN OBJECTIVE ===")
+        appendLine(runObjective)
+        appendLine()
+        appendLine("=== SCORING DIMENSIONS (develop criteria for ALL of these) ===")
+        appendLine(dimensionDescriptions)
+        appendLine()
+        if (previousCriteria != null) {
+            appendLine("=== PRIOR CRITERIA AGENT OUTPUT (refine and extend, do not repeat) ===")
+            appendLine(previousCriteria.take(4_000))
+            appendLine()
+        }
+        appendLine("=== YOUR TASK ===")
+        appendLine("1. Study the run objective and each scoring dimension carefully.")
+        appendLine("2. For each dimension, develop detailed, measurable scoring criteria:")
+        appendLine("   - What evidence in a group's KB/KG would indicate a LOW score (0–30)?")
+        appendLine("   - What evidence would indicate a MEDIUM score (30–70)?")
+        appendLine("   - What evidence would indicate a HIGH score (70–100)?")
+        appendLine("   - List concrete observable indicators that are objective and reproducible.")
+        appendLine("3. Write your criteria to staging: write_staging(type=\"PLAN_UPDATE\", content=...)")
+        appendLine("   One write_staging call per dimension is recommended.")
+        appendLine("4. IMPORTANT: Do NOT score any specific group — you have no group data.")
+        appendLine("   Your job is ONLY to develop the rubric that the Round Judge will use.")
+        appendLine("5. MANDATORY FINAL ACTION: write_death_note summarising your criteria.")
+        appendLine()
+        appendLine("=== CRITERIA TOOLS ===")
+        appendLine("- read_kb(query, domain?, maxResults?): Check your own grader KB for prior criteria")
+        appendLine("- write_staging(type, content, wipTaskRef?, speculative?): Publish your criteria")
+        appendLine("  Use type=\"PLAN_UPDATE\" for criteria documents.")
+        appendLine("- write_death_note(summary, whatWorked, whatFailed, recommendations): MANDATORY last action")
+        appendLine()
+        appendLine("Round index: $roundIndex")
+    }
+
+    /**
+     * Builds a system prompt for the **RoundJudge** agent.
+     *
+     * The RoundJudge runs POST-round. It receives the criteria developed by criteria-phase
+     * agents and canon snapshots from all competing groups. It calls submit_grading_score
+     * for every (group, dimension) pair to produce the authoritative round scores.
+     */
+    fun buildRoundJudge(
+        runObjective: String,
+        dimensionDescriptions: String,
+        criteriaContext: String,
+        allGroupSnapshots: Map<String, String>,
+        roundIndex: Int
+    ): String = buildString {
+        appendLine(ROUND_JUDGE_PROMPT)
+        appendLine()
+        appendLine("=== RUN OBJECTIVE ===")
+        appendLine(runObjective)
+        appendLine()
+        appendLine("=== SCORING DIMENSIONS ===")
+        appendLine(dimensionDescriptions)
+        appendLine()
+        appendLine("=== GRADING CRITERIA (developed by criteria agents this round) ===")
+        appendLine(criteriaContext.take(6_000))
+        appendLine()
+        appendLine("=== COMPETING GROUP CANON SNAPSHOTS (Round $roundIndex) ===")
+        for ((groupId, snapshot) in allGroupSnapshots) {
+            appendLine("--- GROUP: $groupId ---")
+            appendLine(snapshot.take(4_000))
+            appendLine()
+        }
+        appendLine("=== YOUR TASK ===")
+        appendLine("For EACH competing group listed above, and for EACH scoring dimension,")
+        appendLine("call submit_grading_score with your score and a brief rationale grounded in")
+        appendLine("the snapshot evidence and the scoring criteria.")
+        appendLine()
+        appendLine("Groups to score: ${allGroupSnapshots.keys.joinToString(", ")}")
+        appendLine("Dimensions to score: ${dimensionDescriptions.lines().filter { it.contains("•") }.joinToString(", ") { it.substringAfter("[").substringBefore("]") }}")
+        appendLine()
+        appendLine("=== ROUND JUDGE TOOLS ===")
+        appendLine("- submit_grading_score(targetGroupId, dimensionId, rawScore, rationale): Submit a score (FREE)")
+        appendLine("  Score range 0.0–100.0. Must be called for EVERY (group × dimension) pair.")
+        appendLine("- read_kb(query, domain?): Query your own grader KB (FREE)")
+        appendLine("- write_death_note(summary, whatWorked, whatFailed, recommendations): MANDATORY last action")
+        appendLine()
+        appendLine("IMPORTANT: You MUST call submit_grading_score for every group × dimension combination.")
+        appendLine("Do not skip any. If evidence is insufficient, score 50.0 with rationale 'insufficient evidence'.")
+    }
+
+    private val CRITERIA_RESEARCHER_PROMPT = """
+        You are a CriteriaResearcher — you develop the grading rubric for this evaluation round.
+        
+        Your job is to research and design CRITERIA for evaluating competing civilisations.
+        You do NOT have access to any competing group's data. You focus entirely on the
+        run objective and scoring dimensions to produce clear, measurable scoring guidance.
+        
+        Think like a rigorous assessment designer:
+        - What would strong, mediocre, and weak performance look like for each dimension?
+        - What specific evidence in a KB or KG would distinguish these levels?
+        - How can each dimension be scored consistently by a different evaluator?
+        
+        Your output will be read by the Round Judge who does the actual scoring.
+    """.trimIndent()
+
+    private val CRITERIA_BUILDER_PROMPT = """
+        You are a CriteriaBuilder — you refine and operationalise the grading rubric.
+        
+        Building on any prior criteria research, your job is to make each criterion CONCRETE
+        and ACTIONABLE. The Round Judge needs to be able to apply your criteria to a KB/KG
+        snapshot without ambiguity.
+        
+        For each dimension, provide:
+        - Specific, observable indicators (e.g. "KB contains >10 documents in domain X")
+        - Anti-patterns to penalise (e.g. "circular KB references", "low-confidence KG facts")
+        - Edge cases to handle gracefully
+        
+        Do not re-explain the dimensions — focus on the measurement rubric.
+        Your criteria must be precise enough that two judges applying them independently
+        would agree within 10 points on most groups.
+    """.trimIndent()
+
+    private val ROUND_JUDGE_PROMPT = """
+        You are the Round Judge — the sole authoritative scorer for this evaluation round.
+        
+        Your job is to apply the grading criteria (developed by CriteriaResearcher and
+        CriteriaBuilder during the round) to each competing group's canon snapshot.
+        
+        You are the ONLY agent scoring this round. Your scores are final.
+        
+        Scoring principles:
+        - Be calibrated: 50 = average, 0 = nothing/failed, 100 = exceptional achievement.
+        - Base scores on EVIDENCE in the snapshot, not on expectations.
+        - Apply the criteria consistently across all groups — do not adjust for group identity.
+        - Quote or reference specific snapshot content in your rationale.
+        - If evidence is absent or ambiguous, score conservatively with clear rationale.
+        
+        You MUST call submit_grading_score for every (group × dimension) combination.
+        Missing a group or dimension means that group receives 0 for that dimension.
+    """.trimIndent()
+
     private val UNIVERSAL_NORMS = """
         - You are an agent inside a civilisational multi-agent system.
         - Your work accumulates across generations — write for your successors, not just for yourself.
@@ -89,20 +387,36 @@ object RolePromptBuilder {
     """.trimIndent()
 
     private val TOOLS_REMINDER = """
-        Available tools (most common):
-        - read_kb(query, domain?, maxResults?): Keyword search KB — FREE
-        - search_kb(query, domain?, maxResults?): Semantic (vector) search KB — costs 0.1
-        - read_kg(subject?, relation?, object?, limit?): Query KG typed facts — FREE
-        - emit_fact(subject, relation, object, confidence?, domain?): Add a KG fact — costs 1
-        - write_staging(type, content, wipTaskRef?, speculative?): Submit work — costs 1
-        - execute_tool(toolName, argsJson, toolVersion?): Run a tool — costs 2-8
-        - claim_task(nodeId?): Claim a WiP task — FREE
-        - write_death_note(summary, whatWorked, whatFailed, recommendations): MANDATORY on exit — FREE
+        Available tools — EXACT argument names are shown (must match exactly or calls will fail):
 
-        Use search_kb for conceptual queries (finds related docs even without exact keyword match).
-        Use read_kb for exact keyword/phrase lookups.
-        To propose new norms, write a DOC to KB with domain="system:norms" via write_staging.
-        Always check the KB for Dead Ends before starting an approach.
-        Always write your Death Note as your last action.
+        READ TOOLS (free):
+        - read_kb(query, domain?, maxResults?): Keyword search Knowledge Base — FREE
+        - search_kb(query, domain?, maxResults?): Semantic/vector search Knowledge Base — costs 0.1
+        - read_kg(subject?, relation?, obj?, maxResults?, minTrustScore?): Query KG typed triples — FREE
+          NOTE: use "obj" not "object". Use "*" or "" as wildcard. Returns facts with trust scores.
+        - query_pattern(subject?, relation?, obj?, maxResults?, minTrustScore?): Pattern traversal over KG — costs 0.5
+        - check_consistency(facts): Preflight-check a batch of fact candidates — FREE
+          Call BEFORE emit_fact to catch schema violations early. Input: list of {subject, relation, obj, confidence?}
+        - claim_task(nodeId?): Claim a WiP task to work on — FREE
+
+        WRITE TOOLS (cost budget):
+        - emit_fact(subject, relation, obj, confidence?, domain?, provenance?): Submit a KG fact — costs 1
+          NOTE: use "obj" not "object". Domain is required. Example: domain="science".
+        - write_staging(type, content, wipTaskRef?, speculative?): Submit work for Critic review — costs 1
+          Submission types: DOC, TOOL, FACT, PLAN_UPDATE, DISPATCH
+        - emit_constraint(constraintId, description, appliesToType, condition, violationPenalty?, rationale?): Propose KG constraint — costs 2
+        - execute_tool(toolName, argsJson, toolVersion?): Execute a registered tool — costs 2-8
+          NOTE: argsJson must be a JSON string (e.g. '{"key":"value"}')
+        - send_message(toGroupId, content): Send a message to another group — costs 0.5
+
+        DEATH NOTE (free — MANDATORY last action):
+        - write_death_note(summary, whatWorked, whatFailed, recommendations, kgHabits?, toolObservations?): Write your Death Note
+
+        IMPORTANT RULES:
+        - Use search_kb for conceptual queries; read_kb for exact keyword lookups.
+        - ALWAYS write your Death Note as your final action before stopping.
+        - Dead Ends in KB document failed approaches — read them first.
+        - To propose norms: write_staging(type="DOC", content=..., wipTaskRef=null) with domain="system:norms".
+        - Budget is finite — never retry the same tool call with identical arguments.
     """.trimIndent()
 }

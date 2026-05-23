@@ -5,8 +5,9 @@ import ai.koog.agents.core.agent.singleRunStrategy
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.prompt.executor.clients.openrouter.OpenRouterModels
 import ai.koog.prompt.executor.llms.all.simpleOpenRouterExecutor
-import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
+import ai.koog.prompt.llm.LLModel
 import com.achulkov.evokammer.core.model.Role
 import io.github.aakira.napier.Napier
 
@@ -17,22 +18,23 @@ import io.github.aakira.napier.Napier
  * Each agent receives accumulated context from all previous council agents and
  * produces structured JSON output.
  *
- * This class provides the [agentRunner] callback consumed by [com.achulkov.evokammer.orchestration.council.GenesisCouncil].
+ * This class provides the [agentRunner] callback consumed by `GenesisCouncil`.
  *
  * @param openRouterApiKey OpenRouter API key for LLM calls.
  * @param councilModelId The LLM model to use for all council agents. Defaults to a strong reasoning model.
- * @param maxIterations Maximum Koog iterations per council agent (defaults to 1 — single-shot).
+ * @param maxIterations Maximum Koog iterations per council agent (defaults to 10 — single-shot
+ *   agents still need ≥2 graph iterations: one for the LLM call and one to return the result).
  */
 class CouncilRunner(
     private val openRouterApiKey: String,
-    private val councilModelId: String = "anthropic/claude-sonnet-4.6",
-    private val maxIterations: Int = 1
+    private val councilModelId: String = "anthropic/claude-sonnet-4",
+    private val maxIterations: Int = 10
 ) {
 
     private val executor by lazy { simpleOpenRouterExecutor(openRouterApiKey) }
 
     /**
-     * Returns a suspend function compatible with [com.achulkov.evokammer.orchestration.council.GenesisCouncil.run].
+     * Returns a suspend function compatible with `GenesisCouncil.run`.
      *
      * Usage:
      * ```kotlin
@@ -76,7 +78,7 @@ class CouncilRunner(
                 Produce your structured JSON output now.
                 """.trimIndent()
             )
-            val output = result?.trim() ?: "{}"
+            val output = result.trim().ifBlank { "{}" }
             Napier.i("CouncilRunner: ${role.name} produced ${output.length} chars")
             output
         } catch (e: Exception) {
@@ -86,13 +88,29 @@ class CouncilRunner(
     }
 
     private fun resolveModel(modelId: String): LLModel = when (modelId) {
-        "google/gemini-2.5-flash"       -> OpenRouterModels.Gemini2_5Flash
-        "google/gemini-2.5-flash-lite"  -> OpenRouterModels.Gemini2_5FlashLite
-        "google/gemini-2.5-pro"         -> OpenRouterModels.Gemini2_5Pro
-        "anthropic/claude-3-5-sonnet"   -> OpenRouterModels.Claude3_5Sonnet
-        "anthropic/claude-3-7-sonnet"   -> OpenRouterModels.Claude3_7Sonnet
-        "openai/gpt-4o"                 -> OpenRouterModels.GPT4o
-        "openai/gpt-4o-mini"            -> OpenRouterModels.GPT4oMini
-        else -> LLModel(provider = LLMProvider.OpenRouter, id = modelId)
+        "google/gemini-2.5-flash"                   -> OpenRouterModels.Gemini2_5Flash
+        "google/gemini-2.5-flash-lite"              -> OpenRouterModels.Gemini2_5FlashLite
+        "google/gemini-2.5-pro"                     -> OpenRouterModels.Gemini2_5Pro
+        "anthropic/claude-sonnet-4.6",
+        "anthropic/claude-sonnet-4"                 -> OpenRouterModels.Claude4Sonnet
+        "anthropic/claude-haiku-4.5"                -> OpenRouterModels.Claude4_5Haiku
+        "anthropic/claude-sonnet-4.5"               -> OpenRouterModels.Claude4_5Sonnet
+        "anthropic/claude-3-5-sonnet"               -> OpenRouterModels.Claude3_5Sonnet
+        "anthropic/claude-3-7-sonnet"               -> OpenRouterModels.Claude3_7Sonnet
+        "openai/gpt-4o"                             -> OpenRouterModels.GPT4o
+        "openai/gpt-4o-mini"                        -> OpenRouterModels.GPT4oMini
+        "deepseek/deepseek-v3.2",
+        "deepseek/deepseek-chat-v3-0324"            -> OpenRouterModels.DeepSeekV30324
+        // Fallback: create with standard capabilities so Koog accepts it
+        else -> LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = modelId,
+            capabilities = listOf(
+                LLMCapability.Temperature,
+                LLMCapability.Speculation,
+                LLMCapability.Tools,
+                LLMCapability.Completion
+            )
+        )
     }
 }

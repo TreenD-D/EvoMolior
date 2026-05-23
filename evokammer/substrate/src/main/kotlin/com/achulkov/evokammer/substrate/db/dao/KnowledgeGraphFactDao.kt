@@ -64,7 +64,7 @@ interface KnowledgeGraphFactDao {
 
     /**
      * Flexible triple pattern query — any of subject/relation/object can be '%' for wildcard.
-     * Primary tool for [com.achulkov.evokammer.agents.tools.QueryPatternTool].
+     * Primary tool for `ReadKGTool`.
      */
     @Query("""
         SELECT * FROM knowledge_graph_facts
@@ -147,7 +147,7 @@ interface KnowledgeGraphFactDao {
     /**
      * Count the number of conflicting (subject, relation) pairs — i.e., pairs where
      * multiple distinct objects are asserted as active at the same time.
-     * Used by [com.achulkov.evokammer.orchestration.watchdog.Watchdog] for the KG inconsistency rate signal.
+     * Used by `Watchdog` for the KG inconsistency rate signal.
      */
     @Query("""
         SELECT COUNT(*) FROM (

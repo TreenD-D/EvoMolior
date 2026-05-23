@@ -32,4 +32,5 @@ dependencies {
     implementation(libs.napier)
 
     testImplementation(kotlin("test"))
+    testImplementation(libs.kotlinx.coroutines.test)
 }

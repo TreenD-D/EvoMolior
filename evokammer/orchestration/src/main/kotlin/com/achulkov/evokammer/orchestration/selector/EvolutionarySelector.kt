@@ -5,7 +5,10 @@ import com.achulkov.evokammer.core.contract.RoleAllocationEntry
 import com.achulkov.evokammer.core.model.GroupProfile
 import com.achulkov.evokammer.core.model.Role
 import com.achulkov.evokammer.substrate.db.EvoKammerDatabase
+import com.achulkov.evokammer.substrate.db.entity.EventLogEntryEntity
+import com.achulkov.evokammer.substrate.db.entity.EventTypes
 import io.github.aakira.napier.Napier
+import java.util.UUID
 
 /**
  * Computes the [RoleAllocation] for the next generation based on substrate signals.
@@ -48,7 +51,7 @@ class EvolutionarySelector(
         val entries = buildAllocationEntries(generation, signals, stasisDetected, globalBudgetCeiling)
         val rationale = buildRationale(signals, entries, stasisDetected)
 
-        return RoleAllocation(
+        val allocation = RoleAllocation(
             runId = runId,
             groupId = groupId,
             generation = generation,
@@ -56,6 +59,34 @@ class EvolutionarySelector(
             totalBudgetCeiling = globalBudgetCeiling,
             rationale = rationale
         )
+
+        // A-2: Write a structured SELECTOR_DECISION event so post-mortem analysis can query
+        // allocation history without relying solely on Napier log strings.
+        runCatching {
+            val roleCountsJson = entries.joinToString(",") {
+                """{"role":"${it.role.name}","count":${it.count},"budget":${it.budgetPerAgent}}"""
+            }
+            db.eventLogDao().insert(
+                EventLogEntryEntity(
+                    id = UUID.randomUUID().toString(),
+                    timestampMs = System.currentTimeMillis(),
+                    eventType = EventTypes.SELECTOR_DECISION,
+                    groupId = groupId,
+                    runId = runId,
+                    generation = generation,
+                    payloadJson = buildString {
+                        val escapedRationale = rationale.replace("\\", "\\\\").replace("\"", "\\\"")
+                        append("""{"generation":$generation,"stasisDetected":$stasisDetected,""")
+                        append(""""budgetCeiling":$globalBudgetCeiling,"kbSize":${signals.kbSize},""")
+                        append(""""stagingBacklog":${signals.stagingBacklog},"toolFailureRate":${signals.toolFailureRate},""")
+                        append(""""unclaimedTasks":${signals.unclaimedTasks},"noRecentPromotions":${signals.noRecentPromotions},""")
+                        append(""""roleCounts":[$roleCountsJson],"rationale":"$escapedRationale"}""")
+                    }
+                )
+            )
+        }.onFailure { e -> Napier.w(e) { "[$groupId] Failed to log SELECTOR_DECISION event for gen $generation" } }
+
+        return allocation
     }
 
     private suspend fun gatherSignals(generation: Int): SelectionSignals {

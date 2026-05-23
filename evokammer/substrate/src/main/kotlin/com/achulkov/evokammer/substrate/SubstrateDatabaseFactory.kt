@@ -52,6 +52,45 @@ class SubstrateDatabaseFactory(private val dataRootDir: File) {
         return File(dataRootDir, "evokammer/runs/$runId/groups/$groupId/substrate.db")
     }
 
+    /**
+     * Returns (or creates) the [EvoKammerDatabase] for a Grader Group.
+     *
+     * Grader databases are stored at:
+     * `{dataRootDir}/evokammer/runs/{runId}/graders/{graderGroupId}/substrate.db`
+     *
+     * Grader groups accumulate their own KB/KG/tools across rounds, enabling the
+     * development of persistent evaluation methodology.
+     *
+     * @param runId The run identifier.
+     * @param graderGroupId The grader group identifier (e.g. "grader-1").
+     * @return An open [EvoKammerDatabase] instance for the grader group.
+     */
+    fun getGrader(runId: String, graderGroupId: String): EvoKammerDatabase {
+        val key = "$runId/graders/$graderGroupId"
+        synchronized(openDatabases) {
+            return openDatabases.getOrPut(key) { createGrader(runId, graderGroupId) }
+        }
+    }
+
+    /** Returns the DB file path for a grader group. */
+    fun graderDbFilePath(runId: String, graderGroupId: String): File {
+        return File(dataRootDir, "evokammer/runs/$runId/graders/$graderGroupId/substrate.db")
+    }
+
+    private fun createGrader(runId: String, graderGroupId: String): EvoKammerDatabase {
+        val dbFile = graderDbFilePath(runId, graderGroupId)
+        dbFile.parentFile?.mkdirs()
+        return Room.databaseBuilder<EvoKammerDatabase>(
+            name = dbFile.absolutePath
+        )
+            .setDriver(BundledSQLiteDriver())
+            // Allow Room to wipe and recreate whenever no migration path exists (both upgrade
+            // and downgrade). EvoKammer DBs are ephemeral per-run stores — data loss is
+            // acceptable and far preferable to crashing with a migration exception.
+            .fallbackToDestructiveMigration(dropAllTables = true)
+            .build()
+    }
+
     private fun create(runId: String, groupId: String): EvoKammerDatabase {
         val dbFile = dbFilePath(runId, groupId)
         dbFile.parentFile?.mkdirs()
@@ -60,7 +99,10 @@ class SubstrateDatabaseFactory(private val dataRootDir: File) {
             name = dbFile.absolutePath
         )
             .setDriver(BundledSQLiteDriver())
-            .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = false)
+            // Allow Room to wipe and recreate whenever no migration path exists (both upgrade
+            // and downgrade). EvoKammer DBs are ephemeral per-run stores — data loss is
+            // acceptable and far preferable to crashing with a migration exception.
+            .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
     }
 }

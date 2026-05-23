@@ -62,7 +62,16 @@ class ExecuteToolTool(
         val toolKey = "${args.toolName}:$argsHash"
 
         val toolExecutablePath = "$toolsMountPath/${tool.name}-v${tool.version}"
-        val result = toolSubSandbox.execute(toolExecutablePath, args.argsJson)
+
+        // Wrap sandbox invocation so unexpected exceptions (e.g. process launch failure)
+        // are still accounted for and returned as a structured error rather than a tool crash.
+        val result = try {
+            toolSubSandbox.execute(toolExecutablePath, args.argsJson)
+        } catch (e: Exception) {
+            // Deduct failure budget for a sandbox-level exception, then surface as structured error.
+            budgetLedger.deduct(ActionType.TOOL_EXEC_FAILURE, toolKey = toolKey)
+            return "Error: Tool '${tool.name}' failed to launch: ${e.message?.take(300)}"
+        }
 
         val actionType = when {
             result.timedOut -> ActionType.TOOL_EXEC_FAILURE

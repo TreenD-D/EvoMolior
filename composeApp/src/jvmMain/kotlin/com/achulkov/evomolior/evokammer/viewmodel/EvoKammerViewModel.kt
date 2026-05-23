@@ -9,6 +9,10 @@ import com.achulkov.evokammer.api.service.MetaArchiveSummary
 import com.achulkov.evokammer.core.model.GradingResult
 import com.achulkov.evokammer.core.model.GroupProfileType
 import com.achulkov.evokammer.core.model.ScoringDimension
+import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
+import com.achulkov.evomolior.evokammer.substrate.RunInfo
+import com.achulkov.evomolior.evokammer.substrate.SubstrateRepository
+import com.achulkov.evomolior.evokammer.substrate.SubstrateSnapshot
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * ViewModel for the EvoKammer Desktop control panel.
@@ -28,15 +33,48 @@ import kotlinx.coroutines.launch
  * - [engineState] — current engine status + group summaries
  * - [recentEvents] — last N engine events for the live log
  * - [gradingHistory] — round-by-round grading results
+ * - [availableRuns] — runs discovered on disk (for the Substrate Browser)
+ * - [substrateSnapshot] — current Substrate Browser data for the selected run + group
  *
  * @param engineService The engine service implementation (in-process or IPC-bridged).
+ * @param substrateFactory Optional substrate DB factory used by the Substrate Browser.
+ * @param dataRootDir Optional data root directory used to discover runs on disk.
  */
 class EvoKammerViewModel(
-    private val engineService: EvoKammerEngineService
+    private val engineService: EvoKammerEngineService,
+    substrateFactory: SubstrateDatabaseFactory? = null,
+    dataRootDir: File? = null
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    // ── Substrate Browser state ────────────────────────────────────────────────
+    private val substrateRepository: SubstrateRepository? =
+        if (substrateFactory != null && dataRootDir != null)
+            SubstrateRepository(substrateFactory, dataRootDir)
+        else null
+
+    private val _availableRuns = MutableStateFlow<List<RunInfo>>(emptyList())
+    /** Runs discovered on disk, sorted newest-first. Used by the Substrate Browser. */
+    val availableRuns: StateFlow<List<RunInfo>> = _availableRuns.asStateFlow()
+
+    private val _selectedBrowserRunId = MutableStateFlow<String?>(null)
+    /** The run ID selected in the Substrate Browser. */
+    val selectedBrowserRunId: StateFlow<String?> = _selectedBrowserRunId.asStateFlow()
+
+    private val _selectedBrowserGroupId = MutableStateFlow<String?>(null)
+    /** The group ID selected in the Substrate Browser. */
+    val selectedBrowserGroupId: StateFlow<String?> = _selectedBrowserGroupId.asStateFlow()
+
+    private val _substrateSnapshot = MutableStateFlow<SubstrateSnapshot?>(null)
+    /** Substrate data snapshot for the currently selected (runId, groupId). */
+    val substrateSnapshot: StateFlow<SubstrateSnapshot?> = _substrateSnapshot.asStateFlow()
+
+    private val _substrateLoading = MutableStateFlow(false)
+    /** True while a [refreshSubstrate] is in progress. */
+    val substrateLoading: StateFlow<Boolean> = _substrateLoading.asStateFlow()
+
+    // ── Engine state ───────────────────────────────────────────────────────────
     private val _engineState = MutableStateFlow(
         EngineState(
             status = EngineStatus.IDLE,
@@ -56,6 +94,13 @@ class EvoKammerViewModel(
     private val _error = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val error: SharedFlow<String> = _error.asSharedFlow()
 
+    private val _activeGraderGroupIds = MutableStateFlow<List<String>>(emptyList())
+    /**
+     * Grader group IDs seen so far in the current run (populated from [EvoKammerEvent.GraderRoundStarted]).
+     * Empty until the first grader round starts (post-round evaluation).
+     */
+    val activeGraderGroupIds: StateFlow<List<String>> = _activeGraderGroupIds.asStateFlow()
+
     private val _metaArchiveSummary = MutableStateFlow<MetaArchiveSummary?>(null)
     val metaArchiveSummary: StateFlow<MetaArchiveSummary?> = _metaArchiveSummary.asStateFlow()
 
@@ -67,6 +112,76 @@ class EvoKammerViewModel(
             }
         }
         refreshState()
+        refreshAvailableRuns()
+    }
+
+    // ── Substrate Browser commands ─────────────────────────────────────────────
+
+    /**
+     * Re-scans the filesystem for available runs and updates [availableRuns].
+     * If the currently active run is not yet in the list, it is not auto-selected here —
+     * use [selectBrowserRun] or the auto-select triggered by RunStarted events.
+     */
+    fun refreshAvailableRuns() {
+        val repo = substrateRepository ?: return
+        scope.launch(Dispatchers.IO) {
+            val runs = repo.discoverRuns()
+            Napier.d("EvoKammerViewModel: discovered ${runs.size} run(s) on disk")
+            _availableRuns.value = runs
+            // Auto-select the most recent run if nothing is selected yet
+            if (_selectedBrowserRunId.value == null && runs.isNotEmpty()) {
+                val first = runs.first()
+                _selectedBrowserRunId.value = first.runId
+                if (_selectedBrowserGroupId.value == null && first.groupIds.isNotEmpty()) {
+                    _selectedBrowserGroupId.value = first.groupIds.first()
+                    refreshSubstrate()
+                }
+            }
+        }
+    }
+
+    /** Selects a run in the Substrate Browser and reloads the snapshot for its first group. */
+    fun selectBrowserRun(runId: String) {
+        if (_selectedBrowserRunId.value == runId) return
+        _selectedBrowserRunId.value = runId
+        _substrateSnapshot.value = null
+        val groupIds = _availableRuns.value.find { it.runId == runId }?.groupIds ?: emptyList()
+        val firstGroup = groupIds.firstOrNull()
+        _selectedBrowserGroupId.value = firstGroup
+        if (firstGroup != null) refreshSubstrate()
+    }
+
+    /** Selects a group within the currently selected run and reloads the snapshot. */
+    fun selectBrowserGroup(groupId: String) {
+        if (_selectedBrowserGroupId.value == groupId) return
+        _selectedBrowserGroupId.value = groupId
+        refreshSubstrate()
+    }
+
+    /**
+     * (Re)loads the [SubstrateSnapshot] for the currently selected (runId, groupId).
+     * No-op if no selection is active or no repository is available.
+     */
+    fun refreshSubstrate() {
+        val repo = substrateRepository ?: return
+        val runId = _selectedBrowserRunId.value ?: return
+        val groupId = _selectedBrowserGroupId.value ?: return
+
+        scope.launch(Dispatchers.IO) {
+            _substrateLoading.value = true
+            try {
+                val snapshot = repo.loadSnapshot(runId, groupId)
+                _substrateSnapshot.value = snapshot
+                Napier.d(
+                    "EvoKammerViewModel: substrate snapshot loaded run=$runId group=$groupId " +
+                    "total=${snapshot.totalRecords} records loaded=${snapshot.loaded}"
+                )
+            } catch (e: Exception) {
+                Napier.e("EvoKammerViewModel: substrate refresh failed: ${e.message}", e)
+            } finally {
+                _substrateLoading.value = false
+            }
+        }
     }
 
     /**
@@ -159,8 +274,17 @@ class EvoKammerViewModel(
                     status = EngineStatus.RUNNING,
                     activeRunId = event.runId
                 )
+                _activeGraderGroupIds.value = emptyList() // reset for new run
                 // Refresh to pick up group summaries populated by EvoKammerRunService.startRun
                 refreshState()
+                // Auto-select this run in the Substrate Browser so data is visible immediately
+                val startedRunId = event.runId
+                if (_selectedBrowserRunId.value != startedRunId) {
+                    _selectedBrowserRunId.value = startedRunId
+                    _selectedBrowserGroupId.value = null
+                    _substrateSnapshot.value = null
+                }
+                refreshAvailableRuns()
             }
             is EvoKammerEvent.RoundStarted -> {
                 Napier.i("EvoKammerViewModel: round started round=${event.roundIndex} runId=${event.runId}")
@@ -176,6 +300,8 @@ class EvoKammerViewModel(
                 history.add(event.result)
                 _gradingHistory.value = history
                 refreshState()
+                // Refresh substrate browser after each round (new KB/KG facts, staging, etc.)
+                refreshSubstrate()
             }
             is EvoKammerEvent.RunCompleted -> {
                 Napier.i("EvoKammerViewModel: run completed runId=${event.runId} winner=${event.winnerId}")
@@ -201,6 +327,47 @@ class EvoKammerViewModel(
                     if (s.groupId == event.groupId) s.copy(remainingBudget = event.remainingBudget) else s
                 }
                 _engineState.value = _engineState.value.copy(groupSummaries = summaries)
+            }
+            is EvoKammerEvent.ShuruStatus -> {
+                if (!event.available) {
+                    Napier.e("EvoKammerViewModel: Shuru unavailable — ${event.message}")
+                    scope.launch { _error.emit("⚠️ Shuru: ${event.message}") }
+                } else {
+                    Napier.i("EvoKammerViewModel: Shuru OK — ${event.version}")
+                }
+            }
+            is EvoKammerEvent.AgentSpawnFailed -> {
+                Napier.w("EvoKammerViewModel: agent spawn failed group=${event.groupId} role=${event.role} error=${event.error}")
+                scope.launch { _error.emit("[${event.groupId}] Spawn failed (${event.role.name}): ${event.error}") }
+            }
+            is EvoKammerEvent.StagingPromoted,
+            is EvoKammerEvent.KGFactEmitted,
+            is EvoKammerEvent.ToolRegistered,
+            is EvoKammerEvent.DeadEndRecorded,
+            is EvoKammerEvent.LegacyProtocolExtracted -> {
+                // These events mutate substrate data — refresh if the affected group is selected
+                val affectedGroup = when (event) {
+                    is EvoKammerEvent.StagingPromoted -> event.groupId
+                    is EvoKammerEvent.KGFactEmitted -> event.groupId
+                    is EvoKammerEvent.ToolRegistered -> event.groupId
+                    is EvoKammerEvent.DeadEndRecorded -> event.groupId
+                    is EvoKammerEvent.LegacyProtocolExtracted -> event.groupId
+                    else -> null
+                }
+                if (affectedGroup != null && affectedGroup == _selectedBrowserGroupId.value) {
+                    refreshSubstrate()
+                }
+            }
+            is EvoKammerEvent.GraderRoundStarted -> {
+                // Track grader group IDs so the Dashboard can display them
+                val current = _activeGraderGroupIds.value
+                if (event.graderGroupId !in current) {
+                    _activeGraderGroupIds.value = current + event.graderGroupId
+                }
+                Napier.i("EvoKammerViewModel: grader round started graderGroupId=${event.graderGroupId} round=${event.roundIndex}")
+            }
+            is EvoKammerEvent.EngineProgress -> {
+                Napier.d("EvoKammerViewModel: engine progress phase=${event.phase} msg=${event.message}")
             }
             else -> {
                 Napier.d("EvoKammerViewModel: unhandled event type ${event::class.simpleName}")

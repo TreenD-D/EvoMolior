@@ -48,6 +48,10 @@ class WriteDeathNoteTool(
         val whatWorked: String,
         val whatFailed: String,
         val recommendations: String,
+        /**
+         * KG habits summary. A plain string describing KG usage patterns observed by the agent.
+         * Must be a string value (not a JSON object) — pass a text description directly.
+         */
         val kgHabits: String? = null,
         val toolObservations: String? = null
     )

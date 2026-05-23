@@ -122,19 +122,24 @@ The BudgetLedger returns a `BudgetDeductResult` — if `BELOW_FLOOR`, the tool t
 
 ```
 boot:
-  1. Deserialise AgentBootContext from stdin
-  2. Initialise Koin with substrate repositories (connected to group DB)
-  3. Create AIAgent via EvoKammerAgentFactory
-  4. Claim WiP task (if provided in boot context)
+  1. Deserialise AgentBootContext from EVOKAMMER_BOOT_CONTEXT env var (or /boot/context.json fallback)
+  2. Read OPENROUTER_API_KEY and EVOKAMMER_GROUP_PROFILE env vars
+  3. Initialise Koin with substrate repositories (connected to group DB)
+  4. Create DeathNoteProtocol; register JVM shutdown hook for unexpected termination
+  5. Create AIAgent via EvoKammerAgentFactory(bootContext, deathNoteProtocol=protocol)
+     - BudgetLedger initial budget = bootContext.allocatedBudget (from EvolutionarySelector)
+     - Falls back to GroupProfile.spawnBudget only when allocatedBudget == 0
 
 main loop:
-  5. Run agent.run(buildInitialPrompt()) — Koog handles the LLM + tool call loop
-  6. BudgetExhaustedException or maxIterations reached → proceed to death note
+  6. Run agent.run(buildInitialPrompt()) — Koog handles the LLM + tool call loop
+  7. On budget floor: WriteDeathNoteTool is always-free and can still execute
+  8. If WriteDeathNoteTool writes a note: deathNoteProtocol.markDeathNoteWritten() cancels grace timer
 
 death note:
-  7. Signal received (or budget exhausted): call WriteDeathNoteTool with current context
-  8. Grace period: wait up to 30 seconds for death note to complete
-  9. Hard kill: process exits
+  9. If agent completed without writing a note: signalGrace() starts the timer
+ 10. Grace period: wait up to gracePeriodSeconds for death note
+ 11. If grace expires without note: emergencyDeathNote() writes a plain-text fallback
+ 12. Process exits
 
 ```
 
@@ -148,6 +153,39 @@ death note:
 
 The Death Note goes to staging as `type = DEATH_NOTE`. Critic reviews are skipped for Death Notes
 — they are always promoted to the Dead Ends / Legacy section of the substrate.
+
+## Lifecycle Contract Invariants
+
+The following invariants must hold for every agent lifecycle. Violations indicate a wiring bug.
+
+| # | Invariant | Checked By |
+|---|-----------|-----------|
+| 1 | `bootContext.allocatedBudget` matches the `RoleAllocationEntry.budgetPerAgent` for this agent | `LifecycleManagerTest.allocatedBudget_in_bootContext_matches_budgetPerAgent` |
+| 2 | `BudgetLedger.initialBudget` == `bootContext.allocatedBudget` (when > 0) | `EvoKammerAgentFactoryTest` |
+| 3 | `WriteDeathNoteTool` calls `deathNoteProtocol.markDeathNoteWritten()` | `DeathNoteProtocolTest` |
+| 4 | Emergency fallback does NOT fire if `markDeathNoteWritten()` was called | `DeathNoteProtocolTest` |
+| 5 | `ExecuteToolTool` sandbox exceptions deduct failure budget + return structured error | `ExecuteToolToolTest` |
+| 6 | Shuru VM config has `EVOKAMMER_BOOT_CONTEXT` in `boot.env`, not in `stdin` | `VmConfigContractTest` |
+| 7 | Shuru availability check runs AFTER lifecycle managers exist (mode is known) | `EvoKammerRunServiceModeGatingTest` |
+
+## Test Coverage Summary
+
+```
+evokammer/agents/src/test/kotlin/com/achulkov/evokammer/agents/
+  runner/
+    DeathNoteProtocolTest.kt       -- DeathNoteProtocol grace period and mark-written contract
+    AgentRunnerContractTest.kt     -- Boot context JSON round-trip, env var reading
+  factory/
+    EvoKammerAgentFactoryTest.kt   -- Budget initialisation from allocatedBudget vs profile default
+  tools/
+    ExecuteToolToolTest.kt         -- Tool missing / sandbox exception / success / failure / retry costs
+evokammer/sandbox/src/test/kotlin/com/achulkov/evokammer/sandbox/shuru/
+  VmConfigContractTest.kt          -- Shuru JSON uses env vars (not stdin) for boot context
+evokammer/orchestration/src/test/kotlin/com/achulkov/evokammer/orchestration/lifecycle/
+  LifecycleManagerTest.kt          -- Spawn, allocatedBudget propagation, live count, terminateAll
+evokammer/api/src/test/kotlin/com/achulkov/evokammer/api/
+  EvoKammerRunServiceModeGatingTest.kt  -- usesInProcessMode contract, needsShuru logic
+```
 
 ## Sub-Agent Delegation (Phase 9)
 

@@ -2,7 +2,6 @@ package com.achulkov.evomolior.evokammer.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -24,7 +23,7 @@ import com.achulkov.evomolior.evokammer.EvoKammerRoute
 import com.achulkov.evomolior.evokammer.LocalEvoKammerNavigator
 import com.achulkov.evomolior.evokammer.viewmodel.EvoKammerViewModel
 import com.achulkov.evomolior.evokammer.viewmodel.StubEvoKammerEngineService
-import com.achulkov.evomolior.evokammer.viewmodel.defaultRunConfig
+import java.util.Locale
 
 /**
  * Run Setup screen — form to configure and start a new EvoKammer civilisation run.
@@ -226,7 +225,7 @@ fun EvoKammerRunSetupScreen(
 
                     val totalWeight = dimensions.sumOf { it.weight }
                     Text(
-                        "Total weight: ${String.format("%.2f", totalWeight)} ${if (kotlin.math.abs(totalWeight - 1.0) < 0.01) "✓" else "⚠️ should sum to 1.0"}",
+                        "Total weight: ${String.format(Locale.US, "%.2f", totalWeight)} ${if (kotlin.math.abs(totalWeight - 1.0) < 0.01) "✓" else "⚠️ should sum to 1.0"}",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (kotlin.math.abs(totalWeight - 1.0) < 0.01)
                             MaterialTheme.colorScheme.primary
@@ -295,7 +294,7 @@ private fun DimensionRow(
                 Text(dimension.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Column(modifier = Modifier.weight(0.5f)) {
-                Text("Weight: ${String.format("%.2f", dimension.weight)}", style = MaterialTheme.typography.labelSmall)
+                Text("Weight: ${String.format(Locale.US, "%.2f", dimension.weight)}", style = MaterialTheme.typography.labelSmall)
                 Slider(
                     value = dimension.weight.toFloat(),
                     onValueChange = { onWeightChange(it.toDouble().coerceIn(0.01, 1.0)) },

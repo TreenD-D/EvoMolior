@@ -34,6 +34,9 @@ import kotlinx.serialization.Serializable
  * @param sealedTestSuiteHash SHA-256 hash of the sealed test suite (for integrity verification).
  * @param norms Founding norms and coordination conventions injected into all role prompts.
  * @param stageContents Constraint-framed stage disclosure content per stage index.
+ * @param consistencyReport Human-readable report from the CouncilSynthesis describing the
+ *   consistency check performed on all role outputs. Empty if the council was not invoked
+ *   or if the synthesis did not produce one.
  */
 @Serializable
 data class StartingField(
@@ -60,31 +63,50 @@ data class StartingField(
     val legacyProtocolTemplate: String,
     val sealedTestSuiteHash: String,
     val norms: String,
-    val stageContents: List<String>
+    val stageContents: List<String>,
+    /** Consistency report from CouncilSynthesis (B-3). Empty string for default/fallback fields. */
+    val consistencyReport: String = ""
 ) {
     companion object {
         /**
          * Returns a minimal [StartingField] with sensible defaults.
-         * Used as a fallback when the Genesis Council output cannot be parsed.
+         * Used as a fallback when the Genesis Council output cannot be parsed,
+         * and as the base configuration for test runs.
          *
          * @param objective The run objective.
          * @param runId The run ID (default: random UUID placeholder).
+         * @param groupCount Number of competing groups. Default 2; use 1 for a test run.
+         * @param groupProfilesMap Optional group-id → profile override. If null, defaults
+         *   are generated for [groupCount] groups using Library/Factory cycle.
+         * @param budgetCeiling Global budget ceiling override. Default 10 000; use lower
+         *   values (e.g. 200.0) for short diagnostic runs.
+         * @param generationCeiling Maximum agent generations override.
          */
         fun default(
             objective: String,
-            runId: String = "default-run"
-        ): StartingField = StartingField(
+            runId: String = "default-run",
+            groupCount: Int = 2,
+            groupProfilesMap: Map<String, GroupProfileType>? = null,
+            budgetCeiling: Double = 10_000.0,
+            generationCeiling: Int = 100
+        ): StartingField {
+            val resolvedGroupCount = groupCount.coerceAtLeast(1)
+            val resolvedProfiles = groupProfilesMap ?: (0 until resolvedGroupCount).associate { idx ->
+                "group-$idx" to GroupProfileType.entries[idx % GroupProfileType.entries.size]
+            }
+            val resolvedRing = resolvedProfiles.keys.toList()
+            return StartingField(
             runId = runId,
             objective = objective,
-            globalBudgetCeiling = 10_000.0,
-            generationCeiling = 100,
-            groupCount = 2,
-            groupProfiles = mapOf("group-0" to GroupProfileType.Library, "group-1" to GroupProfileType.Factory),
-            ringTopology = listOf("group-0", "group-1"),
+            globalBudgetCeiling = budgetCeiling,
+            generationCeiling = generationCeiling,
+            groupCount = resolvedGroupCount,
+            groupProfiles = resolvedProfiles,
+            ringTopology = resolvedRing,
             checkinMilestones = listOf(10, 25, 50, 75, 100),
             leakIntervalGenerations = 20,
             dispatchLagGenerations = 5,
-            graderGroupCount = 1,
+            graderGroupCount = if (resolvedGroupCount == 1) 0 else 1,
             rolePrompts = emptyMap(),
             modelAssignment = emptyMap(),
             kgSchema = "{}",
@@ -97,8 +119,10 @@ data class StartingField(
             legacyProtocolTemplate = "{}",
             sealedTestSuiteHash = "",
             norms = "",
-            stageContents = emptyList()
+            stageContents = emptyList(),
+            consistencyReport = ""
         )
+        }
     }
 }
 

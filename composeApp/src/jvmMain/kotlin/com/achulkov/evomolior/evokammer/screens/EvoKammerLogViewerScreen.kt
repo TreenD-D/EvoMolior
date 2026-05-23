@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
@@ -21,11 +22,17 @@ import androidx.compose.ui.unit.sp
 import com.achulkov.evokammer.api.events.EvoKammerEvent
 import com.achulkov.evomolior.evokammer.EvoKammerRoute
 import com.achulkov.evomolior.evokammer.LocalEvoKammerNavigator
+import com.achulkov.evomolior.evokammer.copyToClipboard
+import com.achulkov.evomolior.evokammer.saveTextToFile
+import com.achulkov.evomolior.evokammer.toLogLine
 import com.achulkov.evomolior.evokammer.viewmodel.EvoKammerViewModel
 import com.achulkov.evomolior.evokammer.viewmodel.StubEvoKammerEngineService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.util.Locale
 
 private enum class LogFilter {
-    ALL, AGENTS, BUDGET, LEAKS, VIOLATIONS, ROUNDS
+    ALL, AGENTS, BUDGET, LEAKS, VIOLATIONS, ROUNDS, GRADERS, ENGINE
 }
 
 /**
@@ -46,22 +53,32 @@ fun EvoKammerLogViewerScreen(
     var activeFilter by remember { mutableStateOf(LogFilter.ALL) }
     var autoScroll by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     val filtered = remember(events, activeFilter) {
         when (activeFilter) {
             LogFilter.ALL -> events
             LogFilter.AGENTS -> events.filterIsInstance<EvoKammerEvent.AgentSpawned>() +
                 events.filterIsInstance<EvoKammerEvent.AgentDied>() +
-                events.filterIsInstance<EvoKammerEvent.AgentMessage>()
+                events.filterIsInstance<EvoKammerEvent.AgentMessage>() +
+                events.filterIsInstance<EvoKammerEvent.AgentSpawnFailed>()
             LogFilter.BUDGET -> events.filterIsInstance<EvoKammerEvent.GroupBudgetChanged>()
             LogFilter.LEAKS -> events.filterIsInstance<EvoKammerEvent.LeakSent>()
             LogFilter.VIOLATIONS -> events.filterIsInstance<EvoKammerEvent.ConstitutionalViolation>() +
-                events.filterIsInstance<EvoKammerEvent.InspectorFlag>()
+                events.filterIsInstance<EvoKammerEvent.InspectorFlag>() +
+                events.filterIsInstance<EvoKammerEvent.WatchdogAlert>()
             LogFilter.ROUNDS -> events.filterIsInstance<EvoKammerEvent.RoundStarted>() +
                 events.filterIsInstance<EvoKammerEvent.RoundCompleted>() +
                 events.filterIsInstance<EvoKammerEvent.RunStarted>() +
                 events.filterIsInstance<EvoKammerEvent.RunCompleted>() +
-                events.filterIsInstance<EvoKammerEvent.RunAborted>()
+                events.filterIsInstance<EvoKammerEvent.RunAborted>() +
+                events.filterIsInstance<EvoKammerEvent.CriticPipelineCompleted>() +
+                events.filterIsInstance<EvoKammerEvent.GenesisCouncilCompleted>()
+            LogFilter.GRADERS -> events.filterIsInstance<EvoKammerEvent.GraderRoundStarted>() +
+                events.filterIsInstance<EvoKammerEvent.GraderRoundCompleted>()
+            // Engine-level lifecycle, Shuru VM status, and generic progress events
+            LogFilter.ENGINE -> events.filterIsInstance<EvoKammerEvent.EngineProgress>() +
+                events.filterIsInstance<EvoKammerEvent.ShuruStatus>()
         }
     }
 
@@ -102,6 +119,29 @@ fun EvoKammerLogViewerScreen(
                 Spacer(Modifier.width(4.dp))
                 Text("Auto-scroll", style = MaterialTheme.typography.bodySmall)
             }
+            // ── Copy / export actions ─────────────────────────────────────────
+            OutlinedButton(
+                onClick = {
+                    val text = filtered.joinToString("\n") { it.toLogLine() }
+                    copyToClipboard(text)
+                },
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text("Copy All", style = MaterialTheme.typography.labelMedium)
+            }
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        val text = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                            filtered.joinToString("\n") { it.toLogLine() }
+                        }
+                        saveTextToFile(text, "evokammer-events.txt")
+                    }
+                },
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text("Export…", style = MaterialTheme.typography.labelMedium)
+            }
         }
 
         // ── Filter chips ─────────────────────────────────────────────────────
@@ -139,13 +179,16 @@ fun EvoKammerLogViewerScreen(
                     )
                 }
             } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize().padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    items(filtered) { event ->
-                        LogViewerRow(event)
+                // SelectionContainer makes all Text children selectable / copy-able
+                SelectionContainer(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize().padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        items(filtered) { event ->
+                            LogViewerRow(event)
+                        }
                     }
                 }
             }
@@ -166,7 +209,7 @@ private fun LogViewerRow(event: EvoKammerEvent) {
         )
         is EvoKammerEvent.RoundCompleted -> Triple(
             "🏁", "[ROUND ${event.result.roundIndex}] winner=${event.result.winnerId} | " +
-                event.result.scores.joinToString { "${it.groupId}=${String.format("%.2f", it.weightedTotal)}" },
+                event.result.scores.joinToString { "${it.groupId}=${String.format(Locale.US, "%.2f", it.weightedTotal)}" },
             MaterialTheme.colorScheme.secondary
         )
         is EvoKammerEvent.RunCompleted -> Triple(
@@ -191,7 +234,7 @@ private fun LogViewerRow(event: EvoKammerEvent) {
             MaterialTheme.colorScheme.onSurface
         )
         is EvoKammerEvent.GroupBudgetChanged -> Triple(
-            "💰", "[${event.groupId}] budget → ${String.format("%.1f", event.remainingBudget)}",
+            "💰", "[${event.groupId}] budget → ${String.format(Locale.US, "%.1f", event.remainingBudget)}",
             MaterialTheme.colorScheme.onSurfaceVariant
         )
         is EvoKammerEvent.ResourceNodeClaimed -> Triple(
@@ -217,7 +260,7 @@ private fun LogViewerRow(event: EvoKammerEvent) {
             MaterialTheme.colorScheme.secondary
         )
         is EvoKammerEvent.KGFactEmitted -> Triple(
-            "🧠", "[${event.groupId}] KG: ${event.subject} ${event.relation} ${event.`object`} (conf=${String.format("%.2f", event.confidence)})",
+            "🧠", "[${event.groupId}] KG: ${event.subject} ${event.relation} ${event.`object`} (conf=${String.format(Locale.US, "%.2f", event.confidence)})",
             MaterialTheme.colorScheme.tertiary
         )
         is EvoKammerEvent.ToolRegistered -> Triple(
@@ -233,8 +276,67 @@ private fun LogViewerRow(event: EvoKammerEvent) {
             MaterialTheme.colorScheme.primary
         )
         is EvoKammerEvent.StageAdvanced -> Triple(
-            "📈", "[${event.groupId}] stage ${event.fromStage}→${event.toStage} (score=${String.format("%.2f", event.checkinScore)})",
+            "📈", "[${event.groupId}] stage ${event.fromStage}→${event.toStage} (score=${String.format(Locale.US, "%.2f", event.checkinScore)})",
             MaterialTheme.colorScheme.secondary
+        )
+
+        is EvoKammerEvent.AgentSpawnFailed -> Triple(
+            "💥",
+            "[${event.groupId}] SPAWN FAILED ${event.role.name} (${event.agentId.take(8)}): ${event.error}",
+            MaterialTheme.colorScheme.error
+        )
+        is EvoKammerEvent.CriticPipelineCompleted -> Triple(
+            "🔬",
+            "[${event.groupId}] critic R${event.roundIndex}: +${event.promoted} promoted, -${event.rejected} rejected",
+            MaterialTheme.colorScheme.secondary
+        )
+        is EvoKammerEvent.EngineProgress -> Triple(
+            "⚙️",
+            "[${event.phase.uppercase()}] ${event.message}" +
+                (event.progressFraction?.let { " (${String.format(Locale.US, "%.0f", it * 100)}%)" } ?: ""),
+            MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        is EvoKammerEvent.ShuruStatus -> Triple(
+            if (event.available) "✅" else "⚠️",
+            "[SHURU] ${if (event.available) "v${event.version}" else "UNAVAILABLE"} — ${event.message}",
+            if (event.available) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+        )
+        is EvoKammerEvent.WatchdogAlert -> Triple(
+            "🚨",
+            "[${event.groupId}] WATCHDOG ${event.signalType.uppercase()}: ${event.details}",
+            MaterialTheme.colorScheme.error
+        )
+        is EvoKammerEvent.GenesisCouncilCompleted -> Triple(
+            "🌱",
+            buildString {
+                append("[GENESIS] ${if (event.usedDefault) "⚠ DEFAULTS" else "council complete"} — ")
+                append("${event.groupCount} groups, ${event.stageCount} stages, ")
+                append("${event.primordialKbCount} KB seeds, ${event.primordialFactCount} KG seeds | ")
+                if (event.modelAssignment.isNotEmpty()) {
+                    append("models: ${event.modelAssignment.entries.joinToString(" ") { "${it.key}→${it.value.substringAfterLast("/")}" }}")
+                } else append("models: defaults")
+            },
+            if (event.usedDefault) MaterialTheme.colorScheme.onSurfaceVariant
+            else MaterialTheme.colorScheme.primary
+        )
+        is EvoKammerEvent.GraderRoundStarted -> Triple(
+            "🧑‍⚖️",
+            "[GRADER ${event.graderGroupId}] R${event.roundIndex} evaluation started → " +
+                event.competingGroupIds.joinToString(", "),
+            MaterialTheme.colorScheme.tertiary
+        )
+        is EvoKammerEvent.GraderRoundCompleted -> Triple(
+            "📋",
+            buildString {
+                append("[GRADER ${event.graderGroupId}] R${event.roundIndex} complete — ")
+                append("${event.totalScoresCollected} scores collected | ")
+                append(
+                    event.scoresPerGroup.entries.joinToString("  ") { (gId, summary) ->
+                        "${gId.substringAfterLast("-")}: $summary"
+                    }
+                )
+            },
+            MaterialTheme.colorScheme.primary
         )
     }
 

@@ -17,6 +17,7 @@ dependencies {
     implementation(libs.koog.agents.core)
     implementation(libs.koog.agents.tools)
     implementation(libs.koog.prompt.executor.llms.all)
+    implementation(libs.koog.agents.features.event.handler)
 
     implementation(project(":evokammer:sandbox"))
 

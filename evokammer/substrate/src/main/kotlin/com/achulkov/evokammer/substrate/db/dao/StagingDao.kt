@@ -97,6 +97,15 @@ interface StagingDao {
     """)
     suspend fun getTotalCountForAgent(runId: String, groupId: String, agentId: String): Int
 
+    /** All submissions for a run+group regardless of status (for the Substrate Browser). */
+    @Query("""
+        SELECT * FROM staging_submissions 
+        WHERE runId = :runId AND groupId = :groupId
+        ORDER BY submittedAtMs DESC
+        LIMIT :limit
+    """)
+    suspend fun getAll(runId: String, groupId: String, limit: Int = 300): List<StagingSubmissionEntity>
+
     /** All distinct agent IDs with at least one submission in a generation. */
     @Query("""
         SELECT DISTINCT agentId FROM staging_submissions 

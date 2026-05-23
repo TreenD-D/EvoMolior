@@ -24,10 +24,20 @@ class LeakOracle(
     private val _leakEvents = MutableSharedFlow<LeakEvent>(extraBufferCapacity = 256)
 
     /** Observable stream of all leak events (sent, blocked, corrupted). */
+    @Suppress("unused")
     val leakEvents: SharedFlow<LeakEvent> = _leakEvents.asSharedFlow()
 
     // Round-scoped quota tracking: sourceGroupId -> leakCount
     private val roundQuotas = mutableMapOf<String, Int>()
+
+    /**
+     * B-6: Per-group dynamic ceilings overriding `config.maxLeaksPerGroupPerRound`.
+     *
+     * Set by `GroupCoordinator.updateMigrationCeiling()` before each round using
+     * 15% of the source group's active KB entry count. Falls back to the static
+     * `config.maxLeaksPerGroupPerRound` if no ceiling has been registered for a group.
+     */
+    private val groupCeilings = mutableMapOf<String, Int>()
 
     /**
      * Processes a [LeakPacket] from [sourceGroupId] destined for [targetGroupId].
@@ -40,8 +50,10 @@ class LeakOracle(
         packet: LeakPacket
     ): LeakPacket? {
         val usedQuota = roundQuotas.getOrDefault(sourceGroupId, 0)
-        if (usedQuota >= config.maxLeaksPerGroupPerRound) {
-            Napier.w("LeakOracle: quota exceeded for $sourceGroupId (round max=${config.maxLeaksPerGroupPerRound})")
+        // B-6: Use the dynamic ceiling if set; fall back to static config default.
+        val effectiveCeiling = groupCeilings.getOrDefault(sourceGroupId, config.maxLeaksPerGroupPerRound)
+        if (usedQuota >= effectiveCeiling) {
+            Napier.w("LeakOracle: quota exceeded for $sourceGroupId (round max=$effectiveCeiling usedQuota=$usedQuota)")
             _leakEvents.emit(LeakEvent.Blocked(sourceGroupId, targetGroupId, packet.leakId, "quota_exceeded"))
             return null
         }
@@ -70,7 +82,24 @@ class LeakOracle(
     /** Resets quotas at the start of each round. */
     fun onRoundStart() {
         roundQuotas.clear()
+        // B-6: Ceilings are NOT cleared on round start; they persist until updated by
+        // GroupCoordinator.updateMigrationCeiling() at the next round's spawn phase.
         Napier.d("LeakOracle: quotas reset for new round")
+    }
+
+    /**
+     * B-6: Sets a dynamic per-group leak ceiling for the current round.
+     *
+     * Computed by the orchestration layer as `ceil(kbEntryCount * 0.15)` (minimum: 1).
+     * Overrides `config.maxLeaksPerGroupPerRound` for [groupId] until the next call.
+     *
+     * @param groupId The source group ID whose ceiling is being updated.
+     * @param ceiling The maximum number of leak events allowed from this group per round.
+     */
+    fun patchGroupCeiling(groupId: String, ceiling: Int) {
+        val effectiveCeiling = maxOf(1, ceiling)  // always allow at least 1 leak
+        groupCeilings[groupId] = effectiveCeiling
+        Napier.d("LeakOracle: migration ceiling for $groupId set to $effectiveCeiling")
     }
 
     private fun corruptContent(original: String): String {

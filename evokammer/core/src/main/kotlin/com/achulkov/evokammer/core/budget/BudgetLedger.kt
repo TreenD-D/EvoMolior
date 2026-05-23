@@ -41,6 +41,9 @@ class BudgetLedger(
     /** Current balance (snapshot; may be outdated by time it's read under concurrency). */
     val balance: Double get() = _balance
 
+    /** True if the balance is at or below the kill floor. */
+    val isAtFloor: Boolean get() = _balance <= floor
+
     /** Immutable snapshot of the action log. */
     val actionLog: List<BudgetDeduction> get() = _actionLog.toList()
 

@@ -59,9 +59,18 @@ data class VmConfig(
     val mounts: FilesystemMountConfig,
     val network: NetworkAllowlistConfig,
     val agentJarPath: String,          // path to AgentRunner JAR
-    val bootContextJson: String        // serialised AgentBootContext
+    val bootContextJson: String,       // serialised AgentBootContext — injected as env var
+    val openRouterApiKey: String,      // injected as OPENROUTER_API_KEY env var
+    val groupProfile: String           // injected as EVOKAMMER_GROUP_PROFILE env var
 )
 ```
+
+**Boot injection contract**: the generated Shuru JSON places the boot context in
+`boot.env.EVOKAMMER_BOOT_CONTEXT` (not in `boot.stdin`). This matches `AgentRunner`'s
+expected env-var source. Using env vars instead of stdin prevents pipe-buffer issues
+with large boot contexts and makes the injection contract explicit and testable.
+
+See `VmConfigContractTest` for a unit test that verifies the generated JSON shape.
 
 ### Filesystem Mount Specification
 

@@ -17,8 +17,8 @@ import kotlinx.serialization.Serializable
  * - Only the MetaPlanner sees goal-framed content at all stages
  *
  * ### Stage advancement
- * - After each check-in, [onCheckinComplete] is called with the group's [CheckinResult]
- * - If the group meets [CheckInThreshold], their stage counter increments
+ * - After each check-in, [onCheckinComplete] is called with the group's [GroupCheckinResult]
+ * - If the group meets the `checkinThreshold`, their stage counter increments
  * - Below threshold: stage stays, leak frequency increases, no stage advance
  *
  * @param stages Ordered list of [DisclosureStage]s for this run.
@@ -65,6 +65,7 @@ class ProgressiveDisclosureEngine(
      * Returns all [DisclosureStage]s up to (and including) the group's current stage.
      * This is the full context visible to the group at any point in time.
      */
+    @Suppress("unused")
     fun visibleStages(groupId: String): List<DisclosureStage> {
         val idx = requireStageIndex(groupId)
         return stages.take(idx + 1)
@@ -75,6 +76,7 @@ class ProgressiveDisclosureEngine(
      *
      * @throws IllegalArgumentException if [groupId] was never registered.
      */
+    @Suppress("unused")
     fun goalFramedContent(groupId: String): String {
         val idx = requireStageIndex(groupId)
         return stages[idx].goalFramedContent
@@ -84,15 +86,16 @@ class ProgressiveDisclosureEngine(
      * Returns the current leak frequency multiplier for [groupId].
      * Groups that failed check-ins get a higher multiplier (more frequent leaks from neighbours).
      */
+    @Suppress("unused")
     fun leakMultiplierFor(groupId: String): Double =
         groupLeakMultipliers.getOrDefault(groupId, 1.0)
 
     /**
-     * Processes a [CheckinResult] for [groupId] and potentially advances their stage.
+     * Processes a [GroupCheckinResult] for [groupId] and potentially advances their stage.
      *
      * Side effects:
-     * - Stage increment if score >= [checkinThreshold]
-     * - Leak multiplier increase if score < [checkinThreshold]
+     * - Stage increment if score >= `checkinThreshold`
+     * - Leak multiplier increase if score < `checkinThreshold`
      * - Emits [StageAdvance] on [stageAdvances] if stage changed
      */
     suspend fun onCheckinComplete(groupId: String, checkin: GroupCheckinResult) {

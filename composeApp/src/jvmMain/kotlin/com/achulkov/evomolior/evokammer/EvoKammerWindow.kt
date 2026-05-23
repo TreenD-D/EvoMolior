@@ -25,6 +25,7 @@ import com.achulkov.evomolior.evokammer.screens.EvoKammerRunSetupScreen
 import com.achulkov.evomolior.evokammer.screens.EvoKammerScoringDashboardScreen
 import com.achulkov.evomolior.evokammer.screens.EvoKammerPostRunAnalysisScreen
 import com.achulkov.evomolior.evokammer.screens.EvoKammerSubstrateBrowserScreen
+import com.achulkov.evomolior.evokammer.screens.EvoKammerTestRunSetupScreen
 import com.achulkov.evomolior.evokammer.viewmodel.EvoKammerViewModel
 import com.achulkov.evomolior.evokammer.viewmodel.StubEvoKammerEngineService
 
@@ -34,6 +35,8 @@ import com.achulkov.evomolior.evokammer.viewmodel.StubEvoKammerEngineService
 sealed class EvoKammerRoute {
     data object Dashboard : EvoKammerRoute()
     data object RunSetup : EvoKammerRoute()
+    /** Minimal single-group diagnostic run setup — bypasses Genesis Council. */
+    data object TestRunSetup : EvoKammerRoute()
     data class RunMonitor(val runId: String) : EvoKammerRoute()
     data object LogViewer : EvoKammerRoute()
     data object ScoringDashboard : EvoKammerRoute()
@@ -78,6 +81,8 @@ fun EvoKammerApp(
                             EvoKammerDashboardScreen(viewModel = viewModel)
                         is EvoKammerRoute.RunSetup ->
                             EvoKammerRunSetupScreen(viewModel = viewModel)
+                        is EvoKammerRoute.TestRunSetup ->
+                            EvoKammerTestRunSetupScreen(viewModel = viewModel)
                         is EvoKammerRoute.RunMonitor ->
                             EvoKammerRunMonitorScreen(runId = route.runId, viewModel = viewModel)
                         is EvoKammerRoute.LogViewer ->
@@ -90,7 +95,7 @@ fun EvoKammerApp(
                         is EvoKammerRoute.SubstrateBrowser ->
                             EvoKammerSubstrateBrowserScreen(
                                 viewModel = viewModel,
-                                groupId = route.groupId,
+                                initialGroupId = route.groupId,
                                 onBack = { currentRoute = EvoKammerRoute.Dashboard }
                             )
                         is EvoKammerRoute.AgentDetail ->
