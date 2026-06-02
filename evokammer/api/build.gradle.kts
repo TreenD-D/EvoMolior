@@ -34,3 +34,16 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(libs.kotlinx.coroutines.test)
 }
+
+tasks.register<JavaExec>("scanRunLogSignatures") {
+    group = "verification"
+    description = "Scans a run log artifact for known failure signatures."
+
+    val runLogPath = providers.gradleProperty("runLogPath")
+    inputs.property("runLogPath", runLogPath)
+
+    dependsOn(tasks.named("classes"))
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.achulkov.evokammer.api.service.RunLogSignatureScannerMainKt")
+    args(runLogPath.orNull ?: error("Provide -PrunLogPath=/path/to/log"))
+}

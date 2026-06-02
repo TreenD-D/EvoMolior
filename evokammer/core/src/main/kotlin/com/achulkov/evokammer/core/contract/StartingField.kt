@@ -23,14 +23,22 @@ import kotlinx.serialization.Serializable
  * @param graderGroupCount Number of Grader Group civilisations.
  * @param rolePrompts Role-specific system prompt templates keyed by [Role].
  * @param modelAssignment LLM model assignment keyed by [Role] (OpenRouter model strings).
+ * @param modelPools Candidate OpenRouter model pools keyed by role name. The runtime draws
+ *   one model per agent spawn from the pool when present, then falls back to
+ *   [modelAssignment] for compatibility.
  * @param kgSchema JSON-serialised typed KG schema (entities, relations, constraints).
  * @param actionCosts Cost overrides per ActionType (for custom council-designed economics).
+ * @param scoreNormalization Council-defined per-dimension max-score overrides used by the
+ *   scoring pipeline when the deterministic sealed-suite evaluator normalizes raw scores.
  * @param nodeGraph JSON-serialised knowledge node graph (ResourceMapEngine seed).
  * @param primordialKb Seed KB documents to pre-populate each group's KB at genesis.
  * @param primordialKgFacts Seed KG facts to pre-populate each group's KG at genesis.
  * @param primordialTools Seed tools to pre-populate each group's Tool Registry at genesis.
+ * @param inputArtifacts User-supplied run-start artifacts available read-only to the groups.
+ * @param continuedFromRunId Optional source run that this starting field continues from.
  * @param deathNoteSchema JSON schema for the expected Death Note structure.
  * @param legacyProtocolTemplate JSON template for Legacy Protocol extraction.
+ * @param sealedTestSuiteJson JSON-serialised sealed test suite produced by CouncilSynthesis.
  * @param sealedTestSuiteHash SHA-256 hash of the sealed test suite (for integrity verification).
  * @param norms Founding norms and coordination conventions injected into all role prompts.
  * @param stageContents Constraint-framed stage disclosure content per stage index.
@@ -53,14 +61,19 @@ data class StartingField(
     val graderGroupCount: Int,
     val rolePrompts: Map<String, String>,
     val modelAssignment: Map<String, String>,
+    val modelPools: Map<String, List<String>> = emptyMap(),
     val kgSchema: String,
     val actionCosts: Map<String, Double>,
+    val scoreNormalization: Map<String, Double> = emptyMap(),
     val nodeGraph: String,
     val primordialKb: List<SeedKBDocument>,
     val primordialKgFacts: List<SeedKGFact>,
     val primordialTools: List<SeedTool>,
+    val inputArtifacts: List<RunInputArtifact> = emptyList(),
+    val continuedFromRunId: String? = null,
     val deathNoteSchema: String,
     val legacyProtocolTemplate: String,
+    val sealedTestSuiteJson: String = "",
     val sealedTestSuiteHash: String,
     val norms: String,
     val stageContents: List<String>,
@@ -96,32 +109,37 @@ data class StartingField(
             }
             val resolvedRing = resolvedProfiles.keys.toList()
             return StartingField(
-            runId = runId,
-            objective = objective,
-            globalBudgetCeiling = budgetCeiling,
-            generationCeiling = generationCeiling,
-            groupCount = resolvedGroupCount,
-            groupProfiles = resolvedProfiles,
-            ringTopology = resolvedRing,
-            checkinMilestones = listOf(10, 25, 50, 75, 100),
-            leakIntervalGenerations = 20,
-            dispatchLagGenerations = 5,
-            graderGroupCount = if (resolvedGroupCount == 1) 0 else 1,
-            rolePrompts = emptyMap(),
-            modelAssignment = emptyMap(),
-            kgSchema = "{}",
-            actionCosts = emptyMap(),
-            nodeGraph = "{}",
-            primordialKb = emptyList(),
-            primordialKgFacts = emptyList(),
-            primordialTools = emptyList(),
-            deathNoteSchema = "{}",
-            legacyProtocolTemplate = "{}",
-            sealedTestSuiteHash = "",
-            norms = "",
-            stageContents = emptyList(),
-            consistencyReport = ""
-        )
+                runId = runId,
+                objective = objective,
+                globalBudgetCeiling = budgetCeiling,
+                generationCeiling = generationCeiling,
+                groupCount = resolvedGroupCount,
+                groupProfiles = resolvedProfiles,
+                ringTopology = resolvedRing,
+                checkinMilestones = listOf(10, 25, 50, 75, 100),
+                leakIntervalGenerations = 20,
+                dispatchLagGenerations = 5,
+                graderGroupCount = if (resolvedGroupCount == 1) 0 else 1,
+                rolePrompts = emptyMap(),
+                modelAssignment = emptyMap(),
+                modelPools = emptyMap(),
+                kgSchema = "{}",
+                actionCosts = emptyMap(),
+                scoreNormalization = emptyMap(),
+                nodeGraph = "{}",
+                primordialKb = emptyList(),
+                primordialKgFacts = emptyList(),
+                primordialTools = emptyList(),
+                inputArtifacts = emptyList(),
+                continuedFromRunId = null,
+                deathNoteSchema = "{}",
+                legacyProtocolTemplate = "{}",
+                sealedTestSuiteJson = "",
+                sealedTestSuiteHash = "",
+                norms = "",
+                stageContents = emptyList(),
+                consistencyReport = ""
+            )
         }
     }
 }
@@ -155,4 +173,37 @@ data class SeedTool(
     val outputSchemaJson: String,
     val code: String,
     val domain: String
+)
+
+/** Kind of run-start input artifact provided by the user. */
+@Serializable
+enum class RunInputArtifactKind {
+    TEXT,
+    IMAGE,
+    BINARY
+}
+
+/**
+ * User-supplied artifact that is available to the groups during the run.
+ *
+ * The binary bytes are persisted separately in the run artifact directory.
+ * This contract only carries the canonical metadata and preview information.
+ *
+ * @param relativePath Path of the artifact within the uploaded bundle.
+ * @param sourceName Original file name or logical source label.
+ * @param mimeType MIME type, if known.
+ * @param sizeBytes Size in bytes.
+ * @param sha256 Lowercase hex SHA-256 hash of the persisted bytes.
+ * @param kind Artifact kind.
+ * @param textPreview Optional derived text preview for binary inputs.
+ */
+@Serializable
+data class RunInputArtifact(
+    val relativePath: String,
+    val sourceName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val sha256: String,
+    val kind: RunInputArtifactKind,
+    val textPreview: String? = null
 )

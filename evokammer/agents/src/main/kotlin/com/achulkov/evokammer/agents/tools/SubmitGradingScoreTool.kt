@@ -2,6 +2,8 @@ package com.achulkov.evokammer.agents.tools
 
 import ai.koog.agents.core.tools.SimpleTool
 import ai.koog.serialization.typeToken
+import com.achulkov.evokammer.core.budget.BudgetLedger
+import com.achulkov.evokammer.core.model.ActionType
 import com.achulkov.evokammer.core.model.DimensionScore
 import kotlinx.serialization.Serializable
 
@@ -22,6 +24,7 @@ import kotlinx.serialization.Serializable
  * @param onScoreSubmitted Callback invoked for each valid score submission.
  */
 class SubmitGradingScoreTool(
+    private val budgetLedger: BudgetLedger,
     private val graderGroupId: String,
     private val onScoreSubmitted: (targetGroupId: String, score: DimensionScore) -> Unit
 ) : SimpleTool<SubmitGradingScoreTool.Args>(
@@ -73,6 +76,9 @@ class SubmitGradingScoreTool(
             justification = args.rationale
         )
 
+        // Record the submission as meaningful activity so judge agents are not treated as idle
+        // just because score submission itself is free.
+        budgetLedger.deduct(ActionType.SUBMIT_GRADING_SCORE)
         onScoreSubmitted(args.targetGroupId, score)
 
         return "Score recorded: ${args.targetGroupId} | ${args.dimensionId} = ${

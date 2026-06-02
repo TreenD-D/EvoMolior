@@ -66,6 +66,9 @@ enum class ActionType(
      */
     WRITE_DEATH_NOTE(0.0, "Write Death Note"),
 
+    /** Submit a grading score in the judge pipeline. Free, but still meaningful work. */
+    SUBMIT_GRADING_SCORE(0.0, "Submit grading score"),
+
     /**
      * Validate a batch of staged facts against the KG schema. Zero cost per batch.
      * Encourages agents to check before submitting.

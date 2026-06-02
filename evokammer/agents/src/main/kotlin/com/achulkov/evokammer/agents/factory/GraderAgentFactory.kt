@@ -6,15 +6,19 @@ import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.core.agent.config.AIAgentConfig
 import ai.koog.agents.core.agent.singleRunStrategy
 import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.features.eventHandler.feature.EventHandler
+import ai.koog.prompt.executor.clients.openrouter.OpenRouterLLMClient
+import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
+import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.dsl.prompt as koogPrompt
-import ai.koog.prompt.executor.clients.openrouter.OpenRouterModels
-import ai.koog.prompt.executor.llms.all.simpleOpenRouterExecutor
 import ai.koog.prompt.llm.LLModel
 import ai.koog.serialization.kotlinx.KotlinxSerializer
+import com.achulkov.evokammer.core.config.ModelSelectionConfig
 import com.achulkov.evokammer.agents.runner.DeathNoteProtocol
 import com.achulkov.evokammer.agents.tools.EmitFactTool
 import com.achulkov.evokammer.agents.tools.ReadKBTool
 import com.achulkov.evokammer.agents.tools.ReadKGTool
+import com.achulkov.evokammer.agents.tools.ReadRunArtifactTool
 import com.achulkov.evokammer.agents.tools.SendMessageTool
 import com.achulkov.evokammer.agents.tools.SubmitGradingScoreTool
 import com.achulkov.evokammer.agents.tools.WriteDeathNoteTool
@@ -52,7 +56,9 @@ class GraderAgentFactory(
     private val graderGroupId: String,
     private val onScoreSubmitted: (targetGroupId: String, score: DimensionScore) -> Unit
 ) {
-    private val executor by lazy { simpleOpenRouterExecutor(openRouterApiKey) }
+    private val executor by lazy {
+        MultiLLMPromptExecutor(LLMProvider.OpenRouter to OpenRouterLLMClient(openRouterApiKey))
+    }
 
     /**
      * Creates a Grader agent for the specified role.
@@ -64,7 +70,7 @@ class GraderAgentFactory(
      * @param runObjective The run's objective (used in system prompt).
      * @param scoringDimensions All scoring dimensions for this run.
      * @param canonSnapshot Structured text export of the competing group's KB/KG.
-     * @param modelOverride Optional model override; falls back to [DEFAULT_GRADER_MODEL].
+     * @param modelOverride Optional model override; falls back to [ModelSelectionConfig.DEFAULT_GRADER_MODEL].
      * @param deathNoteProtocol Optional [DeathNoteProtocol] for in-process agent runs.
      * @param previousFindings Optional summary from a prior grader agent in this round.
      * @return A [GraderAgentContext] ready to run.
@@ -127,6 +133,7 @@ class GraderAgentFactory(
                     agentId = agentId,
                     role = role.name,
                     generation = generation,
+                    defaultWipTaskRef = null,
                     isOutlier = false
                 )
             )
@@ -138,7 +145,8 @@ class GraderAgentFactory(
                     groupId = graderGroupId,
                     agentId = agentId,
                     role = role.name,
-                    generation = generation
+                    generation = generation,
+                    defaultWipTaskRef = null
                 )
             )
             tool(
@@ -166,13 +174,14 @@ class GraderAgentFactory(
             // The primary grader output tool
             tool(
                 SubmitGradingScoreTool(
+                    budgetLedger = budgetLedger,
                     graderGroupId = graderGroupId,
                     onScoreSubmitted = onScoreSubmitted
                 )
             )
         }
 
-        val model = resolveModel(modelOverride ?: DEFAULT_GRADER_MODEL)
+        val model = resolveModel(modelOverride ?: ModelSelectionConfig.DEFAULT_GRADER_MODEL)
 
         // Use agentConfig with KotlinxSerializer so tool Args deserialization works correctly.
         // ignoreUnknownKeys=true prevents failures when LLMs pass extra fields.
@@ -183,6 +192,7 @@ class GraderAgentFactory(
                     prompt = koogPrompt("grader-agent") { system(systemPrompt) },
                     model = model,
                     maxAgentIterations = 20,
+                    responseProcessor = EmptyAssistantResponseRecoveryProcessor,
                     serializer = KotlinxSerializer(kotlinx.serialization.json.Json {
                         ignoreUnknownKeys = true
                         isLenient = true
@@ -192,12 +202,22 @@ class GraderAgentFactory(
             .toolRegistry(toolRegistry)
             .graphStrategy(singleRunStrategy())
             .maxIterations(20)  // Grader agents have simpler task; 20 is enough
+            .install(EventHandler.Feature) { config ->
+                config.onToolValidationFailed { ctx ->
+                    Napier.w("[Grader[$agentId]] aborting agent due to blocking runtime error: tool validation failed: ${ctx.message}")
+                    throw com.achulkov.evokammer.core.contract.BlockingAgentAbortException("[Grader[$agentId]] tool validation failed: ${ctx.message}")
+                }
+                config.onToolCallFailed { ctx ->
+                    Napier.w("[Grader[$agentId]] aborting agent due to blocking runtime error: tool call failed: ${ctx.message}")
+                    throw com.achulkov.evokammer.core.contract.BlockingAgentAbortException("[Grader[$agentId]] tool call failed: ${ctx.message}")
+                }
+            }
             .build()
 
         Napier.d(
             "GraderAgentFactory: created $agentId " +
             "(role=${role.name} targetGroup=$targetGroupId round=$roundIndex " +
-            "model=${modelOverride ?: DEFAULT_GRADER_MODEL})"
+            "model=${modelOverride ?: ModelSelectionConfig.DEFAULT_GRADER_MODEL})"
         )
 
         return GraderAgentContext(
@@ -207,29 +227,14 @@ class GraderAgentFactory(
             budgetLedger = budgetLedger,
             targetGroupId = targetGroupId,
             roundIndex = roundIndex,
+            systemPrompt = systemPrompt,
             taskPrompt = "Evaluate the competing group '$targetGroupId' " +
                 "based on the Canon Snapshot in your system prompt. " +
                 "Submit grading scores using submit_grading_score for each dimension."
         )
     }
 
-    private fun resolveModel(modelId: String): LLModel = when (modelId) {
-        OpenRouterModels.Claude4Sonnet.id           -> OpenRouterModels.Claude4Sonnet
-        OpenRouterModels.Claude4_5Haiku.id          -> OpenRouterModels.Claude4_5Haiku
-        OpenRouterModels.Claude4_5Sonnet.id         -> OpenRouterModels.Claude4_5Sonnet
-        OpenRouterModels.Claude3Haiku.id            -> OpenRouterModels.Claude3Haiku
-        OpenRouterModels.Gemini2_5Flash.id          -> OpenRouterModels.Gemini2_5Flash
-        OpenRouterModels.Gemini2_5FlashLite.id      -> OpenRouterModels.Gemini2_5FlashLite
-        OpenRouterModels.Gemini2_5Pro.id            -> OpenRouterModels.Gemini2_5Pro
-        OpenRouterModels.GPT4o.id                   -> OpenRouterModels.GPT4o
-        OpenRouterModels.GPT4oMini.id               -> OpenRouterModels.GPT4oMini
-        OpenRouterModels.GPT5Mini.id                -> OpenRouterModels.GPT5Mini
-        OpenRouterModels.DeepSeekV30324.id          -> OpenRouterModels.DeepSeekV30324
-        else -> {
-            Napier.w("GraderAgentFactory: unknown model '$modelId', using Gemini2.5Flash as fallback")
-            OpenRouterModels.Gemini2_5Flash
-        }
-    }
+    private fun resolveModel(modelId: String): LLModel = OpenRouterModelResolver.resolve(modelId)
 
     /**
      * Creates a grader agent for the **criteria development phase** (runs DURING the round).
@@ -293,6 +298,12 @@ class GraderAgentFactory(
             tool(ReadKBTool(graderDb.knowledgeBaseDao(), runId, graderGroupId))
             tool(ReadKGTool(graderDb.knowledgeGraphFactDao(), runId, graderGroupId))
             tool(
+                ReadRunArtifactTool(
+                    artifactsMountPath = null,
+                    inputArtifacts = emptyList()
+                )
+            )
+            tool(
                 WriteStagingTool(
                     stagingDao = graderDb.stagingDao(),
                     budgetLedger = budgetLedger,
@@ -301,6 +312,7 @@ class GraderAgentFactory(
                     agentId = agentId,
                     role = role.name,
                     generation = generation,
+                    defaultWipTaskRef = null,
                     isOutlier = false
                 )
             )
@@ -317,7 +329,7 @@ class GraderAgentFactory(
             )
         }
 
-        val model = resolveModel(modelOverride ?: DEFAULT_GRADER_MODEL)
+        val model = resolveModel(modelOverride ?: ModelSelectionConfig.DEFAULT_GRADER_MODEL)
         val agent: AIAgent<String, String> = AIAgent.builder()
             .promptExecutor(executor)
             .agentConfig(
@@ -325,6 +337,7 @@ class GraderAgentFactory(
                     prompt = koogPrompt("criteria-agent") { system(systemPrompt) },
                     model = model,
                     maxAgentIterations = 15,
+                    responseProcessor = EmptyAssistantResponseRecoveryProcessor,
                     serializer = KotlinxSerializer(kotlinx.serialization.json.Json {
                         ignoreUnknownKeys = true
                         isLenient = true
@@ -338,7 +351,7 @@ class GraderAgentFactory(
 
         Napier.d(
             "GraderAgentFactory: created criteria agent $agentId " +
-            "(role=${role.name} round=$roundIndex model=${modelOverride ?: DEFAULT_GRADER_MODEL})"
+            "(role=${role.name} round=$roundIndex model=${modelOverride ?: ModelSelectionConfig.DEFAULT_GRADER_MODEL})"
         )
 
         return GraderAgentContext(
@@ -348,6 +361,7 @@ class GraderAgentFactory(
             budgetLedger = budgetLedger,
             targetGroupId = "criteria-phase",
             roundIndex = roundIndex,
+            systemPrompt = systemPrompt,
             taskPrompt = "Develop detailed scoring criteria for all dimensions as described in your system prompt. " +
                 "Write each dimension's criteria to staging using write_staging(type='PLAN_UPDATE', content=...)."
         )
@@ -412,6 +426,12 @@ class GraderAgentFactory(
             tool(ReadKBTool(graderDb.knowledgeBaseDao(), runId, graderGroupId))
             tool(ReadKGTool(graderDb.knowledgeGraphFactDao(), runId, graderGroupId))
             tool(
+                ReadRunArtifactTool(
+                    artifactsMountPath = null,
+                    inputArtifacts = emptyList()
+                )
+            )
+            tool(
                 WriteDeathNoteTool(
                     stagingDao = graderDb.stagingDao(),
                     runId = runId,
@@ -424,13 +444,14 @@ class GraderAgentFactory(
             )
             tool(
                 SubmitGradingScoreTool(
+                    budgetLedger = budgetLedger,
                     graderGroupId = graderGroupId,
                     onScoreSubmitted = onScoreSubmitted
                 )
             )
         }
 
-        val model = resolveModel(modelOverride ?: DEFAULT_GRADER_MODEL)
+        val model = resolveModel(modelOverride ?: ModelSelectionConfig.DEFAULT_GRADER_MODEL)
         val agent: AIAgent<String, String> = AIAgent.builder()
             .promptExecutor(executor)
             .agentConfig(
@@ -438,6 +459,7 @@ class GraderAgentFactory(
                     prompt = koogPrompt("round-judge") { system(systemPrompt) },
                     model = model,
                     maxAgentIterations = 30,
+                    responseProcessor = EmptyAssistantResponseRecoveryProcessor,
                     serializer = KotlinxSerializer(kotlinx.serialization.json.Json {
                         ignoreUnknownKeys = true
                         isLenient = true
@@ -451,7 +473,7 @@ class GraderAgentFactory(
 
         Napier.d(
             "GraderAgentFactory: created RoundJudge $agentId " +
-            "(round=$roundIndex groups=${allGroupSnapshots.keys} model=${modelOverride ?: DEFAULT_GRADER_MODEL})"
+            "(round=$roundIndex groups=${allGroupSnapshots.keys} model=${modelOverride ?: ModelSelectionConfig.DEFAULT_GRADER_MODEL})"
         )
 
         val groupList = allGroupSnapshots.keys.joinToString(", ")
@@ -462,15 +484,12 @@ class GraderAgentFactory(
             budgetLedger = budgetLedger,
             targetGroupId = "all-groups",
             roundIndex = roundIndex,
+            systemPrompt = systemPrompt,
             taskPrompt = "Score all competing groups using the criteria and canon snapshots in your system prompt. " +
                 "Call submit_grading_score for every group-dimension combination. Groups: $groupList"
         )
     }
 
-    companion object {
-        /** Default model for grader agents — Gemini 2.5 Flash is fast and has a large context window. */
-        const val DEFAULT_GRADER_MODEL = "google/gemini-2.5-flash"
-    }
 }
 
 /**
@@ -482,6 +501,8 @@ class GraderAgentFactory(
  * @param budgetLedger The agent's budget ledger.
  * @param targetGroupId The competing group this agent is evaluating.
  * @param roundIndex The round being evaluated.
+ * @param systemPrompt The rendered system prompt injected into the Koog agent.
+ * @param taskPrompt The task prompt passed to [AIAgent.run] when this agent is executed.
  */
 data class GraderAgentContext(
     val agentId: String,
@@ -490,9 +511,14 @@ data class GraderAgentContext(
     val budgetLedger: BudgetLedger,
     val targetGroupId: String,
     val roundIndex: Int,
+    val systemPrompt: String,
     /**
      * The task prompt passed to [AIAgent.run] when this agent is executed.
      * Defaults to a generic grader instruction if not set by the factory.
      */
     val taskPrompt: String = "Perform your evaluation task as described in your system prompt."
-)
+) {
+    init {
+        require(systemPrompt.isNotBlank()) { "GraderAgentContext.systemPrompt must not be blank" }
+    }
+}

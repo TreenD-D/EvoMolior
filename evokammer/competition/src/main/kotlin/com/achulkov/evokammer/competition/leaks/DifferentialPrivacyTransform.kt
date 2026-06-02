@@ -3,11 +3,16 @@ package com.achulkov.evokammer.competition.leaks
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.core.agent.singleRunStrategy
 import ai.koog.agents.core.tools.ToolRegistry
-import ai.koog.prompt.executor.clients.openrouter.OpenRouterModels
-import ai.koog.prompt.executor.llms.all.simpleOpenRouterExecutor
-import ai.koog.prompt.llm.LLMCapability
-import ai.koog.prompt.llm.LLMProvider
+import ai.koog.agents.features.eventHandler.feature.EventHandler
+import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.llm.LLModel
+import com.achulkov.evokammer.agents.factory.EmptyAssistantResponseRecoveryProcessor
+import com.achulkov.evokammer.agents.factory.installBlockingFailurePolicy
+import com.achulkov.evokammer.agents.factory.runWithOpenRouterProviderRetry
+import com.achulkov.evokammer.core.contract.BlockingAgentAbortException
+import com.achulkov.evokammer.agents.factory.OpenRouterModelResolver
+import com.achulkov.evokammer.agents.factory.createOpenRouterPromptExecutor
+import com.achulkov.evokammer.core.config.ModelSelectionConfig
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -33,11 +38,12 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 class DifferentialPrivacyTransform(
     private val openRouterApiKey: String,
-    private val modelId: String = "google/gemini-2.5-flash",
-    private val timeoutMs: Long = 10_000L
+    private val modelId: String = ModelSelectionConfig.DEFAULT_LEAK_TRANSFORM_MODEL,
+    private val timeoutMs: Long = 10_000L,
+    private val promptExecutor: PromptExecutor? = null
 ) {
 
-    private val executor by lazy { simpleOpenRouterExecutor(openRouterApiKey) }
+    private val executor by lazy { promptExecutor ?: createOpenRouterPromptExecutor(openRouterApiKey) }
 
     /**
      * Transforms [rawContent] so that it cannot be traced back to the source group.
@@ -61,24 +67,33 @@ class DifferentialPrivacyTransform(
                     .promptExecutor(executor)
                     .llmModel(model)
                     .systemPrompt(systemPrompt)
+                    .responseProcessor(EmptyAssistantResponseRecoveryProcessor)
                     .toolRegistry(ToolRegistry.EMPTY)
-                    .maxIterations(1)
+                    .maxIterations(3)
                     .graphStrategy(singleRunStrategy())
+                    .install(EventHandler.Feature) { config ->
+                        config.installBlockingFailurePolicy("DifferentialPrivacyTransform")
+                    }
                     .build()
 
-                val result = agent.run(
-                    """
-                    Apply the differential privacy transform to the following knowledge fragment.
-                    
-                    DOMAIN: $domain
-                    
-                    ORIGINAL CONTENT:
-                    $rawContent
-                    
-                    Return ONLY the transformed content. No explanation. No preamble.
-                    """.trimIndent()
-                )
+                val result = runWithOpenRouterProviderRetry("DifferentialPrivacyTransform") {
+                    agent.run(
+                        """
+                        Apply the differential privacy transform to the following knowledge fragment.
+                        
+                        DOMAIN: $domain
+                        
+                        ORIGINAL CONTENT:
+                        $rawContent
+                        
+                        Return ONLY the transformed content. No explanation. No preamble.
+                        """.trimIndent()
+                    )
+                }
                 result?.trim() ?: rawContent
+            } catch (e: BlockingAgentAbortException) {
+                Napier.e(e) { "DifferentialPrivacyTransform: blocking runtime error" }
+                throw e
             } catch (e: Exception) {
                 Napier.w("DifferentialPrivacyTransform: LLM transform failed, returning original: ${e.message}")
                 rawContent
@@ -107,23 +122,5 @@ class DifferentialPrivacyTransform(
         10. Output plain text only — no JSON, no code blocks, no markdown.
     """.trimIndent()
 
-    private fun resolveModel(id: String): LLModel = when {
-        id.contains("gemini-2.5-flash-lite") -> OpenRouterModels.Gemini2_5FlashLite
-        id.contains("gemini-2.5-flash")      -> OpenRouterModels.Gemini2_5Flash
-        id.contains("gemini-2.5-pro")        -> OpenRouterModels.Gemini2_5Pro
-        id.contains("gpt-4o-mini")           -> OpenRouterModels.GPT4oMini
-        id.contains("claude-3-5-sonnet")     -> OpenRouterModels.Claude3_5Sonnet
-        id.contains("claude-sonnet-4")       -> OpenRouterModels.Claude4Sonnet
-        // Fallback with standard capabilities so Koog accepts the model
-        else -> LLModel(
-            provider = LLMProvider.OpenRouter,
-            id = id,
-            capabilities = listOf(
-                LLMCapability.Temperature,
-                LLMCapability.Speculation,
-                LLMCapability.Tools,
-                LLMCapability.Completion
-            )
-        )
-    }
+    private fun resolveModel(id: String): LLModel = OpenRouterModelResolver.resolve(id)
 }

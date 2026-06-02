@@ -2,6 +2,7 @@ package com.achulkov.evokammer.api.model
 
 import com.achulkov.evokammer.core.model.GroupProfileType
 import com.achulkov.evokammer.core.model.ScoringDimension
+import com.achulkov.evokammer.core.contract.RunInputArtifactKind
 import kotlinx.serialization.Serializable
 
 /**
@@ -19,6 +20,9 @@ import kotlinx.serialization.Serializable
  * @param scoringDimensions Dimensions used by Grader agents.
  * @param openRouterApiKey API key for OpenRouter (used by Koog executors).
  * @param modelOverrides Optional per-role model overrides (role name → model string).
+ * @param contextArtifacts Uploaded run-start context artifacts.
+ * @param continuationFromRunId Optional completed run to continue from by reusing its sealed
+ *   `StartingField` snapshot as the baseline for this fresh run.
  * @param isTestRun When true, enables a minimal single-group diagnostic run:
  *   - groupCount = 1 is allowed
  *   - Genesis Council is bypassed (defaults used)
@@ -38,6 +42,8 @@ data class RunConfig(
     val scoringDimensions: List<ScoringDimension>,
     val openRouterApiKey: String,
     val modelOverrides: Map<String, String> = emptyMap(),
+    val contextArtifacts: List<RunInputArtifactUpload> = emptyList(),
+    val continuationFromRunId: String? = null,
     /** True for a minimal diagnostic run: 1 group, no Genesis Council, fixed budget. */
     val isTestRun: Boolean = false,
     /**
@@ -58,3 +64,26 @@ data class RunConfig(
         require(scoringDimensions.isNotEmpty()) { "At least one scoring dimension is required" }
     }
 }
+
+/**
+ * Uploaded run-start artifact bytes encoded for transport over JSON or multipart bridging.
+ *
+ * The engine persists the decoded bytes to the run artifact directory and converts this
+ * transport object into a stable [RunInputArtifact] metadata record.
+ *
+ * @param relativePath Path of this artifact within the uploaded bundle.
+ * @param sourceName Original source filename or label.
+ * @param mimeType MIME type, if known.
+ * @param contentBase64 Base64-encoded bytes of the uploaded artifact.
+ * @param kind Artifact kind.
+ * @param textPreview Optional text preview supplied by the UI or upload parser.
+ */
+@Serializable
+data class RunInputArtifactUpload(
+    val relativePath: String,
+    val sourceName: String,
+    val mimeType: String,
+    val contentBase64: String,
+    val kind: RunInputArtifactKind = RunInputArtifactKind.TEXT,
+    val textPreview: String? = null
+)

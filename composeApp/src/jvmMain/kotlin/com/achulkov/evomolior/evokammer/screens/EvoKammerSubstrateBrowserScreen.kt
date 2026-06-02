@@ -93,6 +93,7 @@ private val DATE_FMT = SimpleDateFormat("MMM d, HH:mm", Locale.ROOT)
  * Tabs: KB Docs | KG Facts | Tools | Staging | Event Log | WIP Tasks | Dead Ends | Legacy | Trust | KG Schema
  *
  * @param viewModel The shared EvoKammer view model.
+ * @param initialRunId Optional run to pre-select when the screen opens.
  * @param initialGroupId Optional group to pre-select when the screen opens.
  * @param onBack Back navigation callback.
  */
@@ -100,6 +101,7 @@ private val DATE_FMT = SimpleDateFormat("MMM d, HH:mm", Locale.ROOT)
 @Composable
 fun EvoKammerSubstrateBrowserScreen(
     viewModel: EvoKammerViewModel,
+    initialRunId: String? = null,
     initialGroupId: String? = null,
     onBack: () -> Unit
 ) {
@@ -113,8 +115,12 @@ fun EvoKammerSubstrateBrowserScreen(
     var searchQuery by remember { mutableStateOf("") }
     var runDropdownOpen by remember { mutableStateOf(false) }
 
-    // Apply initialGroupId on first composition if provided
-    LaunchedEffect(initialGroupId, availableRuns) {
+    // Apply the requested historical run/group when the browser opens.
+    LaunchedEffect(initialRunId, initialGroupId, availableRuns) {
+        if (initialRunId != null && selectedRunId != initialRunId) {
+            viewModel.selectBrowserRun(initialRunId)
+            return@LaunchedEffect
+        }
         if (initialGroupId != null && selectedGroupId != initialGroupId) {
             viewModel.selectBrowserGroup(initialGroupId)
         }

@@ -140,7 +140,14 @@ fun EvoKammerRunMonitorScreen(
                 Spacer(Modifier.width(8.dp))
 
                 TextButton(
-                    onClick = { navigate(EvoKammerRoute.SubstrateBrowser(selectedGroupId)) }
+                    onClick = {
+                        navigate(
+                            EvoKammerRoute.SubstrateBrowser(
+                                runId = runId,
+                                groupId = selectedGroupId
+                            )
+                        )
+                    }
                 ) {
                     Text("Substrate →")
                 }

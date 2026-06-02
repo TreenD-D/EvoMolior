@@ -1,6 +1,8 @@
 package com.achulkov.evokammer.agents.runner
 
 import com.achulkov.evokammer.agents.factory.EvoKammerAgentFactory
+import com.achulkov.evokammer.agents.factory.requireProductiveAgentOutcome
+import com.achulkov.evokammer.agents.factory.runWithOpenRouterProviderRetry
 import com.achulkov.evokammer.core.budget.BudgetConfig
 import com.achulkov.evokammer.core.contract.AgentBootContext
 import com.achulkov.evokammer.core.model.GroupProfile
@@ -80,9 +82,34 @@ class AgentRunner(
         Napier.i("AgentRunner: ${bootContext.agentId} budget=${agentContext.budgetLedger.balance} floor=${agentContext.budgetLedger.floor}")
 
         // 5. Run the Koog agent loop
+        var finalResult: String? = null
         try {
-            val result = agentContext.agent.run(bootContext.rolePrompt)
-            Napier.i("AgentRunner: ${bootContext.agentId} completed. result=${result.take(200)}")
+            finalResult = runWithOpenRouterProviderRetry("AgentRunner[${bootContext.agentId}]") {
+                agentContext.agent.run(bootContext.rolePrompt)
+            }
+            requireProductiveAgentOutcome("AgentRunner[${bootContext.agentId}]", finalResult!!, agentContext.budgetLedger)
+            val actionCount = agentContext.budgetLedger.snapshot().actionLog.size
+            if (actionCount == 0) {
+                factory.writeEmergencyDeathNote(
+                    bootContext = bootContext,
+                    reason = "WarningOnlyNoProgressCompletion",
+                    errorMessage = "agent completed without tool/write actions",
+                    finalResult = finalResult,
+                    noteKind = "warning-only"
+                )
+                deathNoteProtocol.markDeathNoteWritten()
+            }
+            Napier.i("AgentRunner: ${bootContext.agentId} completed. result=${finalResult!!.take(200)}")
+        } catch (e: com.achulkov.evokammer.core.contract.BlockingAgentAbortException) {
+            Napier.e("AgentRunner: ${bootContext.agentId} agent error: ${e.message}", e)
+            if (!deathNoteProtocol.isWritten) {
+                factory.writeEmergencyDeathNote(
+                    bootContext = bootContext,
+                    reason = e.javaClass.simpleName,
+                    errorMessage = e.message ?: "unknown error",
+                    finalResult = finalResult
+                )
+            }
         } catch (e: Exception) {
             Napier.e("AgentRunner: ${bootContext.agentId} agent error: ${e.message}", e)
             // Write an emergency death note only if the agent didn't already write its own.
@@ -90,7 +117,8 @@ class AgentRunner(
                 factory.writeEmergencyDeathNote(
                     bootContext = bootContext,
                     reason = e.javaClass.simpleName,
-                    errorMessage = e.message ?: "unknown error"
+                    errorMessage = e.message ?: "unknown error",
+                    finalResult = finalResult
                 )
             }
         }

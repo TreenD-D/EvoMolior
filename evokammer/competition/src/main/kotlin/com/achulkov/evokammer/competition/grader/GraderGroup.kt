@@ -28,6 +28,7 @@ class GraderGroup(dimensions: List<ScoringDimension>) {
     /**
      * Records a batch of [DimensionScore]s submitted by a Grader agent for [groupId] in [roundIndex].
      */
+    @Synchronized
     fun submit(groupId: String, roundIndex: Int, scores: List<DimensionScore>) {
         val key = "${groupId}::${roundIndex}"
         submissions.getOrPut(key) { mutableListOf() }.addAll(scores)
@@ -39,6 +40,7 @@ class GraderGroup(dimensions: List<ScoringDimension>) {
      *
      * @param groupIds All competing group IDs (NOT including the grader group itself).
      */
+    @Synchronized
     fun computeRoundScores(groupIds: List<String>, roundIndex: Int): List<RoundScore> {
         val raw = groupIds.map { groupId ->
             val key = "${groupId}::${roundIndex}"
@@ -54,6 +56,7 @@ class GraderGroup(dimensions: List<ScoringDimension>) {
     /**
      * Computes a [GradingResult] for [roundIndex].
      */
+    @Synchronized
     fun computeGradingResult(groupIds: List<String>, roundIndex: Int): GradingResult {
         val scores = computeRoundScores(groupIds, roundIndex)
         val winner = scores.minByOrNull { it.rank }?.groupId ?: groupIds.first()
@@ -61,6 +64,7 @@ class GraderGroup(dimensions: List<ScoringDimension>) {
     }
 
     /** Clears submissions for a completed round (memory management). */
+    @Synchronized
     fun clearRound(roundIndex: Int) {
         val keysToRemove = submissions.keys.filter { it.endsWith("::$roundIndex") }
         keysToRemove.forEach { submissions.remove(it) }

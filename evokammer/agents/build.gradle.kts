@@ -13,11 +13,8 @@ dependencies {
     api(project(":evokammer:substrate"))
 
     // Koog agent framework (JetBrains)
-    implementation(libs.koog.agents)
-    implementation(libs.koog.agents.core)
-    implementation(libs.koog.agents.tools)
-    implementation(libs.koog.prompt.executor.llms.all)
-    implementation(libs.koog.agents.features.event.handler)
+    implementation(libs.koog)
+    implementation(libs.koog.prompt.executor.openrouter.client)
 
     implementation(project(":evokammer:sandbox"))
 

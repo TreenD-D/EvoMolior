@@ -24,6 +24,7 @@ class GraderGroupManager(
      * @param graderGroupId Grader civilisation identifier.
      * @return Backing [GraderGroup] instance.
      */
+    @Synchronized
     fun group(graderGroupId: String): GraderGroup =
         graderGroups.getOrPut(graderGroupId) { GraderGroup(dimensions) }
     /**
@@ -34,6 +35,7 @@ class GraderGroupManager(
      * @param roundIndex Round index.
      * @param scores Dimension scores produced by grader agents.
      */
+    @Synchronized
     fun submitScores(
         graderGroupId: String,
         targetGroupId: String,
@@ -47,6 +49,7 @@ class GraderGroupManager(
      *
      * @param sheet Grading sheet to register.
      */
+    @Synchronized
     fun registerSheet(sheet: GradingSheet) {
         metaJudge.registerSheet(sheet)
     }
@@ -57,6 +60,7 @@ class GraderGroupManager(
      * @param roundIndex Round index.
      * @return Final [GradingResult] for the round.
      */
+    @Synchronized
     fun computeRoundResult(competingGroupIds: List<String>, roundIndex: Int): GradingResult {
         // Ensure a verdict exists (consensus/arbitration side effects + validation).
         val verdict = metaJudge.verdict(roundIndex)
@@ -84,6 +88,7 @@ class GraderGroupManager(
      *
      * @param roundIndex Round index to clear.
      */
+    @Synchronized
     fun clearRound(roundIndex: Int) {
         graderGroups.values.forEach { it.clearRound(roundIndex) }
         metaJudge.clearRound(roundIndex)

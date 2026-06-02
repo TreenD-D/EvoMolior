@@ -7,6 +7,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -16,6 +17,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.achulkov.evomolior.designsystem.theme.AppTheme
+import com.achulkov.evokammer.api.model.RunConfig
 import com.achulkov.evokammer.core.model.Role
 import com.achulkov.evomolior.evokammer.screens.EvoKammerAgentDetailScreen
 import com.achulkov.evomolior.evokammer.screens.EvoKammerDashboardScreen
@@ -38,9 +40,9 @@ sealed class EvoKammerRoute {
     /** Minimal single-group diagnostic run setup — bypasses Genesis Council. */
     data object TestRunSetup : EvoKammerRoute()
     data class RunMonitor(val runId: String) : EvoKammerRoute()
-    data object LogViewer : EvoKammerRoute()
+    data class LogViewer(val runId: String? = null) : EvoKammerRoute()
     data object ScoringDashboard : EvoKammerRoute()
-    data class SubstrateBrowser(val groupId: String? = null) : EvoKammerRoute()
+    data class SubstrateBrowser(val runId: String? = null, val groupId: String? = null) : EvoKammerRoute()
     data class AgentDetail(val agentId: String, val groupId: String, val role: Role) : EvoKammerRoute()
     data class PostRunAnalysis(val runId: String) : EvoKammerRoute()
 }
@@ -63,9 +65,30 @@ val LocalEvoKammerNavigator = compositionLocalOf<(EvoKammerRoute) -> Unit> {
  */
 @Composable
 fun EvoKammerApp(
-    viewModel: EvoKammerViewModel = remember { EvoKammerViewModel(StubEvoKammerEngineService()) }
+    viewModel: EvoKammerViewModel = remember { EvoKammerViewModel(StubEvoKammerEngineService()) },
+    autoReplayConfig: RunConfig? = null,
+    onAutoReplayCompleted: (() -> Unit)? = null
 ) {
     var currentRoute by remember { mutableStateOf<EvoKammerRoute>(EvoKammerRoute.Dashboard) }
+    var autoReplayCompleted by remember(autoReplayConfig?.runId) { mutableStateOf(false) }
+
+    LaunchedEffect(autoReplayConfig?.runId) {
+        val config = autoReplayConfig ?: return@LaunchedEffect
+        println("AUTO_REPLAY_START runId=${config.runId}")
+        io.github.aakira.napier.Napier.i("EvoKammerApp: auto replay enabled runId=${config.runId}")
+        viewModel.startRun(config)
+        viewModel.engineState.collect { state ->
+            val terminalRunFinished =
+                state.activeRunId == null &&
+                    (state.status.name == "COMPLETED" || state.status.name == "IDLE")
+            if (!autoReplayCompleted && terminalRunFinished) {
+                autoReplayCompleted = true
+                println("AUTO_REPLAY_COMPLETE runId=${config.runId}")
+                io.github.aakira.napier.Napier.i("EvoKammerApp: auto replay completed runId=${config.runId}")
+                onAutoReplayCompleted?.invoke()
+            }
+        }
+    }
 
     AppTheme {
         Surface(
@@ -86,7 +109,10 @@ fun EvoKammerApp(
                         is EvoKammerRoute.RunMonitor ->
                             EvoKammerRunMonitorScreen(runId = route.runId, viewModel = viewModel)
                         is EvoKammerRoute.LogViewer ->
-                            EvoKammerLogViewerScreen(viewModel = viewModel)
+                            EvoKammerLogViewerScreen(
+                                viewModel = viewModel,
+                                archivedRunId = route.runId
+                            )
                         is EvoKammerRoute.ScoringDashboard ->
                             EvoKammerScoringDashboardScreen(
                                 viewModel = viewModel,
@@ -95,6 +121,7 @@ fun EvoKammerApp(
                         is EvoKammerRoute.SubstrateBrowser ->
                             EvoKammerSubstrateBrowserScreen(
                                 viewModel = viewModel,
+                                initialRunId = route.runId,
                                 initialGroupId = route.groupId,
                                 onBack = { currentRoute = EvoKammerRoute.Dashboard }
                             )
@@ -106,7 +133,10 @@ fun EvoKammerApp(
                                 viewModel = viewModel
                             )
                         is EvoKammerRoute.PostRunAnalysis ->
-                            EvoKammerPostRunAnalysisScreen(viewModel = viewModel)
+                            EvoKammerPostRunAnalysisScreen(
+                                viewModel = viewModel,
+                                runId = route.runId
+                            )
                     }
                 }
             }

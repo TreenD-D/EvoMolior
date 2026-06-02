@@ -84,11 +84,17 @@ class BlindSubmissionGate(
      *
      * @param forceReveal If true, reveals even if not all groups have submitted (e.g. on timeout).
      */
-    suspend fun closeAndReveal(forceReveal: Boolean = false) {
+    suspend fun closeAndReveal(forceReveal: Boolean = false): RevealedScores {
         check(gateOpen) { "BlindSubmissionGate: gate is not open, cannot reveal" }
         if (!forceReveal && !allSubmitted()) {
             Napier.w("BlindSubmissionGate: closeAndReveal called before all groups submitted — force=$forceReveal")
-            if (!forceReveal) return
+            return RevealedScores(
+                roundIndex = currentRoundIndex,
+                scores = emptyMap(),
+                revealedAt = System.currentTimeMillis(),
+                wasForced = false,
+                missingGroupIds = groupIds.filter { it !in pendingScores }
+            )
         }
 
         gateOpen = false
@@ -117,6 +123,7 @@ class BlindSubmissionGate(
         _revealedScores.emit(revealed)
         Napier.i("BlindSubmissionGate: gate CLOSED for round $currentRoundIndex — scores revealed (forced=$forceReveal)")
         pendingScores.clear()
+        return revealed
     }
 }
 

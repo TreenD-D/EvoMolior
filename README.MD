@@ -170,6 +170,7 @@ Manages the evolutionary run lifecycle:
 ```
 
 This launches both the main EvoMolior app and the EvoKammer control panel window.
+On macOS, the desktop launcher currently runs with `-Xint` because Corretto 17.0.7 has been aborting in HotSpot compiler threads for this app. Upgrade the runtime before removing that workaround.
 
 ### Build a distributable
 

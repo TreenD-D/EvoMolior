@@ -18,10 +18,7 @@ dependencies {
     api(project(":evokammer:orchestration"))
 
     // Koog (for grader agents, privacy transform agent)
-    implementation(libs.koog.agents)
-    implementation(libs.koog.agents.core)
-    implementation(libs.koog.agents.tools)
-    implementation(libs.koog.prompt.executor.llms.all)
+    implementation(libs.koog)
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.koin.core)

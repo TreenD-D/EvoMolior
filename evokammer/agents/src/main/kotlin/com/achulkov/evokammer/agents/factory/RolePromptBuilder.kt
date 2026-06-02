@@ -37,6 +37,9 @@ object RolePromptBuilder {
             appendLine("=== YOUR ASSIGNED TASK ===")
             appendLine("Task ID: ${claim.nodeId}")
             appendLine("Task: ${claim.description}")
+            appendLine(
+                "When you use write_staging, emit_fact, or emit_constraint for this task, include wipTaskRef=${claim.nodeId}."
+            )
             appendLine()
         } else if (bootContext.role == Role.Outlier) {
             appendLine("=== YOUR ROLE: OUTLIER ===")
@@ -136,6 +139,57 @@ object RolePromptBuilder {
         appendLine(GRADER_TOOLS_REMINDER)
     }
 
+    /**
+     * Builds a system prompt for the round-end submission summariser.
+     *
+     * The summariser is a normal group agent spawned briefly at the end of each round so the
+     * group itself produces a concise, human-checkable submission summary for graders.
+     *
+     * @param runObjective The run objective.
+     * @param roundIndex The round being summarised.
+     * @param groupId The group that owns the summary.
+     * @return The complete system prompt.
+     */
+    fun buildRoundSubmissionSummary(
+        runObjective: String,
+        roundIndex: Int,
+        groupId: String
+    ): String = buildString {
+        appendLine("""
+            You are the Round Submission Summariser for group '$groupId'.
+
+            Your job is to produce a concise, evidence-based summary of what this group
+            accomplished during round ${roundIndex + 1}. The summary will be read by the grader
+            and by the human operator after the run, so make it concrete and checkable.
+
+            Required output:
+            - First, write a staging entry with type="PLAN_UPDATE".
+            - The content must begin with the exact marker: ROUND SUBMISSION SUMMARY
+            - Include:
+              1. the most important work completed this round,
+              2. any notable KB/KG/tool/WIP artifacts,
+              3. blockers or unresolved items,
+              4. what the grader should inspect first.
+            - Keep it concise: roughly 5-12 bullet lines or short paragraphs.
+            - Then finish with write_death_note as your final action.
+        """.trimIndent())
+        appendLine()
+        appendLine("=== RUN OBJECTIVE ===")
+        appendLine(runObjective)
+        appendLine()
+        appendLine("=== ROUND TO SUMMARISE ===")
+        appendLine(roundIndex + 1)
+        appendLine()
+        appendLine("=== GRADER TOOLS REMINDER ===")
+        appendLine("""
+            Available tools:
+            - read_kb(query, domain?, maxResults?): read your own group's KB
+            - read_kg(subject?, relation?, obj?, maxResults?): read your own group's KG
+            - write_staging(type, content, wipTaskRef?, speculative?): write the round summary
+            - write_death_note(summary, whatWorked, whatFailed, recommendations): mandatory final action
+        """.trimIndent())
+    }
+
     private val GRADER_RESEARCHER_PROMPT = """
         You are a GraderResearcher — the first evaluator in a three-stage evaluation pipeline.
         
@@ -210,6 +264,7 @@ object RolePromptBuilder {
         WRITE TOOLS (cost budget — optional, for methodology documentation):
         - write_staging(type, content, wipTaskRef?, speculative?): Document evaluation methodology
         - emit_fact(subject, relation, obj, confidence, domain, provenance?): Record grading insight to KG
+          If you are working on an assigned task, include the task ID as wipTaskRef.
         
         MANDATORY FINAL ACTION:
         - write_death_note(summary, whatWorked, whatFailed, recommendations): MUST be your last action
@@ -250,7 +305,7 @@ object RolePromptBuilder {
         appendLine()
         if (previousCriteria != null) {
             appendLine("=== PRIOR CRITERIA AGENT OUTPUT (refine and extend, do not repeat) ===")
-            appendLine(previousCriteria.take(4_000))
+            appendLine(previousCriteria.take(1_500))
             appendLine()
         }
         appendLine("=== YOUR TASK ===")
@@ -298,12 +353,12 @@ object RolePromptBuilder {
         appendLine(dimensionDescriptions)
         appendLine()
         appendLine("=== GRADING CRITERIA (developed by criteria agents this round) ===")
-        appendLine(criteriaContext.take(6_000))
+        appendLine(criteriaContext.take(2_500))
         appendLine()
         appendLine("=== COMPETING GROUP CANON SNAPSHOTS (Round $roundIndex) ===")
         for ((groupId, snapshot) in allGroupSnapshots) {
             appendLine("--- GROUP: $groupId ---")
-            appendLine(snapshot.take(4_000))
+            appendLine(snapshot.take(2_000))
             appendLine()
         }
         appendLine("=== YOUR TASK ===")
@@ -392,6 +447,7 @@ object RolePromptBuilder {
         READ TOOLS (free):
         - read_kb(query, domain?, maxResults?): Keyword search Knowledge Base — FREE
         - search_kb(query, domain?, maxResults?): Semantic/vector search Knowledge Base — costs 0.1
+        - read_run_artifact(relativePath?, listOnly?): Read uploaded run-start context artifacts and compact summaries — FREE
         - read_kg(subject?, relation?, obj?, maxResults?, minTrustScore?): Query KG typed triples — FREE
           NOTE: use "obj" not "object". Use "*" or "" as wildcard. Returns facts with trust scores.
         - query_pattern(subject?, relation?, obj?, maxResults?, minTrustScore?): Pattern traversal over KG — costs 0.5
@@ -405,6 +461,7 @@ object RolePromptBuilder {
         - write_staging(type, content, wipTaskRef?, speculative?): Submit work for Critic review — costs 1
           Submission types: DOC, TOOL, FACT, PLAN_UPDATE, DISPATCH
         - emit_constraint(constraintId, description, appliesToType, condition, violationPenalty?, rationale?): Propose KG constraint — costs 2
+          If you are working on an assigned task, include the task ID as wipTaskRef via the staging write path.
         - execute_tool(toolName, argsJson, toolVersion?): Execute a registered tool — costs 2-8
           NOTE: argsJson must be a JSON string (e.g. '{"key":"value"}')
         - send_message(toGroupId, content): Send a message to another group — costs 0.5
@@ -417,6 +474,7 @@ object RolePromptBuilder {
         - ALWAYS write your Death Note as your final action before stopping.
         - Dead Ends in KB document failed approaches — read them first.
         - To propose norms: write_staging(type="DOC", content=..., wipTaskRef=null) with domain="system:norms".
+        - To build a derivative copy or edited version of an uploaded artifact, use read_run_artifact plus write_staging or execute_tool, then let the normal Critic review path approve it.
         - Budget is finite — never retry the same tool call with identical arguments.
     """.trimIndent()
 }

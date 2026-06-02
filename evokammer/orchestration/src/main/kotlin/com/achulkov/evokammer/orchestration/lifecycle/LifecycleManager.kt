@@ -1,12 +1,17 @@
 package com.achulkov.evokammer.orchestration.lifecycle
 
 import com.achulkov.evokammer.core.budget.BudgetLedger
+import com.achulkov.evokammer.core.contract.BlockingAgentAbortException
 import com.achulkov.evokammer.core.contract.AgentBootContext
+import com.achulkov.evokammer.core.contract.RunInputArtifact
 import com.achulkov.evokammer.core.contract.RoleAllocation
 import com.achulkov.evokammer.core.contract.WipTaskClaim
+import com.achulkov.evokammer.core.config.ModelSelectionConfig
 import com.achulkov.evokammer.core.model.AgentStatus
 import com.achulkov.evokammer.core.model.GroupProfile
 import com.achulkov.evokammer.core.model.Role
+import com.achulkov.evokammer.sandbox.network.ContextUrlAllowlistExtractor
+import com.achulkov.evokammer.sandbox.shuru.NetworkAllowlistConfig
 import com.achulkov.evokammer.sandbox.shuru.ShuruVmManager
 import com.achulkov.evokammer.sandbox.shuru.VmConfig
 import com.achulkov.evokammer.sandbox.shuru.VmHandle
@@ -16,6 +21,8 @@ import com.achulkov.evokammer.substrate.db.entity.EventTypes
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -24,10 +31,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.random.Random
 
 /**
  * Manages the full lifecycle of agent VMs for a single group within a run.
@@ -55,6 +65,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *   Shuru VMs so the in-VM `AgentRunner` can reach OpenRouter without any IPC.
  * @param groupProfile The group's cost profile — injected as `EVOKAMMER_GROUP_PROFILE` env var
  *   in Shuru VMs so the in-VM runner constructs the correct [BudgetConfig].
+ * @param modelSelectionRandom RNG used to sample a concrete model from each role pool at spawn time.
  * @param localAgentRunner Optional suspend function that runs an agent in-process.
  *   The second parameter is an optional callback the runner uses to register the agent's
  *   [BudgetLedger] with this manager, enabling live budget polling. When provided,
@@ -71,15 +82,31 @@ class LifecycleManager(
     private val agentJarPath: String,
     private val openRouterApiKey: String,
     private val groupProfile: GroupProfile = GroupProfile.Library,
+    private val modelSelectionRandom: Random = Random.Default,
     private val localAgentRunner: (suspend (AgentBootContext, onBudgetLedger: ((BudgetLedger) -> Unit)?) -> Unit)? = null,
     private val gracePeriodSeconds: Int = 30,
     private val budgetPollingIntervalMs: Long = 5_000L,
     private val ipcPortBase: Int = 10_000
 ) {
+    internal fun networkAllowlistFor(
+        role: Role,
+        extraAllowedHosts: Set<String> = emptySet()
+    ): NetworkAllowlistConfig {
+        val baseConfig = when (role) {
+            Role.Researcher -> NetworkAllowlistConfig.RESEARCHER
+            Role.Builder -> NetworkAllowlistConfig.BUILDER
+            Role.Outlier -> NetworkAllowlistConfig.BROAD
+            else -> NetworkAllowlistConfig.NO_INTERNET
+        }
+        if (extraAllowedHosts.isEmpty()) return baseConfig
+        return baseConfig.copy(allowedDomains = baseConfig.allowedDomains + extraAllowedHosts)
+    }
+
     private val db get() = substrateDatabaseFactory.get(runId, groupId)
 
     /** Live agent registry: agentId → (VmHandle/Job, status). */
     private val liveAgents = ConcurrentHashMap<String, LiveAgentEntry>()
+    private val refundedBudgetByAgent = ConcurrentHashMap<String, Double>()
     private val ipcPortCounter = AtomicInteger(ipcPortBase)
 
     private val _agentStates = MutableStateFlow<Map<String, AgentState>>(emptyMap())
@@ -87,6 +114,9 @@ class LifecycleManager(
     val agentStates: StateFlow<Map<String, AgentState>> = _agentStates.asStateFlow()
 
     private var budgetMonitorJob: Job? = null
+    private var runInputArtifacts: List<RunInputArtifact> = emptyList()
+    private var runArtifactsMountPath: String? = null
+    private var runContextAllowedHosts: Set<String> = emptySet()
 
     /**
      * Whether this manager uses in-process (coroutine-based) agent execution.
@@ -113,10 +143,28 @@ class LifecycleManager(
     var onAgentDied: (agentId: String, wasKilled: Boolean) -> Unit = { _, _ -> }
 
     /**
+     * Called when a claimed WiP task is abandoned because its owner exited before the task
+     * was canonically completed.
+     *
+     * Parameters: agentId, taskNodeId, generation.
+     */
+    var onWipTaskAbandoned: (agentId: String, taskNodeId: String, generation: Int) -> Unit = { _, _, _ -> }
+
+    /**
      * Called periodically with the updated total remaining budget for this group
      * (sum of all live agents' current budget balances).
      */
     var onBudgetChanged: (totalRemainingBudget: Double) -> Unit = { _ -> }
+
+    fun configureRunArtifacts(
+        inputArtifacts: List<RunInputArtifact>,
+        artifactsMountPath: String?,
+        initialContextAllowedHosts: Set<String> = emptySet()
+    ) {
+        runInputArtifacts = inputArtifacts
+        runArtifactsMountPath = artifactsMountPath
+        runContextAllowedHosts = initialContextAllowedHosts
+    }
 
     /**
      * Spawns all agents defined in the [allocation].
@@ -127,6 +175,7 @@ class LifecycleManager(
      * @param allocation The role allocation from the Evolutionary Selector.
      * @param stageDisclosure The current stage disclosure content.
      * @param modelAssignments Map of role name → OpenRouter model string.
+     * @param modelPools Map of role name → candidate model IDs for per-agent sampling.
      * @param rolePrompts Map of role name → system prompt.
      * @param scope Coroutine scope for monitoring and in-process agent jobs.
      */
@@ -134,6 +183,7 @@ class LifecycleManager(
         allocation: RoleAllocation,
         stageDisclosure: String,
         modelAssignments: Map<String, String>,
+        modelPools: Map<String, List<String>> = emptyMap(),
         rolePrompts: Map<String, String>,
         scope: CoroutineScope
     ) {
@@ -148,11 +198,15 @@ class LifecycleManager(
                         generation = allocation.generation,
                         budgetPerAgent = entry.budgetPerAgent,
                         stageDisclosure = stageDisclosure,
-                        modelAssignment = modelAssignments[entry.role.name]
-                            ?: DEFAULT_MODELS[entry.role]
-                            ?: "openai/gpt-4o-mini",
+                        modelAssignment = resolveModelForRole(
+                            role = entry.role,
+                            modelAssignments = modelAssignments,
+                            modelPools = modelPools
+                        ),
                         rolePrompt = rolePrompts[entry.role.name] ?: defaultRolePrompt(entry.role),
                         forceOutlier = entry.forceOutlier,
+                        claimWipTask = true,
+                        allowLegacyProtocol = entry.role.receivesLegacyProtocol && !entry.forceOutlier,
                         scope = scope
                     )
                 } catch (e: Exception) {
@@ -180,11 +234,71 @@ class LifecycleManager(
         }
     }
 
+    /**
+     * Spawns a special-purpose agent that should not claim a WiP task or inherit Legacy Protocol.
+     *
+     * Used by oversight roles such as MetaPlanner, which need broad read access but should not
+     * consume one of the group's ordinary work claims.
+     *
+     * @param role The special role to spawn.
+     * @param generation The generation number to stamp on the agent.
+     * @param budgetPerAgent The agent's allocated budget.
+     * @param stageDisclosure The current stage disclosure content.
+     * @param modelAssignment Explicit model override for this agent.
+     * @param modelAssignments Per-role model assignments from the council or config.
+     * @param modelPools Per-role candidate model pools from the council or config.
+     * @param rolePrompt The system prompt for the agent.
+     * @param scope Coroutine scope that owns the agent lifecycle.
+     */
+    suspend fun spawnSpecialAgent(
+        role: Role,
+        generation: Int,
+        budgetPerAgent: Double,
+        stageDisclosure: String,
+        modelAssignment: String? = null,
+        modelAssignments: Map<String, String> = emptyMap(),
+        modelPools: Map<String, List<String>> = emptyMap(),
+        rolePrompt: String,
+        scope: CoroutineScope
+    ) {
+        spawnAgent(
+            role = role,
+            generation = generation,
+            budgetPerAgent = budgetPerAgent,
+            stageDisclosure = stageDisclosure,
+            modelAssignment = resolveModelForRole(
+                role = role,
+                modelAssignments = modelAssignments,
+                modelPools = modelPools,
+                explicitModelAssignment = modelAssignment
+            ),
+            rolePrompt = rolePrompt,
+            forceOutlier = false,
+            claimWipTask = false,
+            allowLegacyProtocol = false,
+            scope = scope
+        )
+    }
+
     /** Returns the number of currently live (active) agents. */
     @Suppress("unused") // called by orchestration layer to gate round advancement
     fun getLiveAgentCount(): Int = liveAgents.size
 
     // ---- Private ----
+
+    private fun resolveModelForRole(
+        role: Role,
+        modelAssignments: Map<String, String>,
+        modelPools: Map<String, List<String>>,
+        explicitModelAssignment: String? = null
+    ): String {
+        explicitModelAssignment?.let { return it }
+        modelPools[role.name]?.takeIf { it.isNotEmpty() }?.let { pool ->
+            return pool.random(modelSelectionRandom)
+        }
+        modelAssignments[role.name]?.let { return it }
+        return ModelSelectionConfig.defaultModelFor(role, modelSelectionRandom)
+    }
 
     private suspend fun spawnAgent(
         role: Role,
@@ -194,13 +308,15 @@ class LifecycleManager(
         modelAssignment: String,
         rolePrompt: String,
         forceOutlier: Boolean,
+        claimWipTask: Boolean,
+        allowLegacyProtocol: Boolean,
         scope: CoroutineScope
     ) {
         val agentId = "agent-${role.name.lowercase()}-${UUID.randomUUID().toString().take(8)}"
         val ipcPort = ipcPortCounter.getAndIncrement()
 
         // Claim WiP task (Outliers never get tasks)
-        val wipClaim = if (!forceOutlier && role != Role.Outlier) {
+        val wipClaim = if (claimWipTask && !forceOutlier && role != Role.Outlier) {
             db.wipTaskDao().getNextUnclaimed(runId, groupId)?.let { task ->
                 val claimed = db.wipTaskDao().claimTask(task.nodeId, runId, groupId, agentId, generation)
                 if (claimed > 0) WipTaskClaim(task.nodeId, task.description) else null
@@ -208,7 +324,7 @@ class LifecycleManager(
         } else null
 
         // Retrieve Legacy Protocol
-        val legacyProtocol = if (role.receivesLegacyProtocol && !forceOutlier) {
+        val legacyProtocol = if (allowLegacyProtocol && role.receivesLegacyProtocol && !forceOutlier) {
             db.legacyProtocolDao().getLatestForRole(runId, groupId, role.name, generation)?.let { p ->
                 com.achulkov.evokammer.core.contract.LegacyProtocolContext(
                     protocolId = p.id,
@@ -236,6 +352,27 @@ class LifecycleManager(
             } else null
         }.getOrNull()
 
+        val artifactsMountHostPath = runArtifactsMountPath?.takeIf { runInputArtifacts.isNotEmpty() }
+            ?: if (runInputArtifacts.isNotEmpty()) File(
+                substrateDatabaseFactory.dbFilePath(runId, groupId).parentFile?.parentFile?.parentFile
+                    ?: error("Could not resolve run root for artifacts"),
+                "artifacts"
+            ).absolutePath else null
+        val promptContextAllowedHosts = ContextUrlAllowlistExtractor.extractHosts(
+            rolePrompt,
+            stageDisclosure,
+            dynamicNorms,
+            wipClaim?.description,
+            legacyProtocol?.reasoningPosture,
+            legacyProtocol?.toolHeuristics,
+            legacyProtocol?.failureMap,
+            legacyProtocol?.kgHabits,
+            runInputArtifacts.joinToString(separator = "\n") { artifact ->
+                artifact.textPreview.orEmpty()
+            }
+        )
+        val effectiveAllowedHosts = runContextAllowedHosts + promptContextAllowedHosts
+
         val bootContext = AgentBootContext(
             agentId = agentId,
             runId = runId,
@@ -245,6 +382,7 @@ class LifecycleManager(
             budgetToken = "token:$agentId:${System.currentTimeMillis()}",
             substrateDbPath = substrateDatabaseFactory.dbFilePath(runId, groupId).absolutePath,
             stagingMountPath = "/staging",
+            artifactsMountPath = if (artifactsMountHostPath != null) "/artifacts" else null,
             wipTaskClaim = wipClaim,
             legacyProtocol = legacyProtocol,
             stageDisclosure = stageDisclosure,
@@ -255,7 +393,8 @@ class LifecycleManager(
             dynamicNorms = dynamicNorms,
             // Carry the exact per-agent allocation so both in-process and Shuru runners
             // initialise BudgetLedger with the amount the selector intended.
-            allocatedBudget = budgetPerAgent
+            allocatedBudget = budgetPerAgent,
+            inputArtifacts = runInputArtifacts
         )
 
         if (localAgentRunner != null) {
@@ -281,11 +420,29 @@ class LifecycleManager(
                     val entry = liveAgents[agentId]
                     if (entry != null) handleAgentExit(agentId, entry, wasKilled = true)
                     throw e // propagate to properly cancel the coroutine
+                } catch (e: BlockingAgentAbortException) {
+                    Napier.w(e) { "[$groupId] In-process agent $agentId aborted due to blocking runtime error after ${System.currentTimeMillis() - spawnTimeMs}ms: ${e.message}" }
+                    val entry = liveAgents[agentId]
+                    if (entry != null) {
+                        handleAgentExit(
+                            agentId = agentId,
+                            entry = entry,
+                            wasKilled = true,
+                            refundedBudget = entry.budgetLedger?.initialBudget ?: entry.budgetRemaining
+                        )
+                    }
                 } catch (e: Exception) {
                     val durationMs = System.currentTimeMillis() - spawnTimeMs
                     Napier.e(e) { "[$groupId] In-process agent $agentId [${e::class.simpleName}] error after ${durationMs}ms: ${e.message}" }
                     val entry = liveAgents[agentId]
-                    if (entry != null) handleAgentExit(agentId, entry, wasKilled = false)
+                    if (entry != null) {
+                        handleAgentExit(
+                            agentId = agentId,
+                            entry = entry,
+                            wasKilled = true,
+                            refundedBudget = entry.budgetLedger?.initialBudget ?: entry.budgetRemaining
+                        )
+                    }
                 }
             }
 
@@ -295,7 +452,8 @@ class LifecycleManager(
                 status = AgentStatus.Active,
                 generation = generation,
                 budgetRemaining = budgetPerAgent,
-                budgetLedger = null  // will be set by the runner callback above
+                budgetLedger = null,  // will be set by the runner callback above
+                wipTaskClaim = wipClaim
             )
             updateAgentStates()
             emitEvent(EventTypes.AGENT_SPAWN, agentId, generation, buildSpawnPayload(agentId, role, generation))
@@ -308,14 +466,10 @@ class LifecycleManager(
             val mountConfig = com.achulkov.evokammer.sandbox.shuru.FilesystemMountConfig(
                 kbMountHostPath = "$dbDir/kb",
                 toolsMountHostPath = "$dbDir/tools",
-                stagingMountHostPath = "$dbDir/staging/$agentId"
+                stagingMountHostPath = "$dbDir/staging/$agentId",
+                artifactsMountHostPath = artifactsMountHostPath
             )
-            val networkConfig = when (role) {
-                Role.Researcher -> com.achulkov.evokammer.sandbox.shuru.NetworkAllowlistConfig.RESEARCHER
-                Role.Builder -> com.achulkov.evokammer.sandbox.shuru.NetworkAllowlistConfig.BUILDER
-                Role.Outlier -> com.achulkov.evokammer.sandbox.shuru.NetworkAllowlistConfig.BROAD
-                else -> com.achulkov.evokammer.sandbox.shuru.NetworkAllowlistConfig.NO_INTERNET
-            }
+            val networkConfig = networkAllowlistFor(role, effectiveAllowedHosts)
 
             val vmConfig = VmConfig(
                 agentId = agentId,
@@ -347,7 +501,8 @@ class LifecycleManager(
                 status = AgentStatus.Active,
                 generation = generation,
                 budgetRemaining = budgetPerAgent,
-                budgetLedger = null  // Shuru VM agents manage their own ledger internally
+                budgetLedger = null,  // Shuru VM agents manage their own ledger internally
+                wipTaskClaim = wipClaim
             )
             updateAgentStates()
             emitEvent(EventTypes.AGENT_SPAWN, agentId, generation, buildSpawnPayload(agentId, role, generation))
@@ -419,8 +574,14 @@ class LifecycleManager(
 
         if (entry.job != null) {
             // In-process mode: cancel the coroutine.
-            // The CancellationException handler in the launch block will call handleAgentExit.
-            entry.job.cancel()
+            // Wait for the coroutine to acknowledge cancellation so termination is deterministic.
+            entry.job.cancelAndJoin()
+            // `cancelAndJoin()` returns only after the job has observed cancellation, but
+            // we still finalize the agent here so WIP cleanup does not depend on the
+            // coroutine's catch block running before the test scheduler advances.
+            liveAgents[agentId]?.let { currentEntry ->
+                handleAgentExit(agentId, currentEntry, wasKilled = true)
+            }
             return
         }
 
@@ -448,50 +609,81 @@ class LifecycleManager(
         handleAgentExit(agentId, entry, wasKilled = true)
     }
 
-    private suspend fun handleAgentExit(agentId: String, entry: LiveAgentEntry, wasKilled: Boolean) {
-        liveAgents.remove(agentId)
-        updateAgentStates()
-
-        // Log final budget snapshot if we have a live ledger (in-process mode)
-        val finalSnapshot = entry.budgetLedger?.snapshot()
-        if (finalSnapshot != null) {
-            Napier.i {
-                "[$groupId] Agent $agentId final budget: initial=${finalSnapshot.initialBudget} " +
-                "remaining=${finalSnapshot.currentBalance} " +
-                "actions=${finalSnapshot.actionLog.size} " +
-                "spent=${finalSnapshot.initialBudget - finalSnapshot.currentBalance}"
+    private suspend fun handleAgentExit(
+        agentId: String,
+        entry: LiveAgentEntry,
+        wasKilled: Boolean,
+        refundedBudget: Double = 0.0
+    ) {
+        withContext(NonCancellable) {
+            liveAgents.remove(agentId)
+            if (refundedBudget > 0.0) {
+                refundedBudgetByAgent[agentId] = refundedBudget
+            } else {
+                refundedBudgetByAgent.remove(agentId)
             }
-            if (finalSnapshot.actionLog.isNotEmpty()) {
-                val actionSummary = finalSnapshot.actionLog
-                    .groupBy { it.actionType }
-                    .map { (type, deductions) -> "${type.name}=${deductions.size}" }
-                    .joinToString(", ")
-                Napier.d { "[$groupId] Agent $agentId action breakdown: $actionSummary" }
-            }
-        }
+            updateAgentStates()
 
-        val exitPayload = buildString {
-            append("""{"agentId":"$agentId","wasKilled":$wasKilled""")
+            // Log final budget snapshot if we have a live ledger (in-process mode)
+            val finalSnapshot = entry.budgetLedger?.snapshot()
             if (finalSnapshot != null) {
-                append(""","budgetRemaining":${finalSnapshot.currentBalance}""")
-                append(""","budgetSpent":${finalSnapshot.initialBudget - finalSnapshot.currentBalance}""")
-                append(""","actionCount":${finalSnapshot.actionLog.size}""")
+                Napier.i {
+                    "[$groupId] Agent $agentId final budget: initial=${finalSnapshot.initialBudget} " +
+                        "remaining=${finalSnapshot.currentBalance} " +
+                        "actions=${finalSnapshot.actionLog.size} " +
+                        "spent=${finalSnapshot.initialBudget - finalSnapshot.currentBalance}"
+                }
+                if (finalSnapshot.actionLog.isNotEmpty()) {
+                    val actionSummary = finalSnapshot.actionLog
+                        .groupBy { it.actionType }
+                        .map { (type, deductions) -> "${type.name}=${deductions.size}" }
+                        .joinToString(", ")
+                    Napier.d { "[$groupId] Agent $agentId action breakdown: $actionSummary" }
+                }
             }
-            append("}")
+
+            val exitPayload = buildString {
+                append("""{"agentId":"$agentId","wasKilled":$wasKilled""")
+                if (finalSnapshot != null) {
+                    append(""","budgetRemaining":${finalSnapshot.currentBalance}""")
+                    append(""","budgetSpent":${finalSnapshot.initialBudget - finalSnapshot.currentBalance}""")
+                    append(""","actionCount":${finalSnapshot.actionLog.size}""")
+                }
+                append("}")
+            }
+            emitEvent(
+                if (wasKilled) EventTypes.AGENT_KILLED else EventTypes.AGENT_DEATH,
+                agentId,
+                entry.generation,
+                exitPayload
+            )
+            onAgentDied(agentId, wasKilled)
+
+            val taskClaim = entry.wipTaskClaim
+            if (taskClaim != null) {
+                runCatching {
+                    val released = db.wipTaskDao().abandonTask(
+                        nodeId = taskClaim.nodeId,
+                        runId = runId,
+                        groupId = groupId,
+                        agentId = agentId,
+                        generation = entry.generation
+                    )
+                    if (released > 0) {
+                        onWipTaskAbandoned(agentId, taskClaim.nodeId, entry.generation)
+                        Napier.i { "[$groupId] WiP task ${taskClaim.nodeId} abandoned by $agentId (wasKilled=$wasKilled)" }
+                    }
+                }.onFailure { e ->
+                    Napier.w(e) { "[$groupId] Failed to abandon WiP task ${taskClaim.nodeId} for $agentId" }
+                }
+            }
+
+            // Emit updated group budget after agent exit
+            val totalRemaining = totalRemainingBudget()
+            onBudgetChanged(totalRemaining)
+
+            Napier.i { "[$groupId] Agent $agentId exited (wasKilled=$wasKilled, inProcess=${entry.job != null})" }
         }
-        emitEvent(
-            if (wasKilled) EventTypes.AGENT_KILLED else EventTypes.AGENT_DEATH,
-            agentId,
-            entry.generation,
-            exitPayload
-        )
-        onAgentDied(agentId, wasKilled)
-
-        // Emit updated group budget after agent exit
-        val totalRemaining = liveAgents.values.sumOf { it.budgetLedger?.balance ?: it.budgetRemaining }
-        onBudgetChanged(totalRemaining)
-
-        Napier.i { "[$groupId] Agent $agentId exited (wasKilled=$wasKilled, inProcess=${entry.job != null})" }
     }
 
     private suspend fun emitEvent(type: String, agentId: String?, generation: Int, payload: String) {
@@ -521,31 +713,16 @@ class LifecycleManager(
         }
     }
 
+    private fun totalRemainingBudget(): Double =
+        liveAgents.values.sumOf { it.budgetLedger?.balance ?: it.budgetRemaining } +
+            refundedBudgetByAgent.values.sum()
+
     private fun buildSpawnPayload(agentId: String, role: Role, generation: Int): String =
         """{"agentId":"$agentId","role":"${role.name}","generation":$generation,"inProcess":${localAgentRunner != null}}"""
 
     private fun defaultRolePrompt(role: Role): String =
         "You are a ${role.name} agent in the EvoKammer system. Act according to your role."
 
-    companion object {
-        /**
-         * Default role → model mappings used when no modelAssignments override is provided.
-         *
-         * All IDs here MUST exist in the Koog OpenRouterModels catalogue so the models
-         * are created with proper capabilities (including LLMCapability.Completion).
-         * Using an unknown ID creates a model without capabilities and causes Koog to throw
-         * "does not support completion" at agent launch time.
-         */
-        val DEFAULT_MODELS = mapOf(
-            Role.Planner     to "google/gemini-2.5-pro",         // deep, slow reasoning
-            Role.Critic      to "anthropic/claude-sonnet-4",     // evaluation-tuned, reliable gating
-            Role.Researcher  to "google/gemini-2.5-flash",       // fast, broad-knowledge
-            Role.Builder     to "openai/gpt-4o",                 // code-specialist
-            Role.Archivist   to "google/gemini-2.5-flash-lite",  // efficient summarisation
-            Role.Outlier     to "openai/gpt-oss-120b",           // oddball cognitive diversity
-            Role.MetaPlanner to "anthropic/claude-sonnet-4"      // consistent policy reasoning
-        )
-    }
 }
 
 private data class LiveAgentEntry(
@@ -554,7 +731,8 @@ private data class LiveAgentEntry(
     val status: AgentStatus,
     val generation: Int,
     val budgetRemaining: Double,
-    val budgetLedger: BudgetLedger? // non-null once the in-process runner registers it
+    val budgetLedger: BudgetLedger?, // non-null once the in-process runner registers it
+    val wipTaskClaim: WipTaskClaim?
 )
 
 /** Snapshot of an agent's live state (for IPC / UI). */

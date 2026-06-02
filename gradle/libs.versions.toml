@@ -1,7 +1,7 @@
 [versions]
 
 kotlin = "2.2.21"
-compose = "1.9.3"
+compose = "1.10.0-rc01"
 android-compileSdk = "36"
 android-minSdk = "24"
 composeMaterialIcons = "1.7.3"
@@ -42,7 +42,7 @@ espressoCore = "3.7.0"
 appcompat = "1.7.1"
 material = "1.13.0"
 
-koog = "0.7.2"
+koog = "1.0.0"
 
 
 [libraries]
@@ -104,7 +104,7 @@ koog = { module = "ai.koog:koog-agents", version.ref = "koog" }
 koog-agents = { module = "ai.koog:koog-agents", version.ref = "koog" }
 koog-agents-core = { module = "ai.koog:agents-core", version.ref = "koog" }
 koog-agents-tools = { module = "ai.koog:agents-tools", version.ref = "koog" }
-koog-prompt-executor-llms-all = { module = "ai.koog:prompt-executor-llms-all", version.ref = "koog" }
+koog-prompt-executor-openrouter-client = { module = "ai.koog:prompt-executor-openrouter-client-jvm", version.ref = "koog" }
 koog-agents-features-event-handler = { module = "ai.koog:agents-features-event-handler", version.ref = "koog" }
 
 # Ktor server (for engine IPC)
@@ -136,4 +136,3 @@ ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 room = { id = "androidx.room", version.ref = "room" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
-

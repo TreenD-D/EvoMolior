@@ -30,6 +30,7 @@ data class CheckinResult(
  * @param overallScore Normalised score (0.0–1.0).
  * @param passed Whether the group met the minimum threshold to advance to the next stage.
  * @param dimensionScores Per-dimension scores (dimension name → score).
+ * @param testPassRate Deterministic test pass rate (0.0–1.0) for the sealed suite.
  * @param failedTestCount Number of failed deterministic tests.
  * @param gradingSheetApplied ID of the GradingSheet used.
  * @param stageAdvanced Whether the group's disclosure stage was advanced.
@@ -40,6 +41,7 @@ data class GroupCheckinResult(
     val overallScore: Double,
     val passed: Boolean,
     val dimensionScores: Map<String, Double>,
+    val testPassRate: Double,
     val failedTestCount: Int,
     val gradingSheetApplied: String,
     val stageAdvanced: Boolean

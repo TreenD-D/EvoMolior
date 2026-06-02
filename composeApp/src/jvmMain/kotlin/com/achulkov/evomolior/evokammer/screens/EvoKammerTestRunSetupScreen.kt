@@ -15,6 +15,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.achulkov.evokammer.api.model.RunConfig
+import com.achulkov.evokammer.api.model.RunInputArtifactUpload
 import com.achulkov.evokammer.core.model.GroupProfileType
 import com.achulkov.evokammer.core.model.ScoringDimension
 import com.achulkov.evomolior.common.BuildConfig
@@ -44,11 +45,14 @@ fun EvoKammerTestRunSetupScreen(
     viewModel: EvoKammerViewModel = remember { EvoKammerViewModel(StubEvoKammerEngineService()) }
 ) {
     val navigate = LocalEvoKammerNavigator.current
+    val availableRuns by viewModel.availableRuns.collectAsState()
 
     var objective by remember {
         mutableStateOf("Design a distributed, fault-tolerant knowledge synthesis system")
     }
     var apiKey by remember { mutableStateOf(BuildConfig.OPENROUTER_API_KEY) }
+    var contextArtifacts by remember { mutableStateOf(emptyList<RunInputArtifactUpload>()) }
+    var continuationFromRunId by remember { mutableStateOf<String?>(null) }
     var launchError by remember { mutableStateOf<String?>(null) }
 
     LazyColumn(
@@ -160,6 +164,28 @@ fun EvoKammerTestRunSetupScreen(
             }
         }
 
+        // ── Context files ──────────────────────────────────────────────────
+        item {
+            SectionCard(title = "Run Context") {
+                RunContextArtifactsSection(
+                    artifacts = contextArtifacts,
+                    onArtifactsChanged = { contextArtifacts = it }
+                )
+            }
+        }
+
+        item {
+            SectionCard(title = "Continuation") {
+                ContinuationRunSelectorSection(
+                    availableRuns = availableRuns,
+                    selectedRunId = continuationFromRunId,
+                    onSelectedRunIdChanged = { continuationFromRunId = it },
+                    runFilter = { it.groupIds.size == 1 && it.isCompleted },
+                    helperText = "Test continuations are limited to single-group source runs so the diagnostic layout stays valid."
+                )
+            }
+        }
+
         // ── What to verify ────────────────────────────────────────────────────
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -217,6 +243,8 @@ fun EvoKammerTestRunSetupScreen(
                         maxAgentsPerGroup = TEST_AGENTS,
                         scoringDimensions = defaultTestScoringDimensions(),
                         openRouterApiKey = apiKey,
+                        contextArtifacts = contextArtifacts,
+                        continuationFromRunId = continuationFromRunId,
                         isTestRun = true,
                         budgetOverride = TEST_BUDGET
                     )

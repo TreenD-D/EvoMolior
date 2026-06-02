@@ -7,6 +7,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Drives the Genesis Council — a one-time multi-agent session that designs the run.
@@ -194,7 +196,15 @@ class GenesisCouncil(
             Napier.w("GenesisCouncil: failed to parse StartingField JSON, using defaults: ${e.message}")
             // B-3: Rescue consistencyReport even if the full StartingField parse fails.
             val rescuedReport = extractConsistencyReport(cleaned)
-            StartingField.default(objective).copy(consistencyReport = rescuedReport)
+            val rescuedSuiteJson = extractJsonStringField(cleaned, "sealedTestSuiteJson")
+            val rescuedSuiteHash = extractJsonStringField(cleaned, "sealedTestSuiteHash")
+            val rescuedStageContents = extractJsonStringArrayField(cleaned, "stageContents")
+            StartingField.default(objective).copy(
+                sealedTestSuiteJson = rescuedSuiteJson,
+                sealedTestSuiteHash = rescuedSuiteHash,
+                stageContents = rescuedStageContents,
+                consistencyReport = rescuedReport
+            )
         }
     }
 
@@ -214,6 +224,47 @@ class GenesisCouncil(
                 ?: return ""
             obj["consistencyReport"]?.toString()?.trim('"') ?: ""
         } catch (_: Exception) { "" }
+    }
+
+    /**
+     * Extracts a top-level JSON string field from synthesis output if present.
+     *
+     * Used as a fallback when the full StartingField decode fails, so the sealed suite
+     * can still survive partial JSON corruption.
+     *
+     * @param synthesisOutput Raw or stripped LLM output string.
+     * @param fieldName The JSON string field to rescue.
+     */
+    private fun extractJsonStringField(synthesisOutput: String, fieldName: String): String {
+        return try {
+            val jsonStr = Regex("""\{.*\}""", RegexOption.DOT_MATCHES_ALL).find(synthesisOutput)?.value
+                ?: return ""
+            val obj = lenientJson.parseToJsonElement(jsonStr) as? kotlinx.serialization.json.JsonObject
+                ?: return ""
+            obj[fieldName]?.toString()?.trim('"') ?: ""
+        } catch (_: Exception) { "" }
+    }
+
+    /**
+     * Extracts a top-level JSON string array field from synthesis output if present.
+     *
+     * Used as a fallback when the full StartingField decode fails so disclosure stages
+     * are not lost during JSON corruption.
+     *
+     * @param synthesisOutput Raw or stripped LLM output string.
+     * @param fieldName The JSON string array field to rescue.
+     */
+    private fun extractJsonStringArrayField(synthesisOutput: String, fieldName: String): List<String> {
+        return try {
+            val jsonStr = Regex("""\{.*\}""", RegexOption.DOT_MATCHES_ALL).find(synthesisOutput)?.value
+                ?: return emptyList()
+            val obj = lenientJson.parseToJsonElement(jsonStr) as? kotlinx.serialization.json.JsonObject
+                ?: return emptyList()
+            val array = obj[fieldName] as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+            array.mapNotNull { element ->
+                element.jsonPrimitive.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+            }
+        } catch (_: Exception) { emptyList() }
     }
 
     companion object {

@@ -99,6 +99,7 @@ class NestedGroupRunner(
                     allocation = allocation,
                     stageDisclosure = config.objective,
                     modelAssignments = config.modelAssignment,
+                    modelPools = config.modelPools,
                     rolePrompts = emptyMap(),
                     scope = scope
                 )

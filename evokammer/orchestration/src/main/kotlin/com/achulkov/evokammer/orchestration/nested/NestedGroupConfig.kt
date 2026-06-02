@@ -29,6 +29,8 @@ import kotlinx.serialization.Serializable
  * @param modelAssignment Per-role model overrides (role name → OpenRouter model string).
  *   If empty, [LifecycleManager] falls back to the default model map.
  *   Set from [com.achulkov.evokammer.core.contract.StartingField.modelAssignment] when available.
+ * @param modelPools Per-role candidate model pools (role name → candidate OpenRouter model IDs).
+ *   If empty, the lifecycle manager falls back to [modelAssignment] and then canonical defaults.
  */
 @Serializable
 data class NestedGroupConfig(
@@ -42,7 +44,8 @@ data class NestedGroupConfig(
     val openRouterApiKey: String,
     val agentJarPath: String,
     val safetyMarginFraction: Double = 0.1,
-    val modelAssignment: Map<String, String> = emptyMap()
+    val modelAssignment: Map<String, String> = emptyMap(),
+    val modelPools: Map<String, List<String>> = emptyMap()
 ) {
     /** Budget actually given to the inner instance (after safety margin deduction). */
     val effectiveBudget: Double get() = budgetAllocation * (1.0 - safetyMarginFraction)

@@ -16,25 +16,42 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.achulkov.evokammer.api.service.MetaArchiveEntryRecord
 import com.achulkov.evokammer.api.service.MetaArchiveSummary
 import com.achulkov.evokammer.core.model.GradingResult
 import com.achulkov.evokammer.core.model.RoundScore
 import com.achulkov.evomolior.evokammer.LocalEvoKammerNavigator
 import com.achulkov.evomolior.evokammer.viewmodel.EvoKammerViewModel
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 /**
  * Post-Run Analysis screen — displays final scores, cross-group KB comparison,
  * meta-archive contents, and the civilisational winner summary.
  */
 @Composable
-fun EvoKammerPostRunAnalysisScreen(viewModel: EvoKammerViewModel) {
+fun EvoKammerPostRunAnalysisScreen(
+    viewModel: EvoKammerViewModel,
+    runId: String? = null
+) {
     val navigator = LocalEvoKammerNavigator.current
     val gradingHistory by viewModel.gradingHistory.collectAsState()
     val engineState by viewModel.engineState.collectAsState()
     val metaArchiveSummary by viewModel.metaArchiveSummary.collectAsState()
+    val roundSummaryEntries by viewModel.roundSummaryEntries.collectAsState()
+    val runCompletionEntries by viewModel.runCompletionEntries.collectAsState()
+
+    LaunchedEffect(runId) {
+        if (runId != null) {
+            viewModel.loadArchivedRun(runId)
+        }
+    }
 
     var selectedTab by remember { mutableStateOf(0) }
-    val tabs = listOf("Final Scores", "Round History", "Group Comparison", "Meta-Archive")
+    val tabs = listOf("Final Scores", "Round History", "Group Comparison", "Round Summaries", "Meta-Archive")
+    val effectiveHistory = remember(runId, gradingHistory, roundSummaryEntries) {
+        if (runId != null) buildArchivedGradingHistory(roundSummaryEntries) else gradingHistory
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Top bar
@@ -84,18 +101,170 @@ fun EvoKammerPostRunAnalysisScreen(viewModel: EvoKammerViewModel) {
 
         // Content
         when (selectedTab) {
-            0 -> FinalScoresTab(gradingHistory)
-            1 -> RoundHistoryTab(gradingHistory)
-            2 -> GroupComparisonTab(gradingHistory)
-            3 -> MetaArchiveTab(summary = metaArchiveSummary)
+            0 -> FinalScoresTab(effectiveHistory, roundSummaryEntries, runCompletionEntries)
+            1 -> RoundHistoryTab(effectiveHistory)
+            2 -> GroupComparisonTab(effectiveHistory)
+            3 -> RoundSummariesTab(roundSummaryEntries)
+            4 -> MetaArchiveTab(summary = metaArchiveSummary)
         }
+    }
+}
+
+private val roundSummaryJson = Json {
+    ignoreUnknownKeys = true
+    isLenient = true
+}
+
+@Serializable
+internal data class FinalAnswerArchiveRecord(
+    val runId: String,
+    val winnerId: String? = null,
+    val finalAnswerSummary: String = "",
+    val judgeOutputsByGrader: Map<String, String> = emptyMap(),
+    val submissionSummariesByGroup: Map<String, String?> = emptyMap()
+)
+
+@Serializable
+private data class RoundSummaryArchiveRecord(
+    val runId: String,
+    val roundIndex: Int,
+    val roundWinnerId: String? = null,
+    val judgeOutputsByGrader: Map<String, String> = emptyMap(),
+    val groupSummaries: List<RoundGroupSummaryArchiveRecord> = emptyList()
+)
+
+@Serializable
+private data class RoundGroupSummaryArchiveRecord(
+    val groupId: String,
+    val criticPromoted: Int = 0,
+    val criticRejected: Int = 0,
+    val criticArbitrated: Int = 0,
+    val fitnessScoredAgents: Int = 0,
+    val fitnessTopEligibleAgents: Int = 0,
+    val legacyProtocolsExtracted: Int = 0,
+    val legacyProtocolsExpired: Int = 0,
+    val deadEndsInserted: Int = 0,
+    val submissionSummary: String? = null,
+    val deterministicScore: DeterministicAssessmentArchiveRecord = DeterministicAssessmentArchiveRecord(),
+    val disclosureCheckin: DisclosureCheckinArchiveRecord = DisclosureCheckinArchiveRecord(),
+    val blindScore: BlindScoreArchiveRecord = BlindScoreArchiveRecord()
+)
+
+@Serializable
+private data class DeterministicAssessmentArchiveRecord(
+    val overallScore: Double = 0.0,
+    val automatedTestsPassed: Int = 0,
+    val automatedTestsFailed: Int = 0,
+    val mandatoryFailure: Boolean = false,
+    val gradingSheetApplied: String = "",
+    val failedTestIds: List<String> = emptyList(),
+    val dimensionScores: Map<String, Double> = emptyMap()
+)
+
+@Serializable
+private data class DisclosureCheckinArchiveRecord(
+    val overallScore: Double = 0.0,
+    val passed: Boolean = false,
+    val testPassRate: Double = 0.0,
+    val failedTestCount: Int = 0,
+    val gradingSheetApplied: String = "",
+    val stageAdvanced: Boolean = false,
+    val dimensionScores: Map<String, Double> = emptyMap()
+)
+
+@Serializable
+private data class BlindScoreArchiveRecord(
+    val weightedTotal: Double = 0.0,
+    val rank: Int = 0,
+    val dimensionScores: Map<String, Double> = emptyMap()
+)
+
+internal data class FinalAnswerCardState(
+    val winnerId: String,
+    val finalAnswerSummary: String,
+    val judgeOutputsByGrader: Map<String, String>,
+    val submissionSummariesByGroup: Map<String, String?>
+)
+
+internal fun buildFinalAnswerCardState(
+    roundSummaryEntries: List<MetaArchiveEntryRecord>,
+    runCompletionEntries: List<MetaArchiveEntryRecord>
+): FinalAnswerCardState? {
+    val latestCompletion = runCompletionEntries
+        .asReversed()
+        .firstOrNull()
+        ?.let { entry ->
+            runCatching {
+                roundSummaryJson.decodeFromString(FinalAnswerArchiveRecord.serializer(), entry.contentJson)
+            }.getOrNull()
+        }
+
+    val latestRoundSummary = roundSummaryEntries
+        .asReversed()
+        .firstOrNull()
+        ?.let { entry ->
+            runCatching {
+                roundSummaryJson.decodeFromString(RoundSummaryArchiveRecord.serializer(), entry.contentJson)
+            }.getOrNull()
+        }
+
+    return when {
+        latestCompletion != null -> FinalAnswerCardState(
+            winnerId = latestCompletion.winnerId ?: "unknown",
+            finalAnswerSummary = latestCompletion.finalAnswerSummary,
+            judgeOutputsByGrader = latestCompletion.judgeOutputsByGrader,
+            submissionSummariesByGroup = latestCompletion.submissionSummariesByGroup
+        )
+        latestRoundSummary != null -> FinalAnswerCardState(
+            winnerId = latestRoundSummary.roundWinnerId ?: "unknown",
+            finalAnswerSummary = "",
+            judgeOutputsByGrader = latestRoundSummary.judgeOutputsByGrader,
+            submissionSummariesByGroup = latestRoundSummary.groupSummaries
+                .associate { it.groupId to it.submissionSummary }
+        )
+        else -> null
+    }
+}
+
+internal fun buildArchivedGradingHistory(entries: List<MetaArchiveEntryRecord>): List<GradingResult> {
+    return entries.mapNotNull { entry ->
+        runCatching {
+            roundSummaryJson.decodeFromString(RoundSummaryArchiveRecord.serializer(), entry.contentJson)
+        }.getOrNull()
+    }.sortedBy { it.roundIndex }.map { summary ->
+        GradingResult(
+            roundIndex = summary.roundIndex,
+            scores = summary.groupSummaries.map { group ->
+                RoundScore(
+                    groupId = group.groupId,
+                    roundIndex = summary.roundIndex,
+                    dimensionScores = group.blindScore.dimensionScores.map { (dimensionId, rawScore) ->
+                        com.achulkov.evokammer.core.model.DimensionScore(
+                            dimensionId = dimensionId,
+                            rawScore = rawScore,
+                            justification = ""
+                        )
+                    },
+                    weightedTotal = group.blindScore.weightedTotal,
+                    rank = group.blindScore.rank
+                )
+            }.sortedBy { it.rank },
+            winnerId = summary.roundWinnerId ?: summary.groupSummaries
+                .minByOrNull { it.blindScore.rank }
+                ?.groupId
+                ?: "unknown"
+        )
     }
 }
 
 // ── Final Scores tab ────────────────────────────────────────────────────────
 
 @Composable
-private fun FinalScoresTab(gradingHistory: List<GradingResult>) {
+private fun FinalScoresTab(
+    gradingHistory: List<GradingResult>,
+    roundSummaryEntries: List<MetaArchiveEntryRecord>,
+    runCompletionEntries: List<MetaArchiveEntryRecord>
+) {
     if (gradingHistory.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -116,6 +285,16 @@ private fun FinalScoresTab(gradingHistory: List<GradingResult>) {
         return
     }
 
+    val finalAnswerCardState = buildFinalAnswerCardState(roundSummaryEntries, runCompletionEntries)
+    val latestRoundSummary = roundSummaryEntries
+        .asReversed()
+        .firstOrNull()
+        ?.let { entry ->
+            runCatching {
+                roundSummaryJson.decodeFromString(RoundSummaryArchiveRecord.serializer(), entry.contentJson)
+            }.getOrNull()
+        }
+
     // Aggregate total weighted scores across all rounds
     val groupTotals = mutableMapOf<String, Double>()
     gradingHistory.forEach { result ->
@@ -130,6 +309,92 @@ private fun FinalScoresTab(gradingHistory: List<GradingResult>) {
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        finalAnswerCardState?.let { completion ->
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Final Answer",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "Winner: ${completion.winnerId}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (completion.finalAnswerSummary.isNotBlank()) {
+                            Text(
+                                completion.finalAnswerSummary,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        if (completion.judgeOutputsByGrader.isNotEmpty()) {
+                            completion.judgeOutputsByGrader.forEach { (graderId, output) ->
+                                Text(
+                                    graderId,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(output, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        if (completion.submissionSummariesByGroup.isNotEmpty()) {
+                            completion.submissionSummariesByGroup.forEach { (groupId, summary) ->
+                                summary?.takeIf { it.isNotBlank() }?.let {
+                                    Text(
+                                        "Submission summary: $groupId",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(it, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        latestRoundSummary?.let { summary ->
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Round ${summary.roundIndex + 1} recap",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (summary.judgeOutputsByGrader.isEmpty()) {
+                            Text(
+                                "No judge output was archived for the last round.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        summary.groupSummaries.firstOrNull { it.submissionSummary != null }?.submissionSummary?.let { submissionSummary ->
+                            Text(
+                                "Submission summary",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(submissionSummary, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        }
+
         // Winner banner
         overallWinner?.let { winner ->
             item {
@@ -481,6 +746,7 @@ private fun MetaArchiveTab(summary: MetaArchiveSummary?) {
             ArchiveCategory(Icons.Default.Settings, "StartingFields", "Genesis Council outputs used for each run", "STARTING_FIELD"),
             ArchiveCategory(Icons.Default.CheckCircle, "GradingSheets", "Sealed evaluation rubrics from Grader civilisations", "GRADING_SHEET"),
             ArchiveCategory(Icons.Default.Share, "Legacy Protocols", "Top-fitness agent reasoning postures for epigenetic injection", "LEGACY_PROTOCOL"),
+            ArchiveCategory(Icons.Default.List, "Round Summaries", "Per-group end-of-round submission summaries", "ROUND_SUMMARY"),
         )
 
         items(archiveCategories) { category ->
@@ -540,6 +806,158 @@ private fun MetaArchiveTab(summary: MetaArchiveSummary?) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+    }
+}
+
+// ── Round Summaries tab ─────────────────────────────────────────────────────
+
+@Composable
+private fun RoundSummariesTab(entries: List<MetaArchiveEntryRecord>) {
+    if (entries.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("No round summaries archived yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text(
+                "Round Summaries",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+            Text(
+                "Each round now archives a concise, checkable summary for every group so the round-end answer is accessible outside the live logs.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        items(entries) { entry ->
+            val summary = runCatching {
+                roundSummaryJson.decodeFromString(RoundSummaryArchiveRecord.serializer(), entry.contentJson)
+            }.getOrNull()
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(entry.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        buildString {
+                            append("group=")
+                            append(entry.groupId ?: "round")
+                            append(" round=")
+                            append(entry.generation + 1)
+                            if (entry.finalScore != null) {
+                                append(" score=")
+                                append("%.1f".format(entry.finalScore))
+                            }
+                            if (entry.isFromWinner) {
+                                append(" winner")
+                            }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (summary != null) {
+                        summary.roundWinnerId?.let { winner ->
+                            Text(
+                                "Winner: $winner",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        if (summary.judgeOutputsByGrader.isNotEmpty()) {
+                            Text(
+                                "Judge output",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            summary.judgeOutputsByGrader.forEach { (graderId, output) ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                                    )
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(graderId, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                                        Text(output, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (summary.groupSummaries.isNotEmpty()) {
+                            Text(
+                                "Per-group submission summary",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            summary.groupSummaries.forEach { group ->
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(
+                                        buildString {
+                                            append(group.groupId)
+                                            append(": critic ")
+                                            append(group.criticPromoted)
+                                            append("/")
+                                            append(group.criticRejected)
+                                            append("/")
+                                            append(group.criticArbitrated)
+                                            append(", fitness ")
+                                            append(group.fitnessScoredAgents)
+                                            append("/")
+                                            append(group.fitnessTopEligibleAgents)
+                                            append(", deadEnds=")
+                                            append(group.deadEndsInserted)
+                                            append(", tests=")
+                                            append(group.deterministicScore.automatedTestsPassed)
+                                            append("/")
+                                            append(group.deterministicScore.automatedTestsFailed)
+                                            if (group.deterministicScore.mandatoryFailure) {
+                                                append(" mandatory-fail")
+                                            }
+                                            append(", blind=")
+                                            append("%.1f".format(group.blindScore.weightedTotal))
+                                        },
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    group.submissionSummary?.let { submissionSummary ->
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                                            )
+                                        ) {
+                                            Text(
+                                                submissionSummary,
+                                                modifier = Modifier.padding(10.dp),
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Text(
+                            entry.contentJson.replace(Regex("\\s+"), " ").take(320),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
         }

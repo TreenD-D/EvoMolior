@@ -6,13 +6,14 @@ import com.achulkov.evokammer.core.budget.BudgetLedger
 import com.achulkov.evokammer.core.model.ActionType
 import com.achulkov.evokammer.core.model.GroupProfile
 import com.achulkov.evokammer.core.model.GroupProfileType
-import com.achulkov.evokammer.sandbox.toolsandbox.ExecutionResult
 import com.achulkov.evokammer.sandbox.toolsandbox.ToolSubSandbox
 import com.achulkov.evokammer.substrate.db.dao.ToolRegistryDao
 import com.achulkov.evokammer.substrate.db.entity.ToolRegistryEntryEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import java.io.File
+import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertContains
@@ -55,36 +56,15 @@ class ExecuteToolToolTest {
         override suspend fun getById(id: String) = registeredTool?.takeIf { it.id == id }
         override suspend fun getLatestByName(runId: String, groupId: String, name: String) =
             registeredTool?.takeIf { it.name == name }
+        override suspend fun getLatestVersionByName(runId: String, groupId: String, name: String) =
+            registeredTool?.takeIf { it.name == name }
         override suspend fun getActive(runId: String, groupId: String, domain: String?) = emptyList<ToolRegistryEntryEntity>()
         override fun observeActive(runId: String, groupId: String): Flow<List<ToolRegistryEntryEntity>> = flowOf(emptyList())
         override suspend fun updateExecutionStats(id: String, newSuccessRate: Double, newFailureLogJson: String) {}
         override suspend fun getAverageFailureRate(runId: String, groupId: String): Double? = null
         override suspend fun getAdoptedToolNames(runId: String, groupId: String) = emptyList<String>()
-        override suspend fun getToolAdoptionCountForAgent(runId: String, groupId: String, authorAgentId: String) = 0
+        override suspend fun getAdoptedToolCountForAgent(runId: String, groupId: String, authorAgentId: String) = 0
     }
-
-    /** Fake sandbox that returns pre-configured results or throws. */
-    private class FakeToolSubSandbox(
-        private val resultFactory: () -> ExecutionResult
-    ) : ToolSubSandbox() {
-        override suspend fun execute(toolExecutablePath: String, stdinData: String): ExecutionResult = resultFactory()
-    }
-
-    private fun successResult(stdout: String = "ok") = ExecutionResult(
-        stdout = stdout,
-        stderr = "",
-        exitCode = 0,
-        truncated = false,
-        timedOut = false
-    )
-
-    private fun failureResult(stderr: String = "error") = ExecutionResult(
-        stdout = "",
-        stderr = stderr,
-        exitCode = 1,
-        truncated = false,
-        timedOut = false
-    )
 
     private fun sampleTool(name: String = "my-tool") = ToolRegistryEntryEntity(
         id = "$name-v1",
@@ -101,6 +81,14 @@ class ExecuteToolToolTest {
         createdAtMs = 0L
     )
 
+    private fun toolsMountPath(scriptName: String, scriptBody: String): String {
+        val toolsDir = createTempDirectory(prefix = "tools-").toFile()
+        val script = File(toolsDir, scriptName)
+        script.writeText(scriptBody.trimIndent())
+        script.setExecutable(true, false)
+        return toolsDir.absolutePath
+    }
+
     // ── tests ──────────────────────────────────────────────────────────────────
 
     @Test
@@ -110,7 +98,7 @@ class ExecuteToolToolTest {
 
         val tool = ExecuteToolTool(
             toolRegistryDao = FakeToolRegistryDao(registeredTool = null),
-            toolSubSandbox = FakeToolSubSandbox { successResult() },
+            toolSubSandbox = ToolSubSandbox(createTempDirectory(prefix = "workspace-").toFile()),
             budgetLedger = ledger,
             runId = "run-test",
             groupId = "g0"
@@ -129,15 +117,9 @@ class ExecuteToolToolTest {
         val ledger = freshLedger()
         val balanceBefore = ledger.balance
 
-        class ThrowingSandbox : ToolSubSandbox() {
-            override suspend fun execute(toolExecutablePath: String, stdinData: String): ExecutionResult {
-                throw RuntimeException("Process launch failed: no executable")
-            }
-        }
-
         val tool = ExecuteToolTool(
             toolRegistryDao = FakeToolRegistryDao(registeredTool = sampleTool()),
-            toolSubSandbox = ThrowingSandbox(),
+            toolSubSandbox = ToolSubSandbox(createTempDirectory(prefix = "workspace-").toFile()),
             budgetLedger = ledger,
             runId = "run-test",
             groupId = "g0"
@@ -155,13 +137,23 @@ class ExecuteToolToolTest {
     fun `successful tool execution deducts success budget`() = runTest {
         val ledger = freshLedger()
         val balanceBefore = ledger.balance
+        val toolsMount = toolsMountPath(
+            scriptName = "${sampleTool().name}-v${sampleTool().version}",
+            scriptBody = """
+                #!/bin/sh
+                cat >/dev/null
+                echo ok
+                exit 0
+            """
+        )
 
         val tool = ExecuteToolTool(
             toolRegistryDao = FakeToolRegistryDao(registeredTool = sampleTool()),
-            toolSubSandbox = FakeToolSubSandbox { successResult() },
+            toolSubSandbox = ToolSubSandbox(createTempDirectory(prefix = "workspace-").toFile()),
             budgetLedger = ledger,
             runId = "run-test",
-            groupId = "g0"
+            groupId = "g0",
+            toolsMountPath = toolsMount
         )
 
         tool.execute(ExecuteToolTool.Args(toolName = "my-tool", argsJson = "{}"))
@@ -173,16 +165,58 @@ class ExecuteToolToolTest {
     }
 
     @Test
+    fun `latest active tool version is executed when version is omitted`() = runTest {
+        val ledger = freshLedger()
+        val latestTool = sampleTool().copy(
+            id = "my-tool-v2",
+            version = 2
+        )
+        val toolsMount = toolsMountPath(
+            scriptName = "${latestTool.name}-v${latestTool.version}",
+            scriptBody = """
+                #!/bin/sh
+                cat >/dev/null
+                echo latest-version
+                exit 0
+            """
+        )
+
+        val tool = ExecuteToolTool(
+            toolRegistryDao = FakeToolRegistryDao(registeredTool = latestTool),
+            toolSubSandbox = ToolSubSandbox(createTempDirectory(prefix = "workspace-").toFile()),
+            budgetLedger = ledger,
+            runId = "run-test",
+            groupId = "g0",
+            toolsMountPath = toolsMount
+        )
+
+        val result = tool.execute(ExecuteToolTool.Args(toolName = "my-tool", argsJson = "{}"))
+
+        assertContains(result, "latest-version", ignoreCase = true,
+            message = "Omitted toolVersion should execute the latest active registry row")
+    }
+
+    @Test
     fun `failed tool execution deducts failure budget`() = runTest {
         val ledger = freshLedger()
         val balanceBefore = ledger.balance
+        val toolsMount = toolsMountPath(
+            scriptName = "${sampleTool().name}-v${sampleTool().version}",
+            scriptBody = """
+                #!/bin/sh
+                cat >/dev/null
+                echo error 1>&2
+                exit 1
+            """
+        )
 
         val tool = ExecuteToolTool(
             toolRegistryDao = FakeToolRegistryDao(registeredTool = sampleTool()),
-            toolSubSandbox = FakeToolSubSandbox { failureResult() },
+            toolSubSandbox = ToolSubSandbox(createTempDirectory(prefix = "workspace-").toFile()),
             budgetLedger = ledger,
             runId = "run-test",
-            groupId = "g0"
+            groupId = "g0",
+            toolsMountPath = toolsMount
         )
 
         tool.execute(ExecuteToolTool.Args(toolName = "my-tool", argsJson = "{}"))
@@ -196,13 +230,23 @@ class ExecuteToolToolTest {
     @Test
     fun `repeated identical args is priced as retry (higher cost than first call)`() = runTest {
         val ledger = freshLedger()
+        val toolsMount = toolsMountPath(
+            scriptName = "${sampleTool().name}-v${sampleTool().version}",
+            scriptBody = """
+                #!/bin/sh
+                cat >/dev/null
+                echo ok
+                exit 0
+            """
+        )
 
         val tool = ExecuteToolTool(
             toolRegistryDao = FakeToolRegistryDao(registeredTool = sampleTool()),
-            toolSubSandbox = FakeToolSubSandbox { successResult() },
+            toolSubSandbox = ToolSubSandbox(createTempDirectory(prefix = "workspace-").toFile()),
             budgetLedger = ledger,
             runId = "run-test",
-            groupId = "g0"
+            groupId = "g0",
+            toolsMountPath = toolsMount
         )
 
         val balanceBefore = ledger.balance

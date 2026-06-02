@@ -1,8 +1,11 @@
 package com.achulkov.evomolior.evokammer.substrate
 
 import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
+import com.achulkov.evokammer.api.service.RunArchiveService
 import io.github.aakira.napier.Napier
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Provides read-only access to substrate SQLite databases for all discovered runs on disk.
@@ -27,11 +30,11 @@ class SubstrateRepository(
      * Walks `{dataRootDir}/evokammer/runs/` and collects `groups/{groupId}/substrate.db` under
      * each run directory. Returns a list sorted by most-recently-modified first.
      */
-    fun discoverRuns(): List<RunInfo> {
+    suspend fun discoverRuns(): List<RunInfo> = withContext(Dispatchers.IO) {
         val runsDir = File(dataRootDir, "evokammer/runs")
         if (!runsDir.exists() || !runsDir.isDirectory) {
             Napier.d("SubstrateRepository: runs dir not found at ${runsDir.absolutePath}")
-            return emptyList()
+            return@withContext emptyList()
         }
 
         val runs = mutableListOf<RunInfo>()
@@ -49,16 +52,23 @@ class SubstrateRepository(
 
             if (groupEntries.isEmpty()) return@forEach
 
+            val isCompleted = runCatching {
+                val archiveDb = factory.get(runDir.name, "__meta_archive__")
+                archiveDb.metaArchiveDao().getByType(RunArchiveService.ENTRY_RUN_COMPLETED)
+                    .any { it.runId == runDir.name }
+            }.getOrElse { false }
+
             runs.add(
                 RunInfo(
                     runId = runDir.name,
                     groupIds = groupEntries.map { it.first }.sorted(),
-                    lastModifiedMs = groupEntries.maxOf { it.second }
+                    lastModifiedMs = groupEntries.maxOf { it.second },
+                    isCompleted = isCompleted
                 )
             )
         }
 
-        return runs.sortedByDescending { it.lastModifiedMs }
+        runs.sortedByDescending { it.lastModifiedMs }
     }
 
     /**

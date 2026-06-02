@@ -11,7 +11,7 @@ with agents through the contracts in `core` and events in `substrate`.
 
 ## Key Dependencies
 
-- `ai.koog:koog-agents:0.7.2` — agent framework
+- `ai.koog:koog-agents:1.0.0` — agent framework
 - `evokammer:core` — domain models and contracts
 - `evokammer:substrate` — KB/KG/Staging read/write via repositories
 
@@ -51,7 +51,7 @@ com.achulkov.evokammer.agents/
 
 ```kotlin
 val agent = AIAgent(
-    executor = simpleOpenRouterExecutor(apiKey),
+    executor = createOpenRouterPromptExecutor(apiKey),
     systemPrompt = RolePromptBuilder.build(role, bootContext),
     llmModel = ModelAssignmentResolver.resolve(role, bootContext.modelAssignment),
     toolRegistry = ToolRegistry {
@@ -99,6 +99,8 @@ The BudgetLedger returns a `BudgetDeductResult` — if `BELOW_FLOOR`, the tool t
 - **Returns**: `submissionId: String` on success
 - **Cost**: 1 unit; deducts before writing
 - **Validates**: budget signature generation; rejects if budget exhausted
+- If the agent has an assigned WiP task, the runtime populates `wipTaskRef` automatically.
+- An explicit `wipTaskRef` argument still overrides the assigned task when needed.
 
 ### ExecuteToolTool
 - **Args**: `toolName: String`, `toolVersion: Int?`, `argsJson: String`
@@ -117,6 +119,15 @@ The BudgetLedger returns a `BudgetDeductResult` — if `BELOW_FLOOR`, the tool t
 - **Returns**: `factId: String` (pending staging review)
 - **Cost**: 1 unit
 - **Validated by**: KG Consistency Checker before Critic review
+- If the agent has an assigned WiP task, the runtime populates the staging submission's `wipTaskRef` automatically.
+- An explicit `wipTaskRef` on the tool args still takes precedence when supplied.
+
+### EmitConstraintTool
+- **Args**: `constraintId: String`, `description: String`, `appliesToType: String`, `condition: String`, `violationPenalty: Double`, `rationale: String`
+- **Returns**: `constraintId: String` (pending staging review)
+- **Cost**: 2 units
+- **Validated by**: Critic review before entering the canonical KG schema
+- If the agent has an assigned WiP task, the runtime attaches that `wipTaskRef` automatically.
 
 ## AgentRunner Loop
 

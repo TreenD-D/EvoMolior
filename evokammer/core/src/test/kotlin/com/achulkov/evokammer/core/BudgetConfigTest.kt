@@ -65,4 +65,14 @@ class BudgetConfigTest {
         val retryCost = config.costFor(ActionType.TOOL_EXEC_RETRY)
         assertTrue(retryCost > successCost, "Retry cost ($retryCost) should exceed success cost ($successCost)")
     }
+
+    @Test
+    fun `default max iterations are tuned for bounded agent loops`() {
+        val config = BudgetConfig(
+            groupId = "g0",
+            profile = GroupProfile.default(GroupProfileType.Library)
+        )
+
+        assertEquals(40, config.maxIterations)
+    }
 }

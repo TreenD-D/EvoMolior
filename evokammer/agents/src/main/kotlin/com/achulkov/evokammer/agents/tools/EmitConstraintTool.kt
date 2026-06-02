@@ -36,7 +36,8 @@ class EmitConstraintTool(
     private val groupId: String,
     private val agentId: String,
     private val role: String,
-    private val generation: Int
+    private val generation: Int,
+    private val defaultWipTaskRef: String? = null
 ) : SimpleTool<EmitConstraintTool.Args>(
     argsType = typeToken<Args>(),
     name = "emit_constraint",
@@ -60,7 +61,9 @@ class EmitConstraintTool(
         /** Trust score penalty (0.0–1.0) applied on violation. */
         val violationPenalty: Double = 0.2,
         /** Rationale for why this constraint should exist. */
-        val rationale: String = ""
+        val rationale: String = "",
+        /** Optional WiP task reference when this constraint is tied to a claimed task. */
+        val wipTaskRef: String? = null
     )
 
     override suspend fun execute(args: Args): String {
@@ -88,6 +91,7 @@ class EmitConstraintTool(
         }
 
         val budgetSig = budgetLedger.generateStagingToken("KG_CONSTRAINT")
+        val resolvedWipTaskRef = args.wipTaskRef?.takeIf { it.isNotBlank() } ?: defaultWipTaskRef
 
         val entity = StagingSubmissionEntity(
             id = UUID.randomUUID().toString(),
@@ -97,7 +101,7 @@ class EmitConstraintTool(
             role = role,
             type = "KG_CONSTRAINT",
             content = content,
-            wipTaskRef = null,
+            wipTaskRef = resolvedWipTaskRef,
             speculative = false,
             outlier = role == "Outlier",
             budgetSignature = budgetSig,

@@ -8,10 +8,6 @@ import ai.koog.agents.core.agent.singleRunStrategy
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.features.eventHandler.feature.EventHandler
 import ai.koog.prompt.dsl.prompt as koogPrompt
-import ai.koog.prompt.executor.clients.openrouter.OpenRouterModels
-import ai.koog.prompt.executor.llms.all.simpleOpenRouterExecutor
-import ai.koog.prompt.llm.LLMCapability
-import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import ai.koog.serialization.kotlinx.KotlinxSerializer
 import com.achulkov.evokammer.agents.tools.ClaimTaskTool
@@ -22,6 +18,7 @@ import com.achulkov.evokammer.agents.tools.ExecuteToolTool
 import com.achulkov.evokammer.agents.tools.QueryPatternTool
 import com.achulkov.evokammer.agents.tools.ReadKBTool
 import com.achulkov.evokammer.agents.tools.ReadKGTool
+import com.achulkov.evokammer.agents.tools.ReadRunArtifactTool
 import com.achulkov.evokammer.agents.tools.SearchKBTool
 import com.achulkov.evokammer.agents.tools.SendMessageTool
 import com.achulkov.evokammer.agents.tools.WriteDeathNoteTool
@@ -38,15 +35,15 @@ import com.achulkov.evokammer.substrate.db.EvoKammerDatabase
  * Creates Koog [AIAgent] instances for EvoKammer agent roles.
  *
  * The factory wires together:
- * - Koog's OpenRouter executor (via [simpleOpenRouterExecutor])
+ * - Koog's OpenRouter executor (built from the published OpenRouter client and multi-provider executor)
  * - Role-specific system prompt (built by [RolePromptBuilder])
  * - All EvoKammer custom tools ([ToolRegistry])
  * - [BudgetLedger] shared by tools for token deduction
  *
- * Koog 0.7.2 builder API is used:
+ * Koog 1.0.0 builder API is used:
  * ```
  * AIAgent.builder()
- *     .promptExecutor(simpleOpenRouterExecutor(apiKey))
+ *     .promptExecutor(createOpenRouterPromptExecutor(apiKey))
  *     .llmModel(model)
  *     .systemPrompt(prompt)
  *     .toolRegistry(toolRegistry)
@@ -68,7 +65,7 @@ class EvoKammerAgentFactory(
     private val toolsMountPath: String = "/tools",
     private val contentSanitiser: ContentSanitiser = ContentSanitiser()
 ) {
-    private val executor by lazy { simpleOpenRouterExecutor(openRouterApiKey) }
+    private val executor by lazy { createOpenRouterPromptExecutor(openRouterApiKey) }
 
     /**
      * Creates an [AgentContext] containing a Koog [AIAgent] and its [BudgetLedger].
@@ -109,6 +106,12 @@ class EvoKammerAgentFactory(
             tool(SearchKBTool(db.knowledgeBaseDao(), bootContext.runId, bootContext.groupId))
             tool(ReadKGTool(db.knowledgeGraphFactDao(), bootContext.runId, bootContext.groupId))
             tool(
+                ReadRunArtifactTool(
+                    artifactsMountPath = bootContext.artifactsMountPath,
+                    inputArtifacts = bootContext.inputArtifacts
+                )
+            )
+            tool(
                 QueryPatternTool(
                     knowledgeGraphFactDao = db.knowledgeGraphFactDao(),
                     budgetLedger = budgetLedger,
@@ -133,6 +136,7 @@ class EvoKammerAgentFactory(
                     agentId = bootContext.agentId,
                     role = bootContext.role.name,
                     generation = bootContext.generation,
+                    defaultWipTaskRef = bootContext.wipTaskClaim?.nodeId,
                     isOutlier = isOutlier
                 )
             )
@@ -155,7 +159,8 @@ class EvoKammerAgentFactory(
                     groupId = bootContext.groupId,
                     agentId = bootContext.agentId,
                     role = bootContext.role.name,
-                    generation = bootContext.generation
+                    generation = bootContext.generation,
+                    defaultWipTaskRef = bootContext.wipTaskClaim?.nodeId
                 )
             )
             tool(
@@ -166,7 +171,8 @@ class EvoKammerAgentFactory(
                     groupId = bootContext.groupId,
                     agentId = bootContext.agentId,
                     role = bootContext.role.name,
-                    generation = bootContext.generation
+                    generation = bootContext.generation,
+                    defaultWipTaskRef = bootContext.wipTaskClaim?.nodeId
                 )
             )
             tool(
@@ -205,8 +211,8 @@ class EvoKammerAgentFactory(
         val model: LLModel = resolveModel(bootContext.modelAssignment)
 
         // Build the Koog agent using the 0.7.2 builder API.
-        // maxIterations=25: enough for productive agents; caps budget burn when tools keep failing.
-        // The default of 50 is too generous when tool errors cause retry loops.
+        // The iteration cap comes from BudgetConfig so it can be tuned centrally with the
+        // agent economy rather than drifting as a per-factory literal.
         //
         // IMPORTANT: The JVM AIAgentBuilder defaults to JacksonSerializer (plain ObjectMapper
         // without jackson-module-kotlin). All Args data classes use @Serializable from
@@ -221,7 +227,8 @@ class EvoKammerAgentFactory(
                 AIAgentConfig(
                     prompt = koogPrompt("evo-agent") { system(systemPrompt) },
                     model = model,
-                    maxAgentIterations = 25,
+                    maxAgentIterations = budgetConfig.maxIterations,
+                    responseProcessor = EmptyAssistantResponseRecoveryProcessor,
                     // ignoreUnknownKeys allows LLMs that pass extra fields (e.g. "domain" on
                     // write_staging) to succeed rather than failing with a parse error.
                     serializer = KotlinxSerializer(kotlinx.serialization.json.Json {
@@ -232,7 +239,7 @@ class EvoKammerAgentFactory(
             )
             .toolRegistry(toolRegistry)
             .graphStrategy(singleRunStrategy())
-            .maxIterations(25)
+            .maxIterations(budgetConfig.maxIterations)
             // ── Koog lifecycle event handler ─────────────────────────────────
             // Provides per-call Napier traces for every tool dispatch, LLM call,
             // and agent lifecycle transition so logs flow into the UI debug panel.
@@ -252,8 +259,8 @@ class EvoKammerAgentFactory(
                 }
                 config.onAgentExecutionFailed { ctx ->
                     io.github.aakira.napier.Napier.e(
-                        "Koog[$roleName/$agentId] agent FAILED: ${ctx.throwable.message}",
-                        ctx.throwable
+                        "Koog[$roleName/$agentId] agent FAILED: ${ctx.error.message}",
+                        ctx.error
                     )
                 }
                 config.onToolCallStarting { ctx ->
@@ -268,16 +275,6 @@ class EvoKammerAgentFactory(
                         "Koog[$roleName/$agentId] ← ${ctx.toolName} = $result"
                     )
                 }
-                config.onToolCallFailed { ctx ->
-                    io.github.aakira.napier.Napier.w(
-                        "Koog[$roleName/$agentId] ✕ ${ctx.toolName} FAILED: ${ctx.message}"
-                    )
-                }
-                config.onToolValidationFailed { ctx ->
-                    io.github.aakira.napier.Napier.w(
-                        "Koog[$roleName/$agentId] ✕ ${ctx.toolName} VALIDATION FAILED: ${ctx.message}"
-                    )
-                }
                 config.onLLMCallStarting { _ ->
                     io.github.aakira.napier.Napier.d(
                         "Koog[$roleName/$agentId] LLM call starting"
@@ -288,6 +285,7 @@ class EvoKammerAgentFactory(
                         "Koog[$roleName/$agentId] LLM call completed"
                     )
                 }
+                config.installBlockingFailurePolicy("Koog[$roleName/$agentId]")
             }
             .build()
 
@@ -308,19 +306,28 @@ class EvoKammerAgentFactory(
      * @param bootContext Agent identity and context.
      * @param reason Short description of why the agent terminated unexpectedly.
      * @param errorMessage Full error/exception message (truncated to 500 chars).
+     * @param finalResult Optional final agent output to preserve when the agent completed
+     *   without tool/write activity. Truncated before persistence.
      */
     suspend fun writeEmergencyDeathNote(
         bootContext: AgentBootContext,
         reason: String,
-        errorMessage: String
+        errorMessage: String,
+        finalResult: String? = null,
+        noteKind: String = "emergency"
     ) {
         try {
             val submissionId = "death-auto-${bootContext.agentId}-${System.currentTimeMillis()}"
             val content = buildString {
-                appendLine("=== EMERGENCY DEATH NOTE (auto-generated) ===")
+                appendLine("=== ${noteKind.uppercase(java.util.Locale.ROOT)} DEATH NOTE (auto-generated) ===")
                 appendLine("Agent: ${bootContext.agentId} (${bootContext.role.name})")
                 appendLine("Termination: $reason")
                 appendLine("Error: ${errorMessage.take(500)}")
+                finalResult?.takeIf { it.isNotBlank() }?.let { text ->
+                    appendLine()
+                    appendLine("Final result:")
+                    appendLine(text.take(2000))
+                }
                 appendLine()
                 appendLine("This note was auto-written by the runner because the agent terminated")
                 appendLine("before completing its own write_death_note call.")
@@ -346,67 +353,19 @@ class EvoKammerAgentFactory(
                 )
             )
             io.github.aakira.napier.Napier.i(
-                "EvoKammerAgentFactory: emergency death note written for ${bootContext.agentId} (id=$submissionId)"
+                "EvoKammerAgentFactory: $noteKind death note written for ${bootContext.agentId} (id=$submissionId)"
             )
         } catch (insertEx: Exception) {
             // Best-effort — never let the emergency write crash the runner
             io.github.aakira.napier.Napier.e(
-                "EvoKammerAgentFactory: failed to write emergency death note for ${bootContext.agentId}: ${insertEx.message}",
+                "EvoKammerAgentFactory: failed to write $noteKind death note for ${bootContext.agentId}: ${insertEx.message}",
                 insertEx
             )
         }
     }
 
-    /**
-     * Resolves a model string (e.g. "anthropic/claude-3-haiku") to a [LLModel].
-     *
-     * First checks the [OpenRouterModels] catalogue; falls back to a generic [LLModel]
-     * with standard capabilities (including [LLMCapability.Completion]) so any custom
-     * model string passed in the boot context can still run.
-     *
-     * IMPORTANT: the fallback MUST include [LLMCapability.Completion] — without it Koog
-     * rejects the model before even making an API call.
-     */
     private fun resolveModel(modelId: String): LLModel {
-        return when (modelId) {
-            // Gemini models
-            "google/gemini-3-flash-preview"    -> OpenRouterModels.Gemini2_5Flash         // legacy ID remapped
-            "google/gemini-2.5-flash"          -> OpenRouterModels.Gemini2_5Flash
-            "google/gemini-2.5-flash-lite"     -> OpenRouterModels.Gemini2_5FlashLite
-            "google/gemini-2.5-pro"            -> OpenRouterModels.Gemini2_5Pro
-            // Anthropic models — note: "claude-sonnet-4.6" and "claude-sonnet-4" both map to Claude4Sonnet
-            "anthropic/claude-sonnet-4.6",
-            "anthropic/claude-sonnet-4"        -> OpenRouterModels.Claude4Sonnet
-            "anthropic/claude-haiku-4.5"       -> OpenRouterModels.Claude4_5Haiku
-            "anthropic/claude-sonnet-4.5"      -> OpenRouterModels.Claude4_5Sonnet
-            "anthropic/claude-3-haiku"         -> OpenRouterModels.Claude3Haiku
-            "anthropic/claude-3-5-sonnet"      -> OpenRouterModels.Claude3_5Sonnet
-            "anthropic/claude-3-7-sonnet"      -> OpenRouterModels.Claude3_7Sonnet
-            // OpenAI models
-            "openai/gpt-oss-120b"              -> OpenRouterModels.GPT_OSS_120b
-            "openai/gpt-4o"                    -> OpenRouterModels.GPT4o
-            "openai/gpt-4o-mini"               -> OpenRouterModels.GPT4oMini
-            "openai/gpt-5"                     -> OpenRouterModels.GPT5
-            "openai/gpt-5-mini"                -> OpenRouterModels.GPT5Mini
-            // DeepSeek models — "deepseek-v3.2" is a non-existent ID, remap to the catalogue version
-            "deepseek/deepseek-v3.2",
-            "deepseek/deepseek-chat-v3-0324"   -> OpenRouterModels.DeepSeekV30324
-            // MiniMax models — not in catalogue, substitute with capable alternative
-            "minimax/minimax-m2.5"             -> OpenRouterModels.GPT4o
-            // Other models
-            "microsoft/phi-4-reasoning:free"   -> OpenRouterModels.Phi4Reasoning
-            // Fallback: create a generic model entry WITH capabilities so Koog doesn't reject it
-            else                               -> LLModel(
-                provider = LLMProvider.OpenRouter,
-                id = modelId,
-                capabilities = listOf(
-                    LLMCapability.Temperature,
-                    LLMCapability.Speculation,
-                    LLMCapability.Tools,
-                    LLMCapability.Completion
-                )
-            )
-        }
+        return OpenRouterModelResolver.resolve(modelId)
     }
 }
 

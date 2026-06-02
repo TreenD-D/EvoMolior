@@ -1,28 +1,30 @@
 package com.achulkov.evokammer.orchestration.lifecycle
 
-import ai.koog.agents.core.agent.AIAgent
-import ai.koog.agents.core.agent.singleRunStrategy
-import ai.koog.agents.core.tools.ToolRegistry
-import ai.koog.prompt.executor.clients.openrouter.OpenRouterModels
-import ai.koog.prompt.executor.llms.all.simpleOpenRouterExecutor
-import ai.koog.prompt.llm.LLModel
-import ai.koog.prompt.llm.LLMProvider
+import com.achulkov.evokammer.agents.factory.CriticReviewAgent
+import com.achulkov.evokammer.agents.factory.KgCriticArbitrationAgent
+import com.achulkov.evokammer.core.config.ModelSelectionConfig
 import com.achulkov.evokammer.core.contract.CriticOutcome
 import com.achulkov.evokammer.core.contract.CriticReview
 import com.achulkov.evokammer.substrate.db.EvoKammerDatabase
 import com.achulkov.evokammer.core.embedding.EmbeddingEngine
+import com.achulkov.evokammer.orchestration.kg.KGConsistencyChecker as KGConflictConsistencyChecker
+import com.achulkov.evokammer.orchestration.kg.ConsistencyResult as KGConflictConsistencyResult
 import com.achulkov.evokammer.substrate.db.entity.EventLogEntryEntity
 import com.achulkov.evokammer.substrate.db.entity.EventTypes
 import com.achulkov.evokammer.substrate.db.entity.KGSchemaEntity
+import com.achulkov.evokammer.substrate.db.entity.KgSchemaConstraintEntity
 import com.achulkov.evokammer.substrate.db.entity.KnowledgeBaseEntryEntity
 import com.achulkov.evokammer.substrate.db.entity.KnowledgeGraphFactEntity
 import com.achulkov.evokammer.substrate.db.entity.ToolRegistryEntryEntity
 import com.achulkov.evokammer.substrate.db.entity.StagingSubmissionEntity
+import com.achulkov.evokammer.substrate.tools.ToolMaterializer
 import io.github.aakira.napier.Napier
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.File
 import java.util.UUID
 
 /**
@@ -31,7 +33,7 @@ import java.util.UUID
  * The pipeline:
  * 1. Reads pending submissions from staging
  * 2. Applies pre-review guards: self-submission, wip_task_reference, budget_signature
- * 3. Uses a Koog AIAgent to evaluate each submission
+ * 3. Delegates the review call to a dedicated CriticReviewAgent wrapper
  * 4. On PROMOTE: writes to canonical substrate
  * 5. On REJECT: records rejection reason
  * 6. On DISPUTE: submits for second review; double-promote wins, double-reject loses
@@ -45,6 +47,9 @@ import java.util.UUID
  * @param criticModel The model to use for Critic review.
  * @param kgSchema JSON-serialised KG schema from `StartingField`, used by `KGConsistencyChecker`
  *   to validate `KG_FACT` submissions before sending them to the LLM Critic.
+ * @param criticReviewRunner Optional deterministic reviewer hook used by tests and other
+ *   non-OpenRouter runtimes. When present, it receives the generated prompt and must return
+ *   the final review verdict.
  */
 class CriticPipeline(
     private val db: EvoKammerDatabase,
@@ -52,19 +57,30 @@ class CriticPipeline(
     private val groupId: String,
     private val generation: Int,
     private val openRouterApiKey: String,
-    private val criticModel: String = "anthropic/claude-sonnet-4",
-    private val kgSchema: String = "{}"
+    private val criticModel: String = ModelSelectionConfig.DEFAULT_CRITIC_PIPELINE_MODEL,
+    private val criticAgentId: String? = null,
+    private val kgSchema: String = "{}",
+    private val criticReviewRunner: (suspend (
+        submission: StagingSubmissionEntity,
+        prompt: String,
+        disputeContext: String?,
+        criticId: String
+    ) -> CriticReview)? = null,
+    private val toolsMountHostPath: String,
+    private val onWipTaskCompleted: (suspend (groupId: String, nodeId: String, agentId: String, generation: Int) -> Unit)? = null
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-
-    /**
-     * Cached OpenRouter executor — created once per [CriticPipeline] instance and shared
-     * across all [reviewSubmission] calls in the same round.
-     *
-     * Without caching, each submission review would create a fresh HTTP client, which can
-     * exhaust OS socket/thread limits in large staging backlogs.
-     */
-    private val executor by lazy { simpleOpenRouterExecutor(openRouterApiKey) }
+    private val toolMaterializer = ToolMaterializer(File(toolsMountHostPath))
+    private val criticReviewAgent = CriticReviewAgent(
+        openRouterApiKey = openRouterApiKey,
+        criticModelId = criticModel,
+        deterministicReviewRunner = criticReviewRunner
+    )
+    private val kgCriticArbitrationAgent = KgCriticArbitrationAgent(
+        openRouterApiKey = openRouterApiKey,
+        criticModelId = criticModel,
+        deterministicReviewRunner = criticReviewRunner
+    )
 
     /**
      * Processes all pending submissions in the staging area for the current group.
@@ -86,9 +102,10 @@ class CriticPipeline(
         var arbitrated = 0  // submissions that went through the second-pass dispute path
 
         // A-1: generate a single critic ID for the entire round so self-submissions can be detected.
-        // If a future LifecycleManager assigns a specific critic agent ID here, this check will block
-        // any staging submissions made by that same agent from being self-reviewed.
+        // The runtime can also supply a stable criticAgentId; either way, matching submissions
+        // are rejected before any review prompt is sent.
         val roundCriticId = "critic-${UUID.randomUUID().toString().take(8)}"
+        val reviewerAgentId = criticAgentId ?: roundCriticId
 
         for (submission in pending) {
             try {
@@ -108,14 +125,14 @@ class CriticPipeline(
                 }
 
                 // A-1: Self-submission guard — an agent cannot act as both submitter and reviewer.
-                if (submission.agentId == roundCriticId) {
+                if (submission.agentId == reviewerAgentId) {
                     Napier.w { "[$groupId] Self-submission violation: ${submission.agentId} tried to submit and review own content" }
                     applyReview(
                         submission,
                         CriticReview(
                             submissionId = submission.id,
                             outcome = CriticOutcome.REJECT,
-                            criticAgentId = roundCriticId,
+                            criticAgentId = reviewerAgentId,
                             rejectionReason = "self_submission_violation: Critic cannot review its own staged submissions."
                         )
                     )
@@ -123,14 +140,14 @@ class CriticPipeline(
                     continue
                 }
 
-                val firstReview = reviewSubmission(submission, criticId = roundCriticId)
+                val firstReview = reviewSubmission(submission, criticId = reviewerAgentId)
 
                 if (firstReview.outcome == CriticOutcome.DISPUTE) {
                     // Second-pass: re-review with dispute context injected
                     val secondReview = reviewSubmission(
                         submission,
                         disputeContext = firstReview.disputeReason,
-                        criticId = roundCriticId
+                        criticId = reviewerAgentId
                     )
                     val resolvedReview = resolveDispute(firstReview, secondReview)
                     applyReview(submission, resolvedReview)
@@ -170,6 +187,13 @@ class CriticPipeline(
             bothReject ->
                 first.copy(outcome = CriticOutcome.REJECT,
                     rejectionReason = "Arbitration: both Critics agreed to reject. ${first.rejectionReason ?: ""}")
+            second.outcome == CriticOutcome.DISPUTE ->
+                first.copy(
+                    outcome = CriticOutcome.REJECT,
+                    rejectionReason = "Arbitration remained unresolved after the second review: ${
+                        second.disputeReason ?: first.disputeReason ?: "no reason provided"
+                    }"
+                )
             else ->
                 // Split decision: promote at reduced trust
                 first.copy(outcome = CriticOutcome.PROMOTE, initialTrustScore = 0.5,
@@ -207,131 +231,92 @@ class CriticPipeline(
             )
         }
 
+        var trustScorePenalty = 0.0
+
         // B-1: KG schema consistency check for KG_FACT submissions.
-        // Validates relation types and hard constraints before the expensive LLM call.
+        // Validates relation types and hard constraints before the expensive critic call.
         // Uses the live DB schema if available (B-2 upserts KG_CONSTRAINT promotions there),
         // falling back to the startingField schema passed in via constructor.
-        if (submission.type == "KG_FACT" && disputeContext == null) {
-            val liveSchemaJson: String = runCatching {
-                db.kgSchemaDao().get(runId, groupId)?.let { entity ->
-                    // Compose a unified schema JSON from the entity's separate JSON arrays
-                    """{"relationTypes":${entity.relationTypesJson},"entityTypes":${entity.entityTypesJson},"hardConstraints":${entity.hardConstraintsJson},"softConstraints":${entity.softConstraintsJson}}"""
-                }
-            }.getOrNull() ?: kgSchema  // fall back to startingField schema if DB query fails
+        if (submission.type == "KG_FACT") {
+            val liveSchemaJson: String = loadLiveKgSchemaJson()
 
             val consistencyResult = KGConsistencyChecker(liveSchemaJson).validate(submission)
             if (consistencyResult is ConsistencyResult.Invalid) {
-                Napier.d { "[$groupId] KG_FACT ${submission.id} failed schema check — escalating to DISPUTE: ${consistencyResult.reason}" }
+                Napier.d { "[$groupId] KG_FACT ${submission.id} failed schema check — rejecting before LLM: ${consistencyResult.reason}" }
                 return CriticReview(
                     submissionId = submission.id,
-                    outcome = CriticOutcome.DISPUTE,
+                    outcome = CriticOutcome.REJECT,
                     criticAgentId = criticId,
-                    disputeReason = consistencyResult.reason
+                    rejectionReason = consistencyResult.reason
                 )
+            }
+
+            if (disputeContext == null) {
+                when (
+                    val conflictResult = KGConflictConsistencyChecker(
+                        knowledgeGraphFactDao = db.knowledgeGraphFactDao()
+                    ).check(submission, runId, groupId)
+                ) {
+                    is KGConflictConsistencyResult.Reject -> {
+                        Napier.d { "[$groupId] KG_FACT ${submission.id} failed conflict check — rejecting before critic: ${conflictResult.reason}" }
+                        return CriticReview(
+                            submissionId = submission.id,
+                            outcome = CriticOutcome.REJECT,
+                            criticAgentId = criticId,
+                            rejectionReason = conflictResult.reason
+                        )
+                    }
+
+                    is KGConflictConsistencyResult.Dispute -> {
+                        val arbitrationContext = buildKgConflictArbitrationContext(conflictResult)
+                        Napier.d { "[$groupId] KG_FACT ${submission.id} entered KG dispute arbitration: ${conflictResult.reason}" }
+                        return CriticReview(
+                            submissionId = submission.id,
+                            outcome = CriticOutcome.DISPUTE,
+                            criticAgentId = criticId,
+                            disputeReason = arbitrationContext
+                        )
+                    }
+
+                    is KGConflictConsistencyResult.PassWithPenalty -> {
+                        trustScorePenalty += conflictResult.trustScoreReduction
+                    }
+
+                    KGConflictConsistencyResult.Pass -> Unit
+                }
             }
         }
 
-        val prompt = buildCriticPrompt(submission, disputeContext)
-
-        val model: LLModel = when (criticModel) {
-            "anthropic/claude-sonnet-4.6",
-            "anthropic/claude-sonnet-4"   -> OpenRouterModels.Claude4Sonnet
-            "anthropic/claude-haiku-4.5"  -> OpenRouterModels.Claude4_5Haiku
-            "anthropic/claude-sonnet-4.5" -> OpenRouterModels.Claude4_5Sonnet
-            "anthropic/claude-3-5-sonnet" -> OpenRouterModels.Claude3_5Sonnet
-            "anthropic/claude-3-haiku"    -> OpenRouterModels.Claude3Haiku
-            "openai/gpt-4o"               -> OpenRouterModels.GPT4o
-            "openai/gpt-4o-mini"          -> OpenRouterModels.GPT4oMini
-            "google/gemini-2.5-flash"     -> OpenRouterModels.Gemini2_5Flash
-            else -> LLModel(
-                provider = LLMProvider.OpenRouter,
-                id = criticModel,
-                capabilities = listOf(
-                    ai.koog.prompt.llm.LLMCapability.Temperature,
-                    ai.koog.prompt.llm.LLMCapability.Speculation,
-                    ai.koog.prompt.llm.LLMCapability.Tools,
-                    ai.koog.prompt.llm.LLMCapability.Completion
-                )
+        val responseReview = if (submission.type == "KG_FACT" && disputeContext != null) {
+            kgCriticArbitrationAgent.reviewConflict(
+                submission = submission,
+                disputeContext = disputeContext,
+                criticId = criticId
+            )
+        } else {
+            criticReviewAgent.reviewSubmission(
+                submission = submission,
+                disputeContext = disputeContext,
+                criticId = criticId
             )
         }
 
-        val agent: AIAgent<String, String> = AIAgent.builder()
-            .promptExecutor(executor)
-            .llmModel(model)
-            .systemPrompt(CRITIC_SYSTEM_PROMPT)
-            .toolRegistry(ToolRegistry {})
-            .graphStrategy(singleRunStrategy())
-            .build()
-
-        val responseText = agent.run(prompt)
-
-        return parseCriticResponse(responseText, criticId, submission.id)
+        return responseReview.adjustedForPenalty(trustScorePenalty)
     }
 
-    private fun buildCriticPrompt(
-        submission: StagingSubmissionEntity,
-        disputeContext: String? = null
+    private suspend fun buildKgConflictArbitrationContext(
+        conflictResult: KGConflictConsistencyResult.Dispute
     ): String = buildString {
-        append("""
-        Review the following ${submission.type} submission from a ${submission.role} agent.
-        
-        Submission ID: ${submission.id}
-        Type: ${submission.type}
-        Speculative: ${submission.speculative}
-        Outlier: ${submission.outlier}
-        
-        Content:
-        ---
-        ${submission.content.take(8000)}
-        ${if (submission.content.length > 8000) "\n[...truncated...]" else ""}
-        ---
-        
-        Respond with a JSON object containing:
-        - "outcome": "PROMOTE", "REJECT", or "DISPUTE"
-        - "initialTrustScore": number 0.0-1.0 (only if PROMOTE)
-        - "reason": string (required if REJECT or DISPUTE, optional if PROMOTE)
-        
-        Criteria:
-        - PROMOTE if the submission is accurate, useful, well-structured, and adds value to the KB
-        - REJECT if it's incorrect, duplicate, low quality, incoherent, or violates norms
-        - DISPUTE if quality is borderline or you need a second opinion
-        
-        For speculative submissions: lower bar for promotion (0.5+ is fine), but mark as speculative in reason.
-        For Outlier submissions: allow unconventional approaches; only reject if factually incorrect.
-        
-        JSON response only:
-        """.trimIndent())
-        if (disputeContext != null) {
-            append("\n\nNOTE — This is a SECOND REVIEW (arbitration). The first Critic disputed this submission with reason: \"$disputeContext\". Your verdict is final.")
-        }
-    }
+        appendLine(conflictResult.reason)
+        appendLine()
+        appendLine("Conflicting active fact(s):")
 
-    private fun parseCriticResponse(responseText: String, criticId: String, submissionId: String): CriticReview {
-        return try {
-            // Extract the outermost JSON object using DOT_MATCHES_ALL regex to handle nested objects
-            val jsonStr = Regex("""\{.*\}""", RegexOption.DOT_MATCHES_ALL)
-                .find(responseText)?.value ?: "{}"
-            val obj = json.parseToJsonElement(jsonStr) as JsonObject
-            val outcome = obj["outcome"]?.jsonPrimitive?.content?.let {
-                CriticOutcome.valueOf(it)
-            } ?: CriticOutcome.REJECT
-
-            CriticReview(
-                submissionId = submissionId,
-                outcome = outcome,
-                criticAgentId = criticId,
-                initialTrustScore = obj["initialTrustScore"]?.jsonPrimitive?.content?.toDoubleOrNull(),
-                rejectionReason = if (outcome == CriticOutcome.REJECT) obj["reason"]?.jsonPrimitive?.content else null,
-                disputeReason = if (outcome == CriticOutcome.DISPUTE) obj["reason"]?.jsonPrimitive?.content else null
-            )
-        } catch (e: Exception) {
-            Napier.w(e) { "Failed to parse Critic response: $responseText" }
-            // Default to DISPUTE on parse failure
-            CriticReview(
-                submissionId = submissionId,
-                outcome = CriticOutcome.DISPUTE,
-                criticAgentId = criticId,
-                disputeReason = "Critic response parse error: ${e.message}"
+        conflictResult.conflictingFactIds.mapNotNull { factId ->
+            db.knowledgeGraphFactDao().getById(factId)
+        }.forEach { fact ->
+            appendLine(
+                "- factId=${fact.id} subject=${fact.subject} relation=${fact.relation} object=${fact.objectNode} " +
+                    "trust=${fact.trustScore} generation=${fact.generation} status=${fact.status}"
             )
         }
     }
@@ -357,7 +342,25 @@ class CriticPipeline(
         )
 
         if (review.outcome == CriticOutcome.PROMOTE) {
-            promoteStagingToSubstrate(submission.id, review.initialTrustScore ?: 0.7)
+            val promoted = promoteStagingToSubstrate(submission.id, review.initialTrustScore ?: 0.7)
+            if (promoted) {
+                val wipTaskRef = submission.wipTaskRef?.takeIf { it.isNotBlank() }
+                if (wipTaskRef != null) {
+                    val completed = db.wipTaskDao().completeTask(
+                        nodeId = wipTaskRef,
+                        runId = runId,
+                        groupId = groupId,
+                        agentId = submission.agentId,
+                        generation = submission.generation
+                    )
+                    if (completed > 0) {
+                        onWipTaskCompleted?.invoke(groupId, wipTaskRef, submission.agentId, submission.generation)
+                        Napier.i { "[$groupId] WiP task $wipTaskRef completed by ${submission.agentId} at generation ${submission.generation}" }
+                    } else {
+                        Napier.w { "[$groupId] WiP task $wipTaskRef could not be marked completed for ${submission.agentId}" }
+                    }
+                }
+            }
         }
 
         emitEvent(
@@ -370,48 +373,54 @@ class CriticPipeline(
         )
     }
 
-    private suspend fun promoteStagingToSubstrate(submissionId: String, trustScore: Double) {
-        val submission = db.stagingDao().getById(submissionId) ?: return
+    private suspend fun promoteStagingToSubstrate(submissionId: String, trustScore: Double): Boolean {
+        val submission = db.stagingDao().getById(submissionId) ?: return false
 
-        when (submission.type) {
-            "DOC", "DEATH_NOTE" -> {
-                val isDeadEnd = submission.type == "DEATH_NOTE"
-                // Compute TF-IDF embedding for semantic search (SearchKBTool)
-                val embedding = runCatching { EmbeddingEngine.embed(submission.content) }.getOrNull()
-                db.knowledgeBaseDao().insert(
-                    KnowledgeBaseEntryEntity(
-                        id = UUID.randomUUID().toString(),
-                        content = submission.content,
-                        embedding = embedding,
-                        sourceAgentId = submission.agentId,
-                        generation = submission.generation,
-                        trustScore = trustScore,
-                        domain = extractDomain(submission.content),
-                        groupId = groupId,
-                        runId = runId,
-                        createdAtMs = System.currentTimeMillis(),
-                        isDeadEnd = isDeadEnd
+        return try {
+            when (submission.type) {
+                "DOC", "DEATH_NOTE" -> {
+                    val isDeadEnd = submission.type == "DEATH_NOTE"
+                    // Compute TF-IDF embedding for semantic search (SearchKBTool)
+                    val embedding = runCatching { EmbeddingEngine.embed(submission.content) }.getOrNull()
+                    db.knowledgeBaseDao().insert(
+                        KnowledgeBaseEntryEntity(
+                            id = UUID.randomUUID().toString(),
+                            content = submission.content,
+                            embedding = embedding,
+                            sourceAgentId = submission.agentId,
+                            generation = submission.generation,
+                            trustScore = trustScore,
+                            domain = extractDomain(submission.content),
+                            groupId = groupId,
+                            runId = runId,
+                            createdAtMs = System.currentTimeMillis(),
+                            isDeadEnd = isDeadEnd
+                        )
                     )
-                )
+                }
+                "TOOL" -> {
+                    // Tool promotion is handled by a separate ToolPromotionService
+                    // that parses the tool JSON and creates ToolRegistryEntryEntity
+                    promoteToolSubmission(submission, trustScore)
+                }
+                "KG_FACT" -> {
+                    // Parse and promote typed KG fact to the knowledge_graph_facts table
+                    promoteKgFactSubmission(submission, trustScore)
+                }
+                "KG_CONSTRAINT" -> {
+                    // B-2: KG constraints are applied to the live KGSchemaDao so future KGConsistencyChecker
+                    // validations (B-1) reflect agent-proposed schema extensions.
+                    applyKgConstraintToSchema(submission)
+                }
+                else -> {
+                    // PLAN_UPDATE, DISPATCH handled by respective services
+                    Napier.d { "[$groupId] Non-KB submission promoted: ${submission.type} ${submission.id}" }
+                }
             }
-            "TOOL" -> {
-                // Tool promotion is handled by a separate ToolPromotionService
-                // that parses the tool JSON and creates ToolRegistryEntryEntity
-                promoteToolSubmission(submission, trustScore)
-            }
-            "KG_FACT" -> {
-                // Parse and promote typed KG fact to the knowledge_graph_facts table
-                promoteKgFactSubmission(submission, trustScore)
-            }
-            "KG_CONSTRAINT" -> {
-                // B-2: KG constraints are applied to the live KGSchemaDao so future KGConsistencyChecker
-                // validations (B-1) reflect agent-proposed schema extensions.
-                applyKgConstraintToSchema(submission)
-            }
-            else -> {
-                // PLAN_UPDATE, DISPATCH handled by respective services
-                Napier.d { "[$groupId] Non-KB submission promoted: ${submission.type} ${submission.id}" }
-            }
+            true
+        } catch (e: Exception) {
+            Napier.e(e) { "[$groupId] Failed to promote staging submission ${submission.id}" }
+            false
         }
     }
 
@@ -458,7 +467,20 @@ class CriticPipeline(
                     createdAtMs = System.currentTimeMillis()
                 )
             )
-            Napier.i { "[$groupId] KG fact promoted: ($subject, $relation, $obj) trust=$trustScore" }
+            val conflictingFacts = db.knowledgeGraphFactDao()
+                .queryByTriplePattern(runId, groupId, subject, relation, "%", 100)
+                .filter { it.objectNode != obj && it.status == "active" }
+            if (conflictingFacts.isNotEmpty()) {
+                conflictingFacts.forEach { fact ->
+                    db.knowledgeGraphFactDao().markDisputed(fact.id)
+                }
+                Napier.i {
+                    "[$groupId] KG fact promoted: ($subject, $relation, $obj) trust=$trustScore; " +
+                        "disputed ${conflictingFacts.size} conflicting active fact(s)"
+                }
+            } else {
+                Napier.i { "[$groupId] KG fact promoted: ($subject, $relation, $obj) trust=$trustScore" }
+            }
         } catch (e: Exception) {
             Napier.e(e) { "[$groupId] Failed to promote KG_FACT submission ${submission.id}" }
         }
@@ -470,22 +492,30 @@ class CriticPipeline(
     ) {
         try {
             val toolPayload = json.parseToJsonElement(submission.content) as? JsonObject ?: return
-            db.toolRegistryDao().insert(
-                ToolRegistryEntryEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = toolPayload["name"]?.jsonPrimitive?.content ?: "unnamed_tool",
-                    authorAgentId = submission.agentId,
-                    inputSchemaJson = toolPayload["inputSchema"]?.toString() ?: "{}",
-                    outputSchemaJson = toolPayload["outputSchema"]?.toString() ?: "{}",
-                    domain = toolPayload["domain"]?.jsonPrimitive?.content ?: "general",
-                    code = toolPayload["code"]?.jsonPrimitive?.content ?: "",
-                    codeLanguage = toolPayload["language"]?.jsonPrimitive?.content ?: "shell",
-                    generation = submission.generation,
-                    groupId = groupId,
-                    runId = runId,
-                    createdAtMs = System.currentTimeMillis()
-                )
+            val toolName = toolPayload["name"]?.jsonPrimitive?.content ?: "unnamed_tool"
+            val previousVersion = db.toolRegistryDao().getLatestVersionByName(runId, groupId, toolName)
+            val nextVersion = (previousVersion?.version ?: 0) + 1
+            val newTool = ToolRegistryEntryEntity(
+                id = UUID.randomUUID().toString(),
+                name = toolName,
+                version = nextVersion,
+                authorAgentId = submission.agentId,
+                inputSchemaJson = toolPayload["inputSchema"]?.toString() ?: "{}",
+                outputSchemaJson = toolPayload["outputSchema"]?.toString() ?: "{}",
+                domain = toolPayload["domain"]?.jsonPrimitive?.content ?: "general",
+                code = toolPayload["code"]?.jsonPrimitive?.content ?: "",
+                codeLanguage = toolPayload["language"]?.jsonPrimitive?.content ?: "shell",
+                generation = submission.generation,
+                groupId = groupId,
+                runId = runId,
+                createdAtMs = System.currentTimeMillis(),
+                previousVersionId = previousVersion?.id
             )
+            toolMaterializer.materialize(newTool)
+            if (previousVersion?.status == "active") {
+                db.toolRegistryDao().update(previousVersion.copy(status = "archived"))
+            }
+            db.toolRegistryDao().insert(newTool)
         } catch (e: Exception) {
             Napier.e(e) { "[$groupId] Failed to promote tool submission ${submission.id}" }
         }
@@ -513,6 +543,16 @@ class CriticPipeline(
             } catch (_: Exception) { null }
 
             val now = System.currentTimeMillis()
+            db.kgSchemaConstraintDao().insert(
+                KgSchemaConstraintEntity(
+                    id = submission.id,
+                    constraintJson = submission.content,
+                    source = submission.agentId,
+                    runId = runId,
+                    groupId = groupId,
+                    createdAtMs = now
+                )
+            )
             val base: KGSchemaEntity = db.kgSchemaDao().get(runId, groupId)
                 ?: KGSchemaEntity(
                     id = "${runId}_${groupId}_schema",
@@ -572,6 +612,84 @@ class CriticPipeline(
         }
     }
 
+    /** Loads the live KG schema from the baseline row plus persisted KG constraint artifacts. */
+    private suspend fun loadLiveKgSchemaJson(): String {
+        val baseline = runCatching { db.kgSchemaDao().get(runId, groupId) }.getOrNull()
+            ?: return kgSchema
+        val constraints = runCatching { db.kgSchemaConstraintDao().getAll(runId, groupId) }
+            .getOrDefault(emptyList())
+        return buildUnifiedKgSchemaJson(baseline, constraints)
+    }
+
+    /**
+     * Merges the baseline schema row with separately persisted KG constraint artifacts.
+     *
+     * This keeps promoted constraints auditable without changing the validation shape that
+     * [KGConsistencyChecker] already understands.
+     */
+    private fun buildUnifiedKgSchemaJson(
+        baseline: KGSchemaEntity,
+        constraints: List<KgSchemaConstraintEntity>
+    ): String {
+        val entityTypes = parseStringList(baseline.entityTypesJson).toMutableList()
+        val relationTypes = parseStringList(baseline.relationTypesJson).toMutableList()
+        val hardConstraints = parseJsonObjectArray(baseline.hardConstraintsJson).toMutableList()
+        val softConstraints = parseJsonObjectArray(baseline.softConstraintsJson).toMutableList()
+
+        constraints.forEach { constraint ->
+            val parsed = runCatching { json.parseToJsonElement(constraint.constraintJson) as? JsonObject }.getOrNull()
+            if (parsed == null) {
+                hardConstraints += normalizePlainTextConstraint(constraint)
+                return@forEach
+            }
+
+            parsed["entityType"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { entityType ->
+                if (entityType !in entityTypes) entityTypes += entityType
+                return@forEach
+            }
+
+            parsed["relationType"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { relationType ->
+                if (relationType !in relationTypes) relationTypes += relationType
+                return@forEach
+            }
+
+            when (parsed["type"]?.jsonPrimitive?.contentOrNull?.lowercase()) {
+                "soft" -> softConstraints += parsed.toString()
+                else -> hardConstraints += parsed.toString()
+            }
+        }
+
+        return buildString {
+            append('{')
+            append("\"relationTypes\":").append(stringListToJson(relationTypes)).append(',')
+            append("\"entityTypes\":").append(stringListToJson(entityTypes)).append(',')
+            append("\"hardConstraints\":").append(jsonArrayLiteral(hardConstraints)).append(',')
+            append("\"softConstraints\":").append(jsonArrayLiteral(softConstraints))
+            append('}')
+        }
+    }
+
+    private fun normalizePlainTextConstraint(constraint: KgSchemaConstraintEntity): String {
+        val escaped = constraint.constraintJson
+            .take(500)
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+        return """{"id":"${constraint.id}","source":"${constraint.source}","description":"$escaped","expression":""}"""
+    }
+
+    private fun parseJsonObjectArray(arrayJson: String): List<String> = try {
+        val arr = json.parseToJsonElement(arrayJson) as? JsonArray ?: return emptyList()
+        arr.map { it.toString() }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    private fun jsonArrayLiteral(elements: List<String>): String = buildString {
+        append('[')
+        append(elements.joinToString(","))
+        append(']')
+    }
+
     /**
      * Appends [newEntryJson] (a single JSON object string) to a JSON array string.
      * If [arrayJson] is not a valid array, starts a fresh single-element array.
@@ -622,6 +740,12 @@ class CriticPipeline(
             ?.trim()
             ?.takeIf { it.isNotBlank() }
 
+    private fun CriticReview.adjustedForPenalty(penalty: Double): CriticReview {
+        if (penalty <= 0.0 || outcome != CriticOutcome.PROMOTE) return this
+        val baseTrust = initialTrustScore ?: 0.7
+        return copy(initialTrustScore = (baseTrust - penalty).coerceIn(0.0, 1.0))
+    }
+
     private suspend fun emitEvent(type: String, payload: String) {
         db.eventLogDao().insert(
             EventLogEntryEntity(
@@ -634,20 +758,6 @@ class CriticPipeline(
                 payloadJson = payload
             )
         )
-    }
-
-    companion object {
-        private val CRITIC_SYSTEM_PROMPT = """
-            You are a Critic agent in the EvoKammer civilisational multi-agent system.
-            Your role is to evaluate submissions from other agents and decide whether to promote,
-            reject, or dispute them.
-            
-            You are rigorous but fair. You promote high-quality, accurate, and useful content.
-            You reject content that is incorrect, duplicate, incoherent, or violates system norms.
-            You dispute borderline content that needs a second opinion.
-            
-            Always respond with a JSON object only.
-        """.trimIndent()
     }
 }
 

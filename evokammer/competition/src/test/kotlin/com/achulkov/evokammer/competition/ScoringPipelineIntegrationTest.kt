@@ -146,6 +146,54 @@ class ScoringPipelineIntegrationTest {
         assertTrue(ex != null, "Should throw on double openGate")
     }
 
+    @Test
+    fun `gate force reveals missing groups when timeout boundary is reached`() = runTest {
+        val gate = BlindSubmissionGate(listOf("g1", "g2"))
+        val revealedDeferred = async { gate.revealedScores.first() }
+        yield()
+
+        gate.openGate(0)
+        gate.submitGroupResults(
+            "g1", GroupRoundResult(
+                groupId = "g1", roundIndex = 0,
+                dimensionScores = mapOf("accuracy" to 5.0),
+                failureModesTriggered = emptyList(),
+                automatedTestsPassed = 1, automatedTestsFailed = 0
+            )
+        )
+
+        gate.closeAndReveal(forceReveal = true)
+
+        val revealed = revealedDeferred.await()
+        assertTrue(revealed.wasForced, "Force reveal should be marked as forced")
+        assertEquals(listOf("g2"), revealed.missingGroupIds)
+        assertTrue(revealed.scores["g2"]?.isDefaultZeroScore == true)
+    }
+
+    @Test
+    fun `blind gate does not reveal scores before close`() = runTest {
+        val gate = BlindSubmissionGate(listOf("g1", "g2"))
+        val revealedDeferred = async { gate.revealedScores.first() }
+        yield()
+
+        gate.openGate(0)
+        gate.submitGroupResults(
+            "g1", GroupRoundResult(
+                groupId = "g1", roundIndex = 0,
+                dimensionScores = mapOf("accuracy" to 5.0),
+                failureModesTriggered = emptyList(),
+                automatedTestsPassed = 1, automatedTestsFailed = 0
+            )
+        )
+
+        yield()
+        assertFalse(revealedDeferred.isCompleted, "Gate must not expose scores before closeAndReveal")
+
+        gate.closeAndReveal(forceReveal = true)
+        val revealed = revealedDeferred.await()
+        assertEquals(0, revealed.scores["g2"]?.automatedTestsFailed)
+    }
+
     // ── ScoringEngine math ────────────────────────────────────────────────────
 
     @Test
@@ -197,6 +245,48 @@ class ScoringPipelineIntegrationTest {
         // Raw weighted for cheater: ~10.0 - 2.0 penalty = 8.0
         assertTrue(cheaterScore < 10.0, "Penalty must reduce cheater's score below perfect")
         assertTrue(cheaterScore >= 0.0, "Score must not go negative")
+    }
+
+    @Test
+    fun `automated test failures reduce blind score`() = runTest {
+        val mandatorySheet = GradingSheet(
+            sheetId = "mandatory-sheet",
+            runId = "run-test",
+            roundIndex = 0,
+            graderGroupId = "grader-mandatory",
+            rubricDimensions = listOf(
+                RubricDimension("accuracy", "accuracy", 1.0, "Score accuracy")
+            ),
+            automatedTests = listOf(
+                AutomatedTest("must-pass", "Must pass", "alpha", penaltyOnFailure = 3.0, isMandatory = true)
+            ),
+            failureModes = emptyList(),
+            comparativePairs = emptyList(),
+            sealedAt = System.currentTimeMillis()
+        )
+
+        val result = scoreViaEngine(
+            roundIndex = 0,
+            groupResults = mapOf(
+                "pass" to GroupRoundResult(
+                    groupId = "pass", roundIndex = 0,
+                    dimensionScores = mapOf("accuracy" to 10.0),
+                    failureModesTriggered = emptyList(),
+                    automatedTestsPassed = 1, automatedTestsFailed = 0
+                ),
+                "fail" to GroupRoundResult(
+                    groupId = "fail", roundIndex = 0,
+                    dimensionScores = mapOf("accuracy" to 10.0),
+                    failureModesTriggered = emptyList(),
+                    automatedTestsPassed = 0, automatedTestsFailed = 1
+                )
+            ),
+            sheet = mandatorySheet
+        )
+
+        val passScore = result.scores.first { it.groupId == "pass" }.weightedTotal
+        val failScore = result.scores.first { it.groupId == "fail" }.weightedTotal
+        assertTrue(failScore < passScore, "Failed automated tests must reduce the reveal-phase score")
     }
 
     @Test

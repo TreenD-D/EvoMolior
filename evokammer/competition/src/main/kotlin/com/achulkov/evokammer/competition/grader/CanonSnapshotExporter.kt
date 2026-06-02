@@ -13,8 +13,8 @@ import kotlinx.coroutines.withContext
  * - All active KG facts (subject, relation, object, confidence)
  * - Promoted staging entries (type, content, generation) from the current round
  *
- * The export is intentionally capped at MAX_KB_DOCS/MAX_KG_FACTS/MAX_STAGING_ENTRIES to
- * prevent overwhelming the grader agent's context window.
+ * The export is intentionally capped at the configured limits to prevent overwhelming the
+ * grader agent's context window.
  *
  * The output format is designed to be human-readable and LLM-friendly rather than
  * machine-parseable — grader agents read it in natural language and reason about it.
@@ -39,15 +39,19 @@ object CanonSnapshotExporter {
         db: EvoKammerDatabase,
         runId: String,
         groupId: String,
-        roundIndex: Int
+        roundIndex: Int,
+        maxKbDocs: Int = MAX_KB_DOCS,
+        maxKgFacts: Int = MAX_KG_FACTS,
+        maxStagingEntries: Int = MAX_STAGING_ENTRIES,
+        maxContentChars: Int = MAX_CONTENT_CHARS
     ): String = withContext(Dispatchers.IO) {
         try {
             val kbDocs = db.knowledgeBaseDao().search(
                 runId = runId,
                 groupId = groupId,
                 query = "",   // empty query returns all (LIKE '%' matches everything)
-                limit = MAX_KB_DOCS
-            ).take(MAX_KB_DOCS)
+                limit = maxKbDocs
+            ).take(maxKbDocs)
 
             val kgFacts = db.knowledgeGraphFactDao().queryByTriplePattern(
                 runId = runId,
@@ -55,15 +59,15 @@ object CanonSnapshotExporter {
                 subjectPattern = "%",
                 relationPattern = "%",
                 objectPattern = "%",
-                limit = MAX_KG_FACTS
+                limit = maxKgFacts
             )
 
             val stagingEntries = db.stagingDao().getAll(
                 runId = runId,
                 groupId = groupId,
-                limit = MAX_STAGING_ENTRIES
+                limit = maxStagingEntries
             ).filter { it.status == "promoted" }
-                .take(MAX_STAGING_ENTRIES)
+                .take(maxStagingEntries)
 
             val kbCount = db.knowledgeBaseDao().countActive(runId, groupId)
             val kgCount = db.knowledgeGraphFactDao().countActive(runId, groupId)
@@ -89,8 +93,8 @@ object CanonSnapshotExporter {
                         appendLine("${i + 1}. [domain=${doc.domain}] trust=${
                             String.format(java.util.Locale.ROOT, "%.2f", doc.trustScore)
                         } gen=${doc.generation}")
-                        val content = if (doc.content.length > MAX_CONTENT_CHARS) {
-                            doc.content.take(MAX_CONTENT_CHARS) + "...[truncated]"
+                        val content = if (doc.content.length > maxContentChars) {
+                            doc.content.take(maxContentChars) + "...[truncated]"
                         } else {
                             doc.content
                         }
@@ -123,8 +127,8 @@ object CanonSnapshotExporter {
                     stagingEntries.forEach { s ->
                         appendLine()
                         appendLine("[type=${s.type} gen=${s.generation} agent=${s.agentId.take(8)}]")
-                        val content = if (s.content.length > MAX_CONTENT_CHARS) {
-                            s.content.take(MAX_CONTENT_CHARS) + "...[truncated]"
+                        val content = if (s.content.length > maxContentChars) {
+                            s.content.take(maxContentChars) + "...[truncated]"
                         } else {
                             s.content
                         }

@@ -3,11 +3,11 @@ package com.achulkov.evokammer.agents.factory
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.core.agent.singleRunStrategy
 import ai.koog.agents.core.tools.ToolRegistry
-import ai.koog.prompt.executor.clients.openrouter.OpenRouterModels
-import ai.koog.prompt.executor.llms.all.simpleOpenRouterExecutor
-import ai.koog.prompt.llm.LLMCapability
-import ai.koog.prompt.llm.LLMProvider
+import ai.koog.agents.features.eventHandler.feature.EventHandler
+import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.llm.LLModel
+import com.achulkov.evokammer.core.config.ModelSelectionConfig
+import com.achulkov.evokammer.core.contract.BlockingAgentAbortException
 import com.achulkov.evokammer.core.model.Role
 import io.github.aakira.napier.Napier
 
@@ -21,17 +21,19 @@ import io.github.aakira.napier.Napier
  * This class provides the [agentRunner] callback consumed by `GenesisCouncil`.
  *
  * @param openRouterApiKey OpenRouter API key for LLM calls.
- * @param councilModelId The LLM model to use for all council agents. Defaults to a strong reasoning model.
+ * @param councilModelId The LLM model to use for all council agents. Defaults to the shared
+ *   cost-conscious council model from [ModelSelectionConfig].
  * @param maxIterations Maximum Koog iterations per council agent (defaults to 10 — single-shot
  *   agents still need ≥2 graph iterations: one for the LLM call and one to return the result).
  */
 class CouncilRunner(
     private val openRouterApiKey: String,
-    private val councilModelId: String = "anthropic/claude-sonnet-4",
-    private val maxIterations: Int = 10
+    private val councilModelId: String = ModelSelectionConfig.DEFAULT_COUNCIL_MODEL,
+    private val maxIterations: Int = 10,
+    private val promptExecutor: PromptExecutor? = null
 ) {
 
-    private val executor by lazy { simpleOpenRouterExecutor(openRouterApiKey) }
+    private val executor by lazy { promptExecutor ?: createOpenRouterPromptExecutor(openRouterApiKey) }
 
     /**
      * Returns a suspend function compatible with `GenesisCouncil.run`.
@@ -65,52 +67,36 @@ class CouncilRunner(
                 .promptExecutor(executor)
                 .llmModel(model)
                 .systemPrompt(systemPrompt)
+                .responseProcessor(EmptyAssistantResponseRecoveryProcessor)
                 .toolRegistry(ToolRegistry.EMPTY)
                 .maxIterations(maxIterations)
                 .graphStrategy(singleRunStrategy())
+                .install(EventHandler.Feature) { config ->
+                    config.installBlockingFailurePolicy("Council[$role]")
+                }
                 .build()
 
-            val result = agent.run(
-                """
-                COUNCIL CONTEXT (outputs from previous council agents):
-                $contextJson
-                
-                Produce your structured JSON output now.
-                """.trimIndent()
-            )
+            val result = runWithOpenRouterProviderRetry("Council[$role]") {
+                agent.run(
+                    """
+                    COUNCIL CONTEXT (outputs from previous council agents):
+                    $contextJson
+                    
+                    Produce your structured JSON output now.
+                    """.trimIndent()
+                )
+            }
             val output = result.trim().ifBlank { "{}" }
             Napier.i("CouncilRunner: ${role.name} produced ${output.length} chars")
             output
+        } catch (e: BlockingAgentAbortException) {
+            Napier.e(e) { "CouncilRunner: ${role.name} aborted due to a blocking runtime error" }
+            throw e
         } catch (e: Exception) {
             Napier.e("CouncilRunner: ${role.name} failed — ${e.message}")
             "{}" // Return empty JSON so the council can continue
         }
     }
 
-    private fun resolveModel(modelId: String): LLModel = when (modelId) {
-        "google/gemini-2.5-flash"                   -> OpenRouterModels.Gemini2_5Flash
-        "google/gemini-2.5-flash-lite"              -> OpenRouterModels.Gemini2_5FlashLite
-        "google/gemini-2.5-pro"                     -> OpenRouterModels.Gemini2_5Pro
-        "anthropic/claude-sonnet-4.6",
-        "anthropic/claude-sonnet-4"                 -> OpenRouterModels.Claude4Sonnet
-        "anthropic/claude-haiku-4.5"                -> OpenRouterModels.Claude4_5Haiku
-        "anthropic/claude-sonnet-4.5"               -> OpenRouterModels.Claude4_5Sonnet
-        "anthropic/claude-3-5-sonnet"               -> OpenRouterModels.Claude3_5Sonnet
-        "anthropic/claude-3-7-sonnet"               -> OpenRouterModels.Claude3_7Sonnet
-        "openai/gpt-4o"                             -> OpenRouterModels.GPT4o
-        "openai/gpt-4o-mini"                        -> OpenRouterModels.GPT4oMini
-        "deepseek/deepseek-v3.2",
-        "deepseek/deepseek-chat-v3-0324"            -> OpenRouterModels.DeepSeekV30324
-        // Fallback: create with standard capabilities so Koog accepts it
-        else -> LLModel(
-            provider = LLMProvider.OpenRouter,
-            id = modelId,
-            capabilities = listOf(
-                LLMCapability.Temperature,
-                LLMCapability.Speculation,
-                LLMCapability.Tools,
-                LLMCapability.Completion
-            )
-        )
-    }
+    private fun resolveModel(modelId: String): LLModel = OpenRouterModelResolver.resolve(modelId)
 }

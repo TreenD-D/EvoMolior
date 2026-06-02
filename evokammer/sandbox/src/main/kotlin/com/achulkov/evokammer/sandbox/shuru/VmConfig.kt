@@ -1,5 +1,7 @@
 package com.achulkov.evokammer.sandbox.shuru
 
+import com.achulkov.evokammer.sandbox.network.PUBLIC_WEB_HOST_ALLOWLIST
+
 /**
  * Configuration for a Shuru microVM agent instance.
  *
@@ -44,7 +46,8 @@ data class VmConfig(
 data class FilesystemMountConfig(
     val kbMountHostPath: String,
     val toolsMountHostPath: String,
-    val stagingMountHostPath: String
+    val stagingMountHostPath: String,
+    val artifactsMountHostPath: String? = null
 )
 
 /**
@@ -60,22 +63,37 @@ data class NetworkAllowlistConfig(
     val ipcTargetHost: String = "10.0.0.1"
 ) {
     companion object {
+        /**
+         * Broad baseline public-web allowlist.
+         *
+         * This keeps the sandbox useful for general-purpose runs while still limiting egress
+         * to obvious public web, code hosting, documentation, and model-provider domains.
+         */
+        val GENERAL_WEB = NetworkAllowlistConfig(
+            allowedDomains = PUBLIC_WEB_HOST_ALLOWLIST,
+            rateLimit = 30
+        )
+
         /** Allowlist for Researcher role. */
         val RESEARCHER = NetworkAllowlistConfig(
-            allowedDomains = setOf(
-                "en.wikipedia.org", "arxiv.org", "news.ycombinator.com",
-                "developer.mozilla.org", "docs.python.org", "docs.kotlin.org",
-                "kotlinlang.org", "pub.dev", "pypi.org"
+            allowedDomains = GENERAL_WEB.allowedDomains + setOf(
+                "en.wikipedia.org",
+                "docs.kotlin.org",
+                "pub.dev"
             ),
             rateLimit = 20
         )
 
         /** Allowlist for Builder role — package registries + docs. */
         val BUILDER = NetworkAllowlistConfig(
-            allowedDomains = setOf(
-                "search.maven.org", "pypi.org", "npmjs.com", "crates.io",
-                "docs.python.org", "docs.kotlin.org", "kotlinlang.org",
-                "developer.mozilla.org"
+            allowedDomains = GENERAL_WEB.allowedDomains + setOf(
+                "search.maven.org",
+                "pypi.org",
+                "npmjs.com",
+                "crates.io",
+                "docs.python.org",
+                "docs.kotlin.org",
+                "kotlinlang.org"
             ),
             rateLimit = 15
         )
@@ -88,9 +106,13 @@ data class NetworkAllowlistConfig(
 
         /** Broader allowlist for Outlier and Council roles. */
         val BROAD = NetworkAllowlistConfig(
-            allowedDomains = RESEARCHER.allowedDomains + setOf(
-                "github.com", "stackoverflow.com", "reddit.com",
-                "medium.com", "towardsdatascience.com"
+            allowedDomains = GENERAL_WEB.allowedDomains + setOf(
+                "reddit.com",
+                "substack.com",
+                "substackcdn.com",
+                "medium.com",
+                "towardsdatascience.com",
+                "dev.to"
             ),
             rateLimit = 30
         )

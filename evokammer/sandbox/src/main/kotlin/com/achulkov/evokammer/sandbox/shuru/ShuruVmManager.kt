@@ -296,7 +296,12 @@ class ShuruVmManager(
               "mounts": [
                 { "host": "${config.mounts.kbMountHostPath}", "guest": "/kb", "read_only": true },
                 { "host": "${config.mounts.toolsMountHostPath}", "guest": "/tools", "read_only": true },
-                { "host": "${config.mounts.stagingMountHostPath}", "guest": "/staging", "read_only": false, "write_only": true }
+                { "host": "${config.mounts.stagingMountHostPath}", "guest": "/staging", "read_only": false, "write_only": true }${
+                    config.mounts.artifactsMountHostPath?.let {
+                        """,
+                { "host": "$it", "guest": "/artifacts", "read_only": true }"""
+                    } ?: ""
+                }
               ],
               "network": {
                 "allowed_domains": ${config.network.allowedDomains.joinToString(",", "[", "]") { "\"$it\"" }},

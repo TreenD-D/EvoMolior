@@ -1,6 +1,8 @@
 package com.achulkov.evokammer.agents.delegation
 
 import com.achulkov.evokammer.agents.factory.EvoKammerAgentFactory
+import com.achulkov.evokammer.agents.factory.requireProductiveAgentOutcome
+import com.achulkov.evokammer.agents.factory.runWithOpenRouterProviderRetry
 import com.achulkov.evokammer.core.budget.BudgetConfig
 import com.achulkov.evokammer.core.budget.BudgetLedger
 import com.achulkov.evokammer.core.contract.AgentBootContext
@@ -90,12 +92,17 @@ class SubAgentCoordinator(
         val agentContext = factory.create(subBootContext, existingBudgetLedger = subBudgetLedger)
         var output = ""
         var stagingCount = 0
+        var completed = true
 
         try {
-            output = agentContext.agent.run(buildSubPrompt(request, subBootContext))
+            output = runWithOpenRouterProviderRetry("SubAgent[$subAgentId]") {
+                agentContext.agent.run(buildSubPrompt(request, subBootContext))
+            }
+            requireProductiveAgentOutcome("SubAgent[$subAgentId]", output, subBudgetLedger)
         } catch (e: Exception) {
             Napier.e("SubAgentCoordinator: sub-agent $subAgentId error: ${e.message}", e)
             output = "Sub-agent error: ${e.message}"
+            completed = false
         } finally {
             activeSubAgents.remove(subAgentId)
             // Count staging submissions attributed to this sub-agent
@@ -113,7 +120,7 @@ class SubAgentCoordinator(
             output = output,
             stagingContributions = stagingCount,
             budgetConsumed = consumed,
-            completed = true
+            completed = completed
         )
     }
 
@@ -146,6 +153,8 @@ class SubAgentCoordinator(
         budgetToken = "sub-token:$subAgentId:${System.currentTimeMillis()}",
         substrateDbPath = parentContext.substrateDbPath,
         stagingMountPath = parentContext.stagingMountPath,
+        artifactsMountPath = parentContext.artifactsMountPath,
+        inputArtifacts = parentContext.inputArtifacts,
         wipTaskClaim = null,        // sub-agents don't claim WiP tasks directly
         legacyProtocol = null,      // sub-agents don't receive Legacy Protocols
         stageDisclosure = parentContext.stageDisclosure,

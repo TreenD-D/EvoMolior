@@ -272,6 +272,11 @@ room {
 compose.desktop {
     application {
         mainClass = "com.achulkov.evomolior.MainKt"
+        if (System.getProperty("os.name").contains("Mac", ignoreCase = true)) {
+            // Corretto 17.0.7 on macOS has been crashing in HotSpot compiler threads for this app,
+            // so we prefer the slower interpreted mode over a JIT-backed launcher until the runtime is upgraded.
+            jvmArgs += "-Xint"
+        }
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)

@@ -60,3 +60,24 @@ jobs:
           name: ${{ matrix.artifact_name }}
           retention-days: 7
           path: ${{ matrix.artifact_path }}
+
+  scan-run-logs:
+    runs-on: ubuntu-latest
+    name: Scan run logs
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-gradle
+        with:
+          gradle-cache-encryption-key: ${{ secrets.GRADLE_CACHE_ENCRYPTION_KEY }}
+
+      - name: Generate log artifact
+        run: ./gradlew :evokammer:api:test --tests com.achulkov.evokammer.api.service.RunLogSignatureScannerTest --console=plain > "$RUNNER_TEMP/evokammer-run.log" 2>&1
+
+      - name: Scan run log signatures
+        run: ./gradlew :evokammer:api:scanRunLogSignatures -PrunLogPath="$RUNNER_TEMP/evokammer-run.log"

@@ -1,4 +1,5 @@
 package com.achulkov.evokammer.sandbox.network
+
 import com.achulkov.evokammer.core.model.Role
 import java.net.URI
 /**
@@ -11,7 +12,7 @@ import java.net.URI
  * @param roleAllowedHosts Optional per-role host constraints.
  */
 class AllowlistProxy(
-    private val globalAllowedHosts: Set<String> = DEFAULT_ALLOWED_HOSTS,
+    private val globalAllowedHosts: Set<String> = PUBLIC_WEB_HOST_ALLOWLIST,
     private val roleAllowedHosts: Map<Role, Set<String>> = emptyMap()
 ) {
     /**
@@ -33,6 +34,7 @@ class AllowlistProxy(
         }
         return AllowlistDecision.Allowed(host)
     }
+
     /**
      * True when [host] matches any allowlist entry.
      *
@@ -48,6 +50,7 @@ class AllowlistProxy(
             normalisedHost == e || normalisedHost.endsWith(".$e")
         }
     }
+
     /**
      * Parses URL host safely.
      *
@@ -55,18 +58,19 @@ class AllowlistProxy(
      */
     private fun parseHost(url: String): String? =
         runCatching { URI(url).host }.getOrNull()
+
     companion object {
-        /** Conservative default host allowlist for web research roles. */
-        val DEFAULT_ALLOWED_HOSTS: Set<String> = setOf(
-            "wikipedia.org",
-            "arxiv.org",
-            "docs.python.org",
-            "developer.mozilla.org",
-            "kotlinlang.org",
-            "github.com"
-        )
+        /**
+         * Broad default host allowlist for general-purpose web access.
+         *
+         * Exact host entries are kept intentionally coarse so ordinary runs can fetch public
+         * documentation, source code, package metadata, and provider pages without being tied
+         * to a niche research-only host list.
+         */
+        val DEFAULT_ALLOWED_HOSTS: Set<String> = PUBLIC_WEB_HOST_ALLOWLIST
     }
 }
+
 /** Result of an allowlist policy evaluation. */
 sealed class AllowlistDecision {
     /** Request is allowed. */

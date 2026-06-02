@@ -1,0 +1,1694 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 5,
+    "identityHash": "73d4a1945ef8c46e811b55e3ccbd04d1",
+    "entities": [
+      {
+        "tableName": "knowledge_base_entries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `version` INTEGER NOT NULL, `content` TEXT NOT NULL, `embedding` BLOB, `sourceAgentId` TEXT NOT NULL, `generation` INTEGER NOT NULL, `trustScore` REAL NOT NULL, `citationCount` INTEGER NOT NULL, `domain` TEXT NOT NULL, `status` TEXT NOT NULL, `groupId` TEXT NOT NULL, `runId` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, `isDeadEnd` INTEGER NOT NULL, `previousVersionId` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "content",
+            "columnName": "content",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "embedding",
+            "columnName": "embedding",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "sourceAgentId",
+            "columnName": "sourceAgentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "generation",
+            "columnName": "generation",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trustScore",
+            "columnName": "trustScore",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "citationCount",
+            "columnName": "citationCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "domain",
+            "columnName": "domain",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "createdAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isDeadEnd",
+            "columnName": "isDeadEnd",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "previousVersionId",
+            "columnName": "previousVersionId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_knowledge_base_entries_groupId",
+            "unique": false,
+            "columnNames": [
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_base_entries_groupId` ON `${TABLE_NAME}` (`groupId`)"
+          },
+          {
+            "name": "index_knowledge_base_entries_runId",
+            "unique": false,
+            "columnNames": [
+              "runId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_base_entries_runId` ON `${TABLE_NAME}` (`runId`)"
+          },
+          {
+            "name": "index_knowledge_base_entries_domain",
+            "unique": false,
+            "columnNames": [
+              "domain"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_base_entries_domain` ON `${TABLE_NAME}` (`domain`)"
+          },
+          {
+            "name": "index_knowledge_base_entries_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_base_entries_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_knowledge_base_entries_generation",
+            "unique": false,
+            "columnNames": [
+              "generation"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_base_entries_generation` ON `${TABLE_NAME}` (`generation`)"
+          },
+          {
+            "name": "index_knowledge_base_entries_runId_groupId_status",
+            "unique": false,
+            "columnNames": [
+              "runId",
+              "groupId",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_base_entries_runId_groupId_status` ON `${TABLE_NAME}` (`runId`, `groupId`, `status`)"
+          }
+        ]
+      },
+      {
+        "tableName": "knowledge_graph_facts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `subject` TEXT NOT NULL, `relation` TEXT NOT NULL, `object` TEXT NOT NULL, `confidence` REAL NOT NULL, `sourceAgentId` TEXT NOT NULL, `generation` INTEGER NOT NULL, `trustScore` REAL NOT NULL, `provenanceJson` TEXT NOT NULL, `status` TEXT NOT NULL, `speculative` INTEGER NOT NULL, `groupId` TEXT NOT NULL, `runId` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subject",
+            "columnName": "subject",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relation",
+            "columnName": "relation",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "objectNode",
+            "columnName": "object",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceAgentId",
+            "columnName": "sourceAgentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "generation",
+            "columnName": "generation",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trustScore",
+            "columnName": "trustScore",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "provenanceJson",
+            "columnName": "provenanceJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "speculative",
+            "columnName": "speculative",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "createdAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_knowledge_graph_facts_groupId",
+            "unique": false,
+            "columnNames": [
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_graph_facts_groupId` ON `${TABLE_NAME}` (`groupId`)"
+          },
+          {
+            "name": "index_knowledge_graph_facts_runId",
+            "unique": false,
+            "columnNames": [
+              "runId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_graph_facts_runId` ON `${TABLE_NAME}` (`runId`)"
+          },
+          {
+            "name": "index_knowledge_graph_facts_subject",
+            "unique": false,
+            "columnNames": [
+              "subject"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_graph_facts_subject` ON `${TABLE_NAME}` (`subject`)"
+          },
+          {
+            "name": "index_knowledge_graph_facts_relation",
+            "unique": false,
+            "columnNames": [
+              "relation"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_graph_facts_relation` ON `${TABLE_NAME}` (`relation`)"
+          },
+          {
+            "name": "index_knowledge_graph_facts_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_graph_facts_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_knowledge_graph_facts_generation",
+            "unique": false,
+            "columnNames": [
+              "generation"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_graph_facts_generation` ON `${TABLE_NAME}` (`generation`)"
+          },
+          {
+            "name": "index_knowledge_graph_facts_runId_groupId_status",
+            "unique": false,
+            "columnNames": [
+              "runId",
+              "groupId",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_knowledge_graph_facts_runId_groupId_status` ON `${TABLE_NAME}` (`runId`, `groupId`, `status`)"
+          }
+        ]
+      },
+      {
+        "tableName": "tool_registry_entries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `version` INTEGER NOT NULL, `authorAgentId` TEXT NOT NULL, `successRate` REAL NOT NULL, `failureLogJson` TEXT NOT NULL, `inputSchemaJson` TEXT NOT NULL, `outputSchemaJson` TEXT NOT NULL, `domain` TEXT NOT NULL, `status` TEXT NOT NULL, `code` TEXT NOT NULL, `codeLanguage` TEXT NOT NULL, `generation` INTEGER NOT NULL, `groupId` TEXT NOT NULL, `runId` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, `previousVersionId` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "authorAgentId",
+            "columnName": "authorAgentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "successRate",
+            "columnName": "successRate",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "failureLogJson",
+            "columnName": "failureLogJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inputSchemaJson",
+            "columnName": "inputSchemaJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "outputSchemaJson",
+            "columnName": "outputSchemaJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "domain",
+            "columnName": "domain",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "code",
+            "columnName": "code",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "codeLanguage",
+            "columnName": "codeLanguage",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "generation",
+            "columnName": "generation",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "createdAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "previousVersionId",
+            "columnName": "previousVersionId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_tool_registry_entries_groupId",
+            "unique": false,
+            "columnNames": [
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tool_registry_entries_groupId` ON `${TABLE_NAME}` (`groupId`)"
+          },
+          {
+            "name": "index_tool_registry_entries_runId",
+            "unique": false,
+            "columnNames": [
+              "runId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tool_registry_entries_runId` ON `${TABLE_NAME}` (`runId`)"
+          },
+          {
+            "name": "index_tool_registry_entries_name",
+            "unique": false,
+            "columnNames": [
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tool_registry_entries_name` ON `${TABLE_NAME}` (`name`)"
+          },
+          {
+            "name": "index_tool_registry_entries_domain",
+            "unique": false,
+            "columnNames": [
+              "domain"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tool_registry_entries_domain` ON `${TABLE_NAME}` (`domain`)"
+          },
+          {
+            "name": "index_tool_registry_entries_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tool_registry_entries_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_tool_registry_entries_runId_groupId_name_status",
+            "unique": false,
+            "columnNames": [
+              "runId",
+              "groupId",
+              "name",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tool_registry_entries_runId_groupId_name_status` ON `${TABLE_NAME}` (`runId`, `groupId`, `name`, `status`)"
+          }
+        ]
+      },
+      {
+        "tableName": "staging_submissions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `agentId` TEXT NOT NULL, `role` TEXT NOT NULL, `type` TEXT NOT NULL, `content` TEXT NOT NULL, `wipTaskRef` TEXT, `speculative` INTEGER NOT NULL, `outlier` INTEGER NOT NULL, `budgetSignature` TEXT NOT NULL, `status` TEXT NOT NULL, `rejectionReason` TEXT, `criticAgentId` TEXT, `initialTrustScore` REAL, `generation` INTEGER NOT NULL, `groupId` TEXT NOT NULL, `runId` TEXT NOT NULL, `submittedAtMs` INTEGER NOT NULL, `reviewedAtMs` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "agentId",
+            "columnName": "agentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "content",
+            "columnName": "content",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wipTaskRef",
+            "columnName": "wipTaskRef",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "speculative",
+            "columnName": "speculative",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "outlier",
+            "columnName": "outlier",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "budgetSignature",
+            "columnName": "budgetSignature",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rejectionReason",
+            "columnName": "rejectionReason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "criticAgentId",
+            "columnName": "criticAgentId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "initialTrustScore",
+            "columnName": "initialTrustScore",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "generation",
+            "columnName": "generation",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "submittedAtMs",
+            "columnName": "submittedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reviewedAtMs",
+            "columnName": "reviewedAtMs",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_staging_submissions_groupId",
+            "unique": false,
+            "columnNames": [
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_staging_submissions_groupId` ON `${TABLE_NAME}` (`groupId`)"
+          },
+          {
+            "name": "index_staging_submissions_runId",
+            "unique": false,
+            "columnNames": [
+              "runId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_staging_submissions_runId` ON `${TABLE_NAME}` (`runId`)"
+          },
+          {
+            "name": "index_staging_submissions_agentId",
+            "unique": false,
+            "columnNames": [
+              "agentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_staging_submissions_agentId` ON `${TABLE_NAME}` (`agentId`)"
+          },
+          {
+            "name": "index_staging_submissions_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_staging_submissions_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_staging_submissions_type",
+            "unique": false,
+            "columnNames": [
+              "type"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_staging_submissions_type` ON `${TABLE_NAME}` (`type`)"
+          },
+          {
+            "name": "index_staging_submissions_generation",
+            "unique": false,
+            "columnNames": [
+              "generation"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_staging_submissions_generation` ON `${TABLE_NAME}` (`generation`)"
+          },
+          {
+            "name": "index_staging_submissions_runId_groupId_status",
+            "unique": false,
+            "columnNames": [
+              "runId",
+              "groupId",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_staging_submissions_runId_groupId_status` ON `${TABLE_NAME}` (`runId`, `groupId`, `status`)"
+          }
+        ]
+      },
+      {
+        "tableName": "wip_tasks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`nodeId` TEXT NOT NULL, `runId` TEXT NOT NULL, `groupId` TEXT NOT NULL, `description` TEXT NOT NULL, `claimedByAgentId` TEXT, `status` TEXT NOT NULL, `lastChangedGeneration` INTEGER NOT NULL, `abandonCount` INTEGER NOT NULL, `linkedNodeId` TEXT, PRIMARY KEY(`nodeId`, `runId`, `groupId`))",
+        "fields": [
+          {
+            "fieldPath": "nodeId",
+            "columnName": "nodeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "claimedByAgentId",
+            "columnName": "claimedByAgentId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastChangedGeneration",
+            "columnName": "lastChangedGeneration",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "abandonCount",
+            "columnName": "abandonCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "linkedNodeId",
+            "columnName": "linkedNodeId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "nodeId",
+            "runId",
+            "groupId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_wip_tasks_groupId",
+            "unique": false,
+            "columnNames": [
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wip_tasks_groupId` ON `${TABLE_NAME}` (`groupId`)"
+          },
+          {
+            "name": "index_wip_tasks_runId",
+            "unique": false,
+            "columnNames": [
+              "runId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wip_tasks_runId` ON `${TABLE_NAME}` (`runId`)"
+          },
+          {
+            "name": "index_wip_tasks_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wip_tasks_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_wip_tasks_claimedByAgentId",
+            "unique": false,
+            "columnNames": [
+              "claimedByAgentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wip_tasks_claimedByAgentId` ON `${TABLE_NAME}` (`claimedByAgentId`)"
+          },
+          {
+            "name": "index_wip_tasks_runId_groupId_status",
+            "unique": false,
+            "columnNames": [
+              "runId",
+              "groupId",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wip_tasks_runId_groupId_status` ON `${TABLE_NAME}` (`runId`, `groupId`, `status`)"
+          }
+        ]
+      },
+      {
+        "tableName": "event_log_entries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `timestampMs` INTEGER NOT NULL, `eventType` TEXT NOT NULL, `agentId` TEXT, `groupId` TEXT, `runId` TEXT NOT NULL, `generation` INTEGER NOT NULL, `payloadJson` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampMs",
+            "columnName": "timestampMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "eventType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "agentId",
+            "columnName": "agentId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "generation",
+            "columnName": "generation",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payloadJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_event_log_entries_runId",
+            "unique": false,
+            "columnNames": [
+              "runId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_log_entries_runId` ON `${TABLE_NAME}` (`runId`)"
+          },
+          {
+            "name": "index_event_log_entries_groupId",
+            "unique": false,
+            "columnNames": [
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_log_entries_groupId` ON `${TABLE_NAME}` (`groupId`)"
+          },
+          {
+            "name": "index_event_log_entries_agentId",
+            "unique": false,
+            "columnNames": [
+              "agentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_log_entries_agentId` ON `${TABLE_NAME}` (`agentId`)"
+          },
+          {
+            "name": "index_event_log_entries_eventType",
+            "unique": false,
+            "columnNames": [
+              "eventType"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_log_entries_eventType` ON `${TABLE_NAME}` (`eventType`)"
+          },
+          {
+            "name": "index_event_log_entries_generation",
+            "unique": false,
+            "columnNames": [
+              "generation"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_log_entries_generation` ON `${TABLE_NAME}` (`generation`)"
+          },
+          {
+            "name": "index_event_log_entries_timestampMs",
+            "unique": false,
+            "columnNames": [
+              "timestampMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_log_entries_timestampMs` ON `${TABLE_NAME}` (`timestampMs`)"
+          },
+          {
+            "name": "index_event_log_entries_runId_groupId_generation",
+            "unique": false,
+            "columnNames": [
+              "runId",
+              "groupId",
+              "generation"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_log_entries_runId_groupId_generation` ON `${TABLE_NAME}` (`runId`, `groupId`, `generation`)"
+          }
+        ]
+      },
+      {
+        "tableName": "legacy_protocols",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `role` TEXT NOT NULL, `extractedFromGeneration` INTEGER NOT NULL, `expiresAtGeneration` INTEGER NOT NULL, `reasoningPosture` TEXT NOT NULL, `toolHeuristicsJson` TEXT NOT NULL, `failureMapJson` TEXT NOT NULL, `kgHabitsJson` TEXT NOT NULL, `sourceAgentIds` TEXT NOT NULL, `groupId` TEXT NOT NULL, `runId` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "extractedFromGeneration",
+            "columnName": "extractedFromGeneration",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expiresAtGeneration",
+            "columnName": "expiresAtGeneration",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reasoningPosture",
+            "columnName": "reasoningPosture",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "toolHeuristicsJson",
+            "columnName": "toolHeuristicsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "failureMapJson",
+            "columnName": "failureMapJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kgHabitsJson",
+            "columnName": "kgHabitsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceAgentIds",
+            "columnName": "sourceAgentIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "createdAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_legacy_protocols_groupId",
+            "unique": false,
+            "columnNames": [
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_legacy_protocols_groupId` ON `${TABLE_NAME}` (`groupId`)"
+          },
+          {
+            "name": "index_legacy_protocols_runId",
+            "unique": false,
+            "columnNames": [
+              "runId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_legacy_protocols_runId` ON `${TABLE_NAME}` (`runId`)"
+          },
+          {
+            "name": "index_legacy_protocols_role",
+            "unique": false,
+            "columnNames": [
+              "role"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_legacy_protocols_role` ON `${TABLE_NAME}` (`role`)"
+          },
+          {
+            "name": "index_legacy_protocols_expiresAtGeneration",
+            "unique": false,
+            "columnNames": [
+              "expiresAtGeneration"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_legacy_protocols_expiresAtGeneration` ON `${TABLE_NAME}` (`expiresAtGeneration`)"
+          }
+        ]
+      },
+      {
+        "tableName": "trust_scores",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `sourceId` TEXT NOT NULL, `sourceType` TEXT NOT NULL, `runId` TEXT NOT NULL, `groupId` TEXT NOT NULL, `score` REAL NOT NULL, `lastUpdatedMs` INTEGER NOT NULL, `decayCount` INTEGER NOT NULL, `promotionCount` INTEGER NOT NULL, `rejectionCount` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceId",
+            "columnName": "sourceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "sourceType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "score",
+            "columnName": "score",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastUpdatedMs",
+            "columnName": "lastUpdatedMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decayCount",
+            "columnName": "decayCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "promotionCount",
+            "columnName": "promotionCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rejectionCount",
+            "columnName": "rejectionCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_trust_scores_runId",
+            "unique": false,
+            "columnNames": [
+              "runId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_trust_scores_runId` ON `${TABLE_NAME}` (`runId`)"
+          },
+          {
+            "name": "index_trust_scores_groupId",
+            "unique": false,
+            "columnNames": [
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_trust_scores_groupId` ON `${TABLE_NAME}` (`groupId`)"
+          },
+          {
+            "name": "index_trust_scores_sourceType",
+            "unique": false,
+            "columnNames": [
+              "sourceType"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_trust_scores_sourceType` ON `${TABLE_NAME}` (`sourceType`)"
+          },
+          {
+            "name": "index_trust_scores_runId_groupId_sourceId",
+            "unique": false,
+            "columnNames": [
+              "runId",
+              "groupId",
+              "sourceId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_trust_scores_runId_groupId_sourceId` ON `${TABLE_NAME}` (`runId`, `groupId`, `sourceId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "dead_ends",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `runId` TEXT NOT NULL, `groupId` TEXT NOT NULL, `approach` TEXT NOT NULL, `reason` TEXT NOT NULL, `domain` TEXT NOT NULL, `generation` INTEGER NOT NULL, `sourceAgentId` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, `referenceCount` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "approach",
+            "columnName": "approach",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "domain",
+            "columnName": "domain",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "generation",
+            "columnName": "generation",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceAgentId",
+            "columnName": "sourceAgentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "createdAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "referenceCount",
+            "columnName": "referenceCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_dead_ends_runId",
+            "unique": false,
+            "columnNames": [
+              "runId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_dead_ends_runId` ON `${TABLE_NAME}` (`runId`)"
+          },
+          {
+            "name": "index_dead_ends_groupId",
+            "unique": false,
+            "columnNames": [
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_dead_ends_groupId` ON `${TABLE_NAME}` (`groupId`)"
+          },
+          {
+            "name": "index_dead_ends_domain",
+            "unique": false,
+            "columnNames": [
+              "domain"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_dead_ends_domain` ON `${TABLE_NAME}` (`domain`)"
+          },
+          {
+            "name": "index_dead_ends_generation",
+            "unique": false,
+            "columnNames": [
+              "generation"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_dead_ends_generation` ON `${TABLE_NAME}` (`generation`)"
+          },
+          {
+            "name": "index_dead_ends_sourceAgentId",
+            "unique": false,
+            "columnNames": [
+              "sourceAgentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_dead_ends_sourceAgentId` ON `${TABLE_NAME}` (`sourceAgentId`)"
+          },
+          {
+            "name": "index_dead_ends_runId_groupId_domain",
+            "unique": false,
+            "columnNames": [
+              "runId",
+              "groupId",
+              "domain"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_dead_ends_runId_groupId_domain` ON `${TABLE_NAME}` (`runId`, `groupId`, `domain`)"
+          }
+        ]
+      },
+      {
+        "tableName": "kg_schemas",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `runId` TEXT NOT NULL, `groupId` TEXT NOT NULL, `entityTypesJson` TEXT NOT NULL, `relationTypesJson` TEXT NOT NULL, `hardConstraintsJson` TEXT NOT NULL, `softConstraintsJson` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, `schemaVersion` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "entityTypesJson",
+            "columnName": "entityTypesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relationTypesJson",
+            "columnName": "relationTypesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hardConstraintsJson",
+            "columnName": "hardConstraintsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "softConstraintsJson",
+            "columnName": "softConstraintsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "createdAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "schemaVersion",
+            "columnName": "schemaVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_kg_schemas_runId_groupId",
+            "unique": true,
+            "columnNames": [
+              "runId",
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_kg_schemas_runId_groupId` ON `${TABLE_NAME}` (`runId`, `groupId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "meta_archive",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `runId` TEXT NOT NULL, `entryType` TEXT NOT NULL, `groupId` TEXT, `label` TEXT NOT NULL, `contentJson` TEXT NOT NULL, `runObjective` TEXT NOT NULL, `finalScore` REAL, `isFromWinner` INTEGER NOT NULL, `generation` INTEGER NOT NULL, `chunkIndex` INTEGER NOT NULL, `totalChunks` INTEGER NOT NULL, `archivedAtMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "entryType",
+            "columnName": "entryType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentJson",
+            "columnName": "contentJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runObjective",
+            "columnName": "runObjective",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finalScore",
+            "columnName": "finalScore",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "isFromWinner",
+            "columnName": "isFromWinner",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "generation",
+            "columnName": "generation",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chunkIndex",
+            "columnName": "chunkIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalChunks",
+            "columnName": "totalChunks",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "archivedAtMs",
+            "columnName": "archivedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_meta_archive_runId",
+            "unique": false,
+            "columnNames": [
+              "runId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_meta_archive_runId` ON `${TABLE_NAME}` (`runId`)"
+          },
+          {
+            "name": "index_meta_archive_entryType",
+            "unique": false,
+            "columnNames": [
+              "entryType"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_meta_archive_entryType` ON `${TABLE_NAME}` (`entryType`)"
+          },
+          {
+            "name": "index_meta_archive_archivedAtMs",
+            "unique": false,
+            "columnNames": [
+              "archivedAtMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_meta_archive_archivedAtMs` ON `${TABLE_NAME}` (`archivedAtMs`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sealed_test_suites",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `runId` TEXT NOT NULL, `groupId` TEXT NOT NULL, `suiteJson` TEXT NOT NULL, `suiteHash` TEXT NOT NULL, `isLocked` INTEGER NOT NULL, `createdAtMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "suiteJson",
+            "columnName": "suiteJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "suiteHash",
+            "columnName": "suiteHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isLocked",
+            "columnName": "isLocked",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "createdAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sealed_test_suites_runId",
+            "unique": false,
+            "columnNames": [
+              "runId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sealed_test_suites_runId` ON `${TABLE_NAME}` (`runId`)"
+          },
+          {
+            "name": "index_sealed_test_suites_groupId",
+            "unique": false,
+            "columnNames": [
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sealed_test_suites_groupId` ON `${TABLE_NAME}` (`groupId`)"
+          },
+          {
+            "name": "index_sealed_test_suites_runId_groupId",
+            "unique": true,
+            "columnNames": [
+              "runId",
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_sealed_test_suites_runId_groupId` ON `${TABLE_NAME}` (`runId`, `groupId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "run_configs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `objective` TEXT NOT NULL, `globalBudgetCeiling` REAL NOT NULL, `generationCeiling` INTEGER NOT NULL, `groupCount` INTEGER NOT NULL, `groupProfilesJson` TEXT NOT NULL, `ringTopologyJson` TEXT NOT NULL, `checkinMilestonesJson` TEXT NOT NULL, `leakIntervalGenerations` INTEGER NOT NULL, `dispatchLagGenerations` INTEGER NOT NULL, `graderGroupCount` INTEGER NOT NULL, `status` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, `startedAtMs` INTEGER, `completedAtMs` INTEGER, `startingFieldJson` TEXT, `currentGeneration` INTEGER NOT NULL, `totalSpent` REAL NOT NULL, `groupStagesJson` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "objective",
+            "columnName": "objective",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "globalBudgetCeiling",
+            "columnName": "globalBudgetCeiling",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "generationCeiling",
+            "columnName": "generationCeiling",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupCount",
+            "columnName": "groupCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupProfilesJson",
+            "columnName": "groupProfilesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ringTopologyJson",
+            "columnName": "ringTopologyJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkinMilestonesJson",
+            "columnName": "checkinMilestonesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "leakIntervalGenerations",
+            "columnName": "leakIntervalGenerations",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dispatchLagGenerations",
+            "columnName": "dispatchLagGenerations",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "graderGroupCount",
+            "columnName": "graderGroupCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "createdAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtMs",
+            "columnName": "startedAtMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "completedAtMs",
+            "columnName": "completedAtMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "startingFieldJson",
+            "columnName": "startingFieldJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "currentGeneration",
+            "columnName": "currentGeneration",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalSpent",
+            "columnName": "totalSpent",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupStagesJson",
+            "columnName": "groupStagesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '73d4a1945ef8c46e811b55e3ccbd04d1')"
+    ]
+  }
+}

@@ -813,10 +813,10 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 | # | Spec requirement | Status | Notes |
 |---|---|---|---|
 | 1 | 8 council roles | ✅ | All 8 roles present in `GenesisCouncil.councilRoles` |
-| 2 | Non-synthesis roles run **in parallel**; Synthesis runs last sequentially | ❌ | All 8 roles run **strictly sequentially** in a for-loop. No concurrent execution. |
-| 3 | Synthesis emits a `consistency_report` alongside `StartingField` | ❌ | `StartingField` has no `consistencyReport` field. No report emitted. |
-| 4 | On consistency failure, re-run the relevant role with conflict as context | ❌ | No re-run logic. Failed JSON parse falls back to `StartingField.default()`. |
-| 5 | Sealed test suite finalised and locked before any group spawns | ❌ | `StartingField.sealedTestSuiteHash` field exists but is always `""`. No test suite content is produced or stored. |
+| 2 | Non-synthesis roles run **in parallel**; Synthesis runs last sequentially | ✅ | `GenesisCouncil.run()` executes roles 1–7 concurrently via `async`/`awaitAll`, then runs `CouncilSynthesis` sequentially. |
+| 3 | Synthesis emits a `consistency_report` alongside `StartingField` | ✅ | `StartingField` carries `consistencyReport`, and the fallback path rescues it if full decoding fails. |
+| 4 | On consistency failure, re-run the relevant role with conflict as context | ✅ | `GenesisCouncil.run()` retries the conflicting role with the consistency error injected into context. |
+| 5 | Sealed test suite finalised and locked before any group spawns | ✅ | The sealed suite is synthesised, hashed, stored in the first group's substrate, and read back with fail-close verification before spawning. |
 | 6 | Council KB is transient and discarded post-output | ✅ | Council context is in-memory only; not persisted to any group DB. |
 | 7 | Council timeout | ⚠️ | Code is 8 minutes (correct). The `@param` KDoc on `genesisCouncilRunner` in `EvoKammerRunService` still says "3 minutes" — stale comment. |
 
@@ -828,8 +828,8 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 |---|---|---|---|
 | 1 | Spawns agents from Evolutionary Selector signal | ✅ | `EvolutionarySelector.computeAllocation()` → `LifecycleManager.spawnGeneration()` |
 | 2 | Injects role prompt, budget token, WiP task claim, Legacy Protocol at spawn | ✅ | All four injected via `AgentBootContext` |
-| 3 | Injects Legacy Protocol if fitness threshold exceeded | ⚠️ | Protocol is injected from DB if present. Fitness threshold extraction is implemented in `LegacyProtocolExtractor` but the extractor is **not called** from `EvoKammerRunService.runLoop()` — no post-generation fitness scoring pass fires. |
-| 4 | Monitors budget in real time; initiates kill on floor | ⚠️ | Budget polling loop exists (`monitorBudgets`). However kill-on-floor is not triggered from within the lifecycle; round termination kills all agents at round end regardless. `BudgetLedger.floor` is tracked but no `floor-reached → kill` event path is wired. |
+| 3 | Injects Legacy Protocol if fitness threshold exceeded | ✅ | `EvoKammerRunService.runFitnessAndEpigenetics()` now performs the fitness pass, selects the top cohort, and `LifecycleManager.spawnGeneration()` injects the resulting legacy protocol when available. |
+| 4 | Monitors budget in real time; initiates kill on floor | ✅ | `monitorBudgets()` polls live ledgers and calls `initiateKillSequence()` immediately when an agent hits its budget floor. |
 | 5 | Kill sequence: SIGTERM → grace → SIGKILL | ✅ | Fully implemented for Shuru VM mode |
 | 6 | Captures Staging Area output post-kill for Critic routing | ✅ | Staging is persistent; CriticPipeline reads it post-round |
 | 7 | Sub-agent budget delegation | ❌ | Not implemented. No sub-agent spawning from within an agent lifecycle. |
@@ -842,9 +842,9 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 | # | Spec requirement | Status | Notes |
 |---|---|---|---|
 | 1 | Per-agent budget instance allocated at spawn | ✅ | `BudgetLedger` created per agent |
-| 2 | Atomic decrements — concurrent tool calls cannot race past zero | ❌ | No mutex or atomic-compare-and-swap on `balance`. Concurrent calls from the same coroutine context could theoretically overspend. |
-| 3 | Failed tool execution costs double | ❌ | Not implemented. All actions cost their flat configured rate. |
-| 4 | Retry with identical args costs quadruple (detected via argument hashing) | ❌ | No argument hashing or retry detection. |
+| 2 | Atomic decrements — concurrent tool calls cannot race past zero | ✅ | `BudgetLedger` serialises deductions behind a `Mutex`, and the concurrent-pressure regression now proves the balance stays exact under contention. |
+| 3 | Failed tool execution costs double | ✅ | `ActionType.TOOL_EXEC_FAILURE` is priced at 4.0 vs 2.0 for success, and `ExecuteToolTool` charges failure on sandbox exceptions and non-zero exits. |
+| 4 | Retry with identical args costs quadruple (detected via argument hashing) | ✅ | `ActionType.TOOL_EXEC_RETRY` is priced at 8.0, and `BudgetLedger` uses `(toolName, argsHash)` retry tracking to charge repeated calls at the retry rate. |
 | 5 | Budget history exported to event log on death | ✅ | `handleAgentExit` logs `BudgetLedger.snapshot()` |
 
 ---
@@ -856,15 +856,15 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 | 1 | KB: versioned docs, trust score, source agent, generation | ✅ | `KnowledgeBaseEntryEntity` has all fields |
 | 2 | KB: docs are immutable after promotion; new version creates new doc | ✅ | Insertion-only; no in-place update |
 | 3 | KB: low-trust docs archived, not deleted | ✅ | `archiveBelowTrust()` used in `applyTrustDecayForRound` |
-| 4 | KB: Dead Ends Registry is first-class; always returned in retrieval regardless of trust | ⚠️ | `isDeadEnd = true` flag exists. No special always-return path in retrieval queries — dead ends can be filtered by trust decay like regular entries. |
-| 5 | KG: typed fact quads validated against schema constraints before commit | ❌ | No `KGConsistencyChecker`. Facts go directly to `CriticPipeline` review with no schema type check. |
-| 6 | KG constraint violation → dispute raised → KG-Critic Arbitration Agent spawned | ❌ | Not implemented. Disputes from `CriticPipeline` sit permanently in `"disputed"` state. |
+| 4 | KB: Dead Ends Registry is first-class; always returned in retrieval regardless of trust | ✅ | Dead ends are included in the active KB and search queries regardless of trust decay, so they remain retrievable even when ordinary entries are archived. |
+| 5 | KG: typed fact quads validated against schema constraints before commit | ✅ | `KGConsistencyChecker` validates `KG_FACT` submissions before Critic review, and schema-invalid facts are rejected before any LLM call. |
+| 6 | KG constraint violation → dispute raised → KG-Critic arbitration | ⚠️ | Schema-invalid KG facts still fail closed before review, and active KG conflicts now route through `CriticPipeline`'s second-pass arbitration path. A dedicated KG-Critic agent loop is still open. |
 | 7 | Tool Registry: success rate / failure log tracked | ✅ | `successRate` field in `ToolRegistryEntryEntity` |
-| 8 | Staging Area: submissions carry `budget_signature` from Budget Ledger | ❌ | `StagingSubmissionEntity` has no `budgetSignature` field. Staging Area never validates one. |
+| 8 | Staging Area: submissions carry `budget_signature` from Budget Ledger | ✅ | `StagingSubmissionEntity` carries `budgetSignature`, and `CriticPipeline` fail-closes on missing signatures before review. |
 | 9 | Primordial KB docs seeded for each group | ✅ | `seedPrimordialData` seeds KB docs |
 | 10 | Primordial KG facts seeded for each group | ✅ | `seedPrimordialData` seeds KG facts |
-| 11 | Primordial Tools seeded for each group | ❌ | `StartingField.primordialTools` field exists and is populated by council, but `seedPrimordialData` does **not** insert them into the Tool Registry. |
-| 12 | Grader Groups seeded with primordial data | ❌ | `seedPrimordialData` is called only for `groupIds`. Grader group IDs (`graderGroupIds`) are excluded. |
+| 11 | Primordial Tools seeded for each group | ✅ | `seedPrimordialData()` materialises `StartingField.primordialTools` into each group's Tool Registry and logs the seeded count. |
+| 12 | Grader Groups seeded with primordial data | ✅ | `seedPrimordialData()` seeds both competing and grader groups from the council payloads. |
 
 ---
 
@@ -873,11 +873,11 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 | # | Spec requirement | Status | Notes |
 |---|---|---|---|
 | 1 | PROMOTE / REJECT / DISPUTE outcomes | ✅ | All three outcomes implemented |
-| 2 | DISPUTE → Arbitration Agent spawned to resolve | ❌ | Disputed submissions remain permanently in `"disputed"` DB status. No arbitration agent is ever spawned. |
+| 2 | DISPUTE → Arbitration path resolves the dispute | ⚠️ | Disputed submissions now route through `CriticPipeline`'s second-pass review, but the system still does not spawn a dedicated standalone arbitration agent. |
 | 3 | Critic cannot approve its own prior submissions | ❌ | No check comparing submitting `agentId` to the `criticId`. |
 | 4 | Critic evaluates tools for runnable code / test coverage / schema compliance | ❌ | CriticPipeline uses an LLM prompt only. No actual tool execution or schema validation occurs. |
 | 5 | Critic is a lifecycle-bound agent (TTL, budget, Death Note) | ❌ | `CriticPipeline` is a plain class with LLM calls. No budget, no WiP task, no Death Note. |
-| 6 | KG facts evaluated against hard constraint satisfaction | ❌ | Not checked. KG_FACT submissions get the same generic LLM review as documents. |
+| 6 | KG facts evaluated against hard constraint satisfaction | ✅ | `CriticPipeline` now checks hard KG constraints before LLM review and rejects invalid KG facts outright. |
 
 ---
 
@@ -888,8 +888,8 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 | 1 | Reads KB density, staging backlog, tool failure rate, stasis signal | ✅ | All four signals gathered in `gatherSignals()` |
 | 2 | At least 1 Critic per generation | ✅ | Hard constraint in `buildAllocationEntries` |
 | 3 | Outlier every 5 gens (every 3 if stasis) | ✅ | Implemented in allocation logic |
-| 4 | Stasis detected from Watchdog/Inspector and passed to selector | ❌ | `stasisDetected = false` is **hardcoded** in `spawnAgentsForRound`. Watchdog signals are never read and passed here. |
-| 5 | Plan Registry freshness signal | ❌ | No Plan Registry DAO or plan freshness signal used. |
+| 4 | Stasis detected from Watchdog/Inspector and passed to selector | ✅ | `spawnAgentsForRound` now reads `stasisFlags[groupId]` and passes it through to `EvolutionarySelector.computeAllocation()`. |
+| 5 | Plan Registry freshness signal | ✅ | `EvolutionarySelector` now reads `PlanRegistryDao` and biases Planner allocation when plan updates are stale. |
 | 6 | Emits allocation decision to event log | ✅ | Logged via `Napier.i` but not as a structured `EventLogEntry` |
 
 ---
@@ -898,9 +898,9 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 
 | # | Spec requirement | Status | Notes |
 |---|---|---|---|
-| 1 | Inspector runs as passive continuous process | ❌ | Inspector class may exist but `EvoKammerRunService.startRun()` never starts it. |
-| 2 | Inspector emits anomaly flags to Watchdog | ❌ | Not wired. Watchdog.start() is also never called from `startRun()`. |
-| 3 | Auditor spawned by Watchdog on high-severity flags | ❌ | Not implemented. |
+| 1 | Inspector runs as passive continuous process | ✅ | `EvoKammerRunService.startRun()` creates an `InspectorRunner` and starts one inspector loop per group before the round loop begins. |
+| 2 | Inspector emits anomaly flags to Watchdog | ✅ | `InspectorRunner` emits `WatchdogSignal.InspectorFlag` events, and `EvoKammerRunService` subscribes to `watchdog.signals` and forwards them into `handleWatchdogSignal()`. |
+| 3 | Auditor spawned by Watchdog on high-severity flags | ✅ | High-severity Inspector flags are handled by `handleInspectorFlag()`, which rate-limits and spawns an `Auditor` special agent once per group. |
 
 ---
 
@@ -908,12 +908,12 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 
 | # | Spec requirement | Status | Notes |
 |---|---|---|---|
-| 1 | Ring topology managed per StartingField | ⚠️ | `GroupCoordinator` exists and receives group IDs. Ring topology from `StartingField.ringTopology` is not threaded through to the coordinator. |
+| 1 | Ring topology managed per StartingField | ✅ | The run service now uses `StartingField.ringTopology` as the canonical group order when it matches the configured group count. |
 | 2 | Formal Dispatch Relay with configured lag | ❓ | `GroupCoordinator` has dispatch infrastructure; actual lag enforcement not verified. |
-| 3 | Leak Oracle with differential privacy transform | ⚠️ | `DifferentialPrivacyTransform` class exists. Whether it's invoked in the active run loop is not confirmed. |
-| 4 | Source group anonymised in all leaked content | ⚠️ | Transform strips identifiers by design; wiring to active run loop unverified. |
-| 5 | Migration rate ceiling (15% per generation) | ❓ | Not confirmed as enforced. |
-| 6 | Per-group dispatch trust score table | ❓ | Unverified. |
+| 3 | Leak Oracle with differential privacy transform | ✅ | `GroupCoordinator.dispatchLeak()` applies `DifferentialPrivacyTransform` before routing leak packets through `DispatchRelay`. |
+| 4 | Source group anonymised in all leaked content | ✅ | Leak packets are transformed before dispatch and the source group is not embedded in the packet contract. |
+| 5 | Migration rate ceiling (15% per generation) | ✅ | `GroupCoordinator.updateMigrationCeiling()` patches the oracle ceiling and the new leak regression covers the patched limit. |
+| 6 | Per-group dispatch trust score table | ✅ | `LeakOracle` tracks round quotas per source group and enforces them through its internal per-group ceiling map. |
 
 ---
 
@@ -921,10 +921,10 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 
 | # | Spec requirement | Status | Notes |
 |---|---|---|---|
-| 1 | Maintains knowledge node graph from Genesis Council | ⚠️ | `nodeGraph` JSON is parsed and WIP tasks are seeded from it. No `ResourceMapEngine` class managing live node state and captures. |
-| 2 | Claim registered when Critic promotes artifact meeting quality threshold | ❌ | Not implemented. WIP task status flips to `"completed"` on claim+finish but there is no node capture/recapture logic. |
-| 3 | Recapture when a different group's artifact scores higher | ❌ | Not implemented. |
-| 4 | Budget bonuses from held nodes applied by Budget Ledger | ❌ | Not implemented. |
+| 1 | Maintains knowledge node graph from Genesis Council | ✅ | `ResourceMapEngine` consumes the seeded node graph, and `EvoKammerRunService.publishResourceNodeClaims()` emits `ResourceNodeClaimed` events from the completion bridge. |
+| 2 | Claim registered when Critic promotes artifact meeting quality threshold | ⚠️ | Ownership changes are now registered from the completion bridge and check-in quality evaluation, but the exact spec phrasing still differs from the WIP-completion trigger. |
+| 3 | Recapture when a different group's artifact scores higher | ✅ | `ResourceMapEngine.evaluateClaims()` recaptures contested nodes when a challenger’s quality score exceeds the current owner by the configured threshold. |
+| 4 | Budget bonuses from held nodes applied by Budget Ledger | ✅ | `NodeYieldApplier` folds owned nodes into the multiplier used by `GroupCoordinator.budgetMultiplierFor()`, and the run service consumes that multiplier. |
 
 ---
 
@@ -934,12 +934,12 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 |---|---|---|---|
 | 1 | Grader Groups run a complete EvoKammer civilisation cycle | ❌ | Only 2 criteria agents + 1 RoundJudge per round. No evolutionary selection, no multi-generation KB accumulation, no Critic pipeline for grader staging. |
 | 2 | Grader agents have no access to competing group KBs | ✅ | Criteria agents have no competing-group snapshot. RoundJudge receives anonymised text snapshots only. |
-| 3 | GradingSheet includes automated test cases | ❌ | `automatedTests = emptyList()` in all registered sheets. |
-| 4 | Meta-Judge Consensus Detection pass | ❌ | Not implemented. |
-| 5 | Cross-grader Arbitration round | ❌ | Not implemented. |
-| 6 | GradingSheet quality self-scored by Meta-Judge | ❌ | Not implemented. |
-| 7 | Grader Groups receive anonymised failure telemetry from previous check-ins | ❌ | Not implemented. |
-| 8 | Criteria from criteria phase reviewed by Critic before use | ❌ | Criteria staging entries go directly from `write_staging` to RoundJudge context — no Critic review of grader staging. |
+| 3 | GradingSheet includes automated test cases | ⚠️ | `GradingSheet` supports automated tests and both the sealed-suite blind-scoring path and live grader-manager verdict step now populate them, but the Grader Group-produced sheet pipeline still does not emit automated tests. |
+| 4 | Meta-Judge Consensus Detection pass | ⚠️ | `MetaJudge.verdict()` now detects contested dimensions and produces a consolidated verdict, and `EvoKammerRunService` now invokes the verdict path once per round via `GraderGroupManager`, but it is still not a separate standalone arbitration agent loop. |
+| 5 | Cross-grader Arbitration round | ⚠️ | Weighted arbitration is implemented inside `MetaJudge.mergeDimensionWeights()`, and the live round loop now exercises it via the grader-manager verdict step, but there is no standalone live arbitration agent yet. |
+| 6 | GradingSheet quality self-scored by Meta-Judge | ⚠️ | `MetaJudge.registerSheet()` scores sheet quality and carries it into the verdict path, and the live grader-manager verdict step now reads that score, but it still does not feed a broader resource-allocation loop. |
+| 7 | Grader Groups receive anonymised failure telemetry from previous check-ins | ✅ | `EvoKammerRunService.routeFailureTelemetry()` writes anonymised `FAILURE_TELEMETRY` entries into grader staging, and `GraderRunner.readFailureTelemetryContext()` feeds that history back into the next criteria/judging round. |
+| 8 | Criteria from criteria phase reviewed by Critic before use | ✅ | `EvoKammerRunService.reviewGraderCriteriaForRound()` routes grader criteria submissions through the same Critic review machinery before judging. |
 
 ---
 
@@ -947,12 +947,12 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 
 | # | Spec requirement | Status | Notes |
 |---|---|---|---|
-| 1 | Scoring Engine isolated from all agent systems | ❌ | `computeAndSubmitSubstrateScores` runs in the same process and coroutine context as all agents. |
-| 2 | Deterministic test suite executed against each submission | ❌ | No test harness. Scores are heuristic substrate metrics (KB count, KG fact count, etc.). |
-| 3 | Scores held in sealed ledger until all groups submit (blind seal) | ❌ | Scores are computed and submitted immediately per group, not sealed. |
-| 4 | Simultaneous reveal after all groups submit | ❌ | No reveal gate. Scores are visible as soon as computed. |
-| 5 | GradingSheet rubric applied to each submission | ⚠️ | GradingSheet is registered but only the heuristic substrate scores are used in practice. |
-| 6 | Score normalisation from StartingField | ❌ | Normalisation constants are hardcoded (`20 KB entries = full score`, etc.) — not from `StartingField.actionCosts` or any council-defined config. |
+| 1 | Scoring Engine isolated from all agent systems | ⚠️ | `EvoKammerRunService` now routes blind scoring through a dedicated `BlindTournamentService` boundary, but the engine still lives in the same process as the agents. |
+| 2 | Deterministic test suite executed against each submission | ✅ | `SealedTestSuiteEvaluator.assessGroup()` runs the sealed suite against each group's canonical snapshot before scoring. |
+| 3 | Scores held in sealed ledger until all groups submit (blind seal) | ✅ | `BlindSubmissionGate` holds per-group round snapshots until `closeAndReveal()` is called. |
+| 4 | Simultaneous reveal after all groups submit | ✅ | The gate reveals the round's scores in one shot, and `ScoringEngine.processRevealedScores()` consumes that sealed reveal. |
+| 5 | GradingSheet rubric applied to each submission | ✅ | `MetaJudge.verdict()` produces the per-round rubric and `ScoringEngine` applies it to the revealed group snapshots. |
+| 6 | Score normalisation from StartingField | ✅ | Council-defined per-dimension max-score overrides are threaded through `StartingField.scoreNormalization` and applied before sealed-suite scoring. |
 
 ---
 
@@ -961,9 +961,9 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 | # | Spec requirement | Status | Notes |
 |---|---|---|---|
 | 1 | Stage N unlocks when group passes Check-in N | ✅ | `ProgressiveDisclosureEngine.onCheckinComplete()` gated |
-| 2 | Check-in result carries actual dimension scores and test pass rate | ❌ | `processDisclosureCheckIns` passes `dimensionScores = emptyMap()` and `failedTestCount = 0`. Only the heuristic `overallScore` is real. |
-| 3 | Stage content pre-written by Genesis Council and sealed | ❌ | `StartingField.stageContents` is an empty list in default; Genesis Council does not populate it. No sealing mechanism. |
-| 4 | Groups below threshold receive no stage advance and increased Leak Oracle frequency | ⚠️ | Stage advance correctly blocked. Leak Oracle frequency increase on failure not wired. |
+| 2 | Check-in result carries actual dimension scores and test pass rate | ✅ | `processDisclosureCheckIns` now derives `dimensionScores`, `failedTestCount`, and `testPassRate` from the sealed-suite assessment telemetry. |
+| 3 | Stage content pre-written by Genesis Council and sealed | ✅ | The Genesis Council output is sealed into the run meta-archive before spawn, and `StartingField.stageContents` is carried inside that write-once snapshot. |
+| 4 | Groups below threshold receive no stage advance and increased Leak Oracle frequency | ✅ | Below-threshold check-ins now elevate neighbouring groups' leak ceilings for the next round. |
 
 ---
 
@@ -971,11 +971,11 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 
 | # | Spec requirement | Status | Notes |
 |---|---|---|---|
-| 1 | Post-mortem fitness scoring after each generation | ❌ | `LegacyProtocolExtractor` exists but is **never called** from `runLoop`. No fitness scoring pass fires. |
-| 2 | Top-20% fitness → Legacy Protocol extracted | ❌ | Not triggered (see above). |
-| 3 | Crossover Engine merges two protocols for same role | ❌ | No `CrossoverEngine` class. |
-| 4 | Legacy Protocol expires after 2 generations | ⚠️ | `expiresAtGeneration` field stored in DB. Expiry checked at spawn time via DAO query. But no process actively expires and archives them. |
-| 5 | Failure maps promoted to Dead Ends Registry on expiry | ❌ | Not implemented. |
+| 1 | Post-mortem fitness scoring after each generation | ✅ | `runFitnessAndEpigenetics()` now scores each group after the Critic pass and emits fitness progress telemetry. |
+| 2 | Top-20% fitness → Legacy Protocol extracted | ✅ | `FitnessScorer.topPercentile()` selects the top cohort and `LegacyProtocolExtractor.extract()` persists the resulting protocols. |
+| 3 | Crossover Engine merges two protocols for same role | ✅ | `CrossoverEngine` merges same-role protocols and is covered by integration tests. |
+| 4 | Legacy Protocol expires after 2 generations | ✅ | `expiresAtGeneration` is persisted and `sweepExpiredLegacyProtocols()` actively sweeps the expired rows. |
+| 5 | Failure maps promoted to Dead Ends Registry on expiry | ✅ | Expired protocols with non-empty failure maps are promoted into `dead_ends` KB entries. |
 | 6 | Preliminary scores updated retrospectively with citation signals | ❌ | Not implemented. |
 
 ---
@@ -985,11 +985,11 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 | # | Spec requirement | Status | Notes |
 |---|---|---|---|
 | 1 | Watchdog class with stasis, budget-critical, and KG anomaly detection | ✅ | `Watchdog` class fully implemented |
-| 2 | Watchdog started and running during a run | ❌ | `Watchdog.start()` is **never called** from `EvoKammerRunService.startRun()`. |
-| 3 | Watchdog opens and closes check-in gates | ❌ | Not wired. Check-in logic is round-based, not Watchdog-triggered. |
-| 4 | Watchdog triggers Meta-Planner spawn on global stasis | ❌ | Not implemented. |
-| 5 | Watchdog pauses spawning on global cost ceiling | ❌ | Not implemented. |
-| 6 | Watchdog triggers Auditor on high-severity Inspector flags | ❌ | Not implemented. |
+| 2 | Watchdog started and running during a run | ✅ | `EvoKammerRunService.startRun()` creates the run-scoped `Watchdog` and calls `watchdog.start(scope)` before the round loop begins. |
+| 3 | Watchdog opens and closes check-in gates | ✅ | `WatchdogSignal.CheckInGateOpen` / `CheckInGateClose` are handled by `EvoKammerRunService.handleWatchdogSignal()`, and the run loop also opens/closes the gate around `processDisclosureCheckIns()` so the signal path is live. |
+| 4 | Watchdog triggers Meta-Planner spawn on global stasis | ✅ | Stasis signals are collected into `stasisFlags`, then `processMetaPlannerSignals()` calls `spawnMetaPlannerForGroup()` once the threshold is exceeded. |
+| 5 | Watchdog pauses spawning on global cost ceiling | ✅ | `WatchdogSignal.BudgetCritical` is handled in `handleWatchdogSignal()` and pauses the run when remaining budget falls to the configured floor percentage. |
+| 6 | Watchdog triggers Auditor on high-severity Inspector flags | ✅ | High-severity `InspectorFlag` signals are routed to `handleInspectorFlag()`, which rate-limits and spawns an `Auditor` per group. |
 
 ---
 
@@ -997,7 +997,7 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 
 | # | Spec requirement | Status | Notes |
 |---|---|---|---|
-| 1 | Meta-Planner spawnable LLM agent | ❌ | `Role.MetaPlanner` exists in the Role enum and `DEFAULT_MODELS` map, but no spawn path or trigger exists. |
+| 1 | Meta-Planner spawnable LLM agent | ⚠️ | `Role.MetaPlanner` exists in the Role enum and the run loop now triggers `spawnMetaPlannerForGroup()` after sustained stasis, but the broader Meta-Planner lifecycle is still a special-purpose path rather than a full civilisational loop. |
 
 ---
 
@@ -1005,8 +1005,8 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 
 | # | Contract | Status | Notes |
 |---|---|---|---|
-| 1 | Agent → Staging: `budget_signature` required, validated by Staging Area | ❌ | `StagingSubmissionEntity` has no `budgetSignature` field. |
-| 2 | Agent → Staging: `wip_task_reference` required for doc/tool submissions | ❌ | Not enforced in staging validation. |
+| 1 | Agent → Staging: `budget_signature` required, validated by Staging Area | ✅ | `StagingSubmissionEntity` carries `budgetSignature`, and `CriticPipeline` rejects missing signatures before promotion. |
+| 2 | Agent → Staging: `wip_task_reference` required for doc/tool submissions | ✅ | `CriticPipeline` fail-closes on missing `wipTaskRef` for DOC, TOOL, and KG_FACT submissions. |
 | 3 | Lifecycle Manager → Agent: `substrate_read_credential` and `staging_write_credential` | ⚠️ | `AgentBootContext` has `substrateDbPath` and `stagingMountPath`, not typed scoped tokens. Direct DB path sharing is not the credential model described. |
 
 ---
@@ -1015,32 +1015,34 @@ No dashboard exposure of: agent context windows, competitor group details, seale
 
 | # | Observation |
 |---|---|
-| 1 | **`stasisDetected` hardcoded to `false`** — `spawnAgentsForRound` always calls `EvolutionarySelector.computeAllocation(stasisDetected = false)`. The Watchdog/Inspector stasis signal is never propagated. |
-| 2 | **Run ceiling mismatch** — `runLoop` iterates `config.rounds` (from `RunConfig`). `StartingField.generationCeiling` is produced by the Genesis Council but never used to override the run's actual round count. |
-| 3 | **Scoring dimension IDs hardcoded** — `computeAndSubmitSubstrateScores` has string-matching for `"kb_density"`, `"kg_coherence"`, `"tool_utility"`, `"plan_execution"`. Any council-designed dimension IDs outside this set score `0.0` with a warning. |
-| 4 | **`CriticPipeline` reports promoted count incorrectly** — `CriticPipelineCompleted` event emits `promoted = processed` (total processed), `rejected = 0`. Actual per-outcome counts are not surfaced. |
-| 5 | **`GenesisCouncilCompleted.usedDefault`** is `modelAssignment.isEmpty() && primordialKb.isEmpty()`. A council that deliberately chose no model overrides and empty KB would incorrectly set `usedDefault = true`. |
-| 6 | **`KG_CONSTRAINT` submission type** — `promoteStagingToSubstrate` logs it as "schema update" but does not apply the constraint to any schema table or DAO. KG schema constraints are thus never enforced. |
-| 7 | **`primordialTools` not seeded** — `StartingField.primordialTools` field is populated by the council but `seedPrimordialData` never writes to `ToolRegistryDao`. Seed tools are silently dropped. |
-| 8 | **Grader Group primordial seeding skipped** — `seedPrimordialData` seeds only `groupIds`, not `graderGroupIds`. Grader group DBs start empty even when the council emits primordial data. |
+| 1 | **Scoring Engine isolation is now partial** — the blind scoring pipeline is behind a dedicated `BlindTournamentService` boundary, but it still lives inside the engine process rather than a separate JVM. |
+| 2 | **Run ceiling now follows the council ceiling** — `runLoop` caps execution with `minOf(config.rounds, activeGenerationCeiling)` after the council field is stored. |
+| 3 | **Scoring dimensions now come from council data** — the deterministic sealed-suite scoring path consumes `config.scoringDimensions` instead of hardcoded heuristic IDs. |
+| 4 | **CriticPipeline now reports real outcome counts** — `CriticPipeline.processPendingSubmissions()` tracks promoted, rejected, and arbitrated submissions explicitly. |
+| 5 | **KG schema failures now fail closed before LLM review** — `CriticPipeline` rejects schema-invalid KG facts before any dispute retry can reach the model. |
+| 6 | **Legacy protocol expiry is a dedicated lifecycle step** — `sweepExpiredLegacyProtocols()` promotes expired failure maps into dead-end KB entries and is covered by a direct regression test. |
+| 7 | **`GenesisCouncilCompleted.usedDefault` now reflects actual fallback use** — it is true only when the council runner did not produce the field. |
+| 8 | **`KG_CONSTRAINT` promotions now apply to the live schema** — promoted constraint submissions are applied and the updated schema version is logged. |
+| 9 | **Primordial tools are now seeded** — `seedPrimordialData()` materialises council tools into each group's `ToolRegistryDao`. |
+| 10 | **Grader groups now receive primordial seeding** — `seedPrimordialData()` seeds both competing and grader groups from the council payloads. |
 
 ---
 
 ### 10.18 Current Phase Estimate
 
-Based on the above, the implementation most closely corresponds to **Phase 1–2** of §5, with partial Phase 3 and Phase 4 scaffolding:
+Based on the above, the implementation most closely corresponds to **Phase 1–8** of §5, with partial Phase 3 and Phase 6 scaffolding:
 
 | Phase | Status |
 |---|---|
 | Phase 0 — Foundation | ✅ Complete (Substrate, BudgetLedger, Shuru VMs, Agent execution) |
 | Phase 1 — Single group, single generation | ✅ Complete |
-| Phase 2 — Multi-generation, single group | ⚠️ Partial (Evolutionary Selector ✅; Legacy Protocol pipeline ❌ not wired; Epigenetic Inheritance ❌; Outlier ✅) |
-| Phase 3 — KG Integration | ⚠️ Partial (KG facts stored ✅; KG Consistency Checker ❌; KG-Critic ❌) |
-| Phase 4 — Multi-group competition | ⚠️ Partial (GroupCoordinator ✅; Leak Oracle unverified; Resource Map ❌) |
-| Phase 5 — Differential Privacy | ⚠️ Class exists; wiring unverified |
-| Phase 6 — Grader Groups | ⚠️ Partial (2-phase agents ✅; not a full civilisation; Meta-Judge ❌; blind seal ❌) |
-| Phase 7 — Progressive Disclosure | ⚠️ Partial (engine wired ✅; real check-in scores ❌; stage sealing ❌) |
-| Phase 8 — Genesis Council Automation | ⚠️ Partial (8-role pipeline ✅; sequential only ❌; consistency check ❌) |
+| Phase 2 — Multi-generation, single group | ✅ Complete (Evolutionary Selector ✅; Legacy Protocol pipeline ✅; Epigenetic Inheritance ✅; Outlier ✅) |
+| Phase 3 — KG Integration | ⚠️ Partial (KG facts stored ✅; KG Consistency Checker ✅; KG dispute arbitration wired in `CriticPipeline` ✅; dedicated KG-Critic agent loop still open) |
+| Phase 4 — Multi-group competition | ✅ Complete (GroupCoordinator ✅; Leak Oracle ✅; Resource Map ✅) |
+| Phase 5 — Differential Privacy | ✅ Complete (privacy transform wired into `GroupCoordinator.dispatchLeak()` and covered by regression tests) |
+| Phase 6 — Grader Groups | ⚠️ Partial (2-phase agents ✅; Meta-Judge consensus/arbitration ✅; blind seal/reveal ✅; not a full civilisation) |
+| Phase 7 — Progressive Disclosure | ✅ Complete (engine wired ✅; real check-in scores ✅; stage sealing ✅) |
+| Phase 8 — Genesis Council Automation | ✅ Complete (8-role pipeline ✅; parallel phase ✅; consistency re-run ✅) |
 | Phases 9–10 | ❌ Not started |
 
 ---

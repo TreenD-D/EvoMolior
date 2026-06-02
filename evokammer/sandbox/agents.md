@@ -156,13 +156,13 @@ sealed class LogRule {
 
 | Role | Allowed Domains |
 |---|---|
-| Researcher | configurable domain list (default: Wikipedia, arXiv, Hacker News, MDN, docs sites) |
-| Builder | package registries (read-only), docs sites |
+| Researcher | broad public-web baseline plus research extras (Wikipedia, arXiv, docs, repos, provider docs) |
+| Builder | broad public-web baseline plus package registries and docs |
 | Planner | none |
 | Critic | none |
 | Archivist | none |
-| Outlier | broader configurable list (Researcher list + additional) |
-| Council | broader list for research during initialization |
+| Outlier | broader configurable list (public-web baseline + social/discussion sources) |
+| Council | generally none in VM mode; broader list only in initialization helpers |
 
 All outbound HTTP is routed through `AllowlistProxy`:
 - DNS lookup checked against allowlist before connection

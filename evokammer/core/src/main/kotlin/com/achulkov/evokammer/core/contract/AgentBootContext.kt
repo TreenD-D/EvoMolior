@@ -17,6 +17,8 @@ import kotlinx.serialization.Serializable
  * @param budgetToken Signed token granting access to the BudgetLedger for this agent.
  * @param substrateDbPath Path to the group's Room database file inside the VM filesystem.
  * @param stagingMountPath Path to the write-only /staging mount inside the VM.
+ * @param artifactsMountPath Path to the read-only run-artifacts mount inside the VM.
+ * @param inputArtifacts Metadata for uploaded run-start context artifacts.
  * @param wipTaskClaim The WiP task claimed for this agent; null for Outliers.
  * @param legacyProtocol The Legacy Protocol injected as privileged context; null if not available.
  * @param stageDisclosure The current stage disclosure content (constraint-framed task description).
@@ -38,6 +40,8 @@ data class AgentBootContext(
     val budgetToken: String,
     val substrateDbPath: String,
     val stagingMountPath: String,
+    val artifactsMountPath: String? = null,
+    val inputArtifacts: List<RunInputArtifact> = emptyList(),
     val wipTaskClaim: WipTaskClaim?,
     val legacyProtocol: LegacyProtocolContext?,
     val stageDisclosure: String,

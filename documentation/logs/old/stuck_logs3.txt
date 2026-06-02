@@ -1,0 +1,1724 @@
+16:32:10.719 D GraderRunner.judge [grader-0] score: group-2 | kb_density = 45.0
+16:31:56.452 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=grader-0 total=22 records loaded=true
+16:31:55.746 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=__meta_archive__ total=0 records loaded=true
+16:31:55.065 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=grader-0 total=22 records loaded=true
+16:31:54.609 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 total=40 records loaded=true
+16:31:53.885 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-1 total=38 records loaded=true
+16:31:44.687 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-2 total=45 records loaded=true
+16:31:44.112 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 total=40 records loaded=true
+16:31:43.430 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-1 total=38 records loaded=true
+16:31:42.997 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 total=40 records loaded=true
+16:31:37.766 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=grader-0 total=22 records loaded=true
+16:31:37.058 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=__meta_archive__ total=0 records loaded=true
+16:30:50.767 D GraderRunner.judge [grader-0] score: group-1 | plan_execution = 50.0
+16:30:32.760 D GraderRunner.judge [grader-0] score: group-1 | tool_utility = 10.0
+16:30:11.467 D GraderRunner.judge [grader-0] score: group-1 | kg_coherence = 30.0
+16:29:45.127 D GraderRunner.judge [grader-0] score: group-1 | kb_density = 45.0
+16:29:30.288 D GraderRunner.judge [grader-0] score: group-0 | plan_execution = 50.0
+16:29:04.216 D GraderRunner.judge [grader-0] score: group-0 | tool_utility = 10.0
+16:28:34.236 D GraderRunner.judge [grader-0] score: group-0 | kg_coherence = 30.0
+16:28:02.180 D GraderRunner.judge [grader-0] score: group-0 | kb_density = 45.0
+16:27:35.358 I GraderRunner.judge: launching round-judge-213afc21 (GraderCritic) targeting all-groups
+16:27:35.358 D GraderAgentFactory: created RoundJudge round-judge-213afc21 (round=1 groups=[group-0, group-1, group-2] model=openai/gpt-oss-120b)
+16:27:35.349 D EvoKammerViewModel: engine progress phase=grader_judge msg=[grader-0] RoundJudge spawning for round 1 — 3 groups to score
+16:27:35.349 D EvoKammerViewModel: received event EngineProgress
+16:27:35.349 I GraderRunner: spawning RoundJudge for grader-0 round=1
+16:27:35.349 D CanonSnapshotExporter [group-2] round=1: kbTotal=6 kgTotal=6 exporting kb=6 kg=6 staging=5
+16:27:35.348 D CanonSnapshotExporter [group-1] round=1: kbTotal=5 kgTotal=6 exporting kb=5 kg=6 staging=1
+16:27:35.346 D CanonSnapshotExporter [group-0] round=1: kbTotal=5 kgTotal=6 exporting kb=5 kg=6 staging=2
+16:27:35.327 D EvoKammerViewModel: engine progress phase=grader_judge_start msg=RoundJudge starting for round 1 — scoring 3 groups
+16:27:35.327 D EvoKammerViewModel: received event EngineProgress
+16:27:35.327 D EvoKammerViewModel: engine progress phase=grader_criteria_review msg=[grader-0] grader criteria review complete: promoted=4 rejected=0
+16:27:35.327 D EvoKammerViewModel: received event EngineProgress
+16:27:35.327 I EvoKammerViewModel: grader round started graderGroupId=grader-0 round=1
+16:27:35.327 D EvoKammerViewModel: received event GraderRoundStarted
+16:27:35.326 I GraderRunner: starting judging phase round=1 graders=1 targets=3
+16:27:35.325 I EvoKammerRunService: starting RoundJudge evaluation round=1
+16:27:35.324 I EvoKammerRunService: Grader criteria CriticPipeline processed 4 for grader=grader-0 round=1: promoted=4 rejected=0 arbitrated=0
+16:27:35.322 I [grader-0] CriticPipeline gen=1: promoted=4 rejected=0 arbitrated=0
+16:27:35.320 D [grader-0] Non-KB submission promoted: PLAN_UPDATE 953fdecd-76d7-4f3c-b771-a61bd1217b43
+16:27:32.203 D [grader-0] Non-KB submission promoted: PLAN_UPDATE fdebe69d-eb0c-48e8-91c7-3257be31c88e
+16:27:27.001 D [grader-0] Non-KB submission promoted: PLAN_UPDATE 5042eeb6-f1fc-46d2-a0ea-70c7aa1b7b25
+16:27:22.990 D [grader-0] Non-KB submission promoted: PLAN_UPDATE c32bc3c6-0a80-47d8-a7e2-6851e9f7be47
+16:27:18.634 D EvoKammerViewModel: engine progress phase=grader_criteria_review msg=[grader-0] CriticPipeline reviewing 4 grader criteria submissions
+16:27:18.634 D EvoKammerViewModel: received event EngineProgress
+16:27:18.634 I EvoKammerRunService: Grader criteria CriticPipeline starting for grader=grader-0 round=1 pending=4
+16:27:18.633 D EvoKammerViewModel: engine progress phase=grader_criteria msg=[grader-0] criteria phase complete for round 1
+16:27:18.633 D EvoKammerViewModel: received event EngineProgress
+16:27:18.633 D EvoKammerViewModel: engine progress phase=grader_criteria_done msg=Grader criteria phase complete (round 1)
+16:27:18.633 D EvoKammerViewModel: received event EngineProgress
+16:27:18.633 I GraderRunner: criteria phase complete round=1
+16:27:18.633 D GraderRunner: criteria GraderBuilder completed for grader-0 round=1 (209 chars)
+16:27:18.633 I GraderRunner.criteria: criteria-graderbuilder-c8c671ab completed in 92605ms
+16:25:54.738 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 total=40 records loaded=true
+16:25:46.028 I GraderRunner.criteria: launching criteria-graderbuilder-c8c671ab (GraderBuilder)
+16:25:46.028 D GraderAgentFactory: created criteria agent criteria-graderbuilder-c8c671ab (role=GraderBuilder round=1 model=openai/gpt-oss-120b)
+16:25:46.027 D EvoKammerViewModel: engine progress phase=grader_criteria msg=[grader-0] criteria phase: spawning GraderBuilder for round 1
+16:25:46.027 D EvoKammerViewModel: received event EngineProgress
+16:25:46.027 D GraderRunner: criteria phase spawning GraderBuilder for grader-0 round=1
+16:25:46.027 D GraderRunner: criteria GraderResearcher completed for grader-0 round=1 (249 chars)
+16:25:46.026 I GraderRunner.criteria: criteria-graderresearcher-1dcdd75c completed in 99233ms
+16:25:41.201 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-2 total=45 records loaded=true
+16:25:38.580 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-1 total=38 records loaded=true
+16:25:37.981 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 total=40 records loaded=true
+16:25:29.019 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=grader-0 total=22 records loaded=true
+16:25:06.848 D EvoKammerViewModel: engine progress phase=legacy_protocol msg=[group-2] 1 legacy protocol(s) extracted for round 1
+16:25:06.848 D EvoKammerViewModel: received event EngineProgress
+16:25:06.848 I EvoKammerRunService: extracted 1 legacy protocol(s) for group=group-2 round=1
+16:25:06.848 I LegacyProtocolExtractor: extracted protocol for role=Researcher from 1 agents (gen=1 expires=3)
+16:25:06.834 D EvoKammerViewModel: engine progress phase=fitness msg=[group-2] Fitness scored 1 agents (round 1) — top 1 extracting legacy protocol
+16:25:06.834 D EvoKammerViewModel: received event EngineProgress
+16:25:06.834 I EvoKammerRunService: fitness scored 1 agents for group=group-2 round=1; top 1 eligible for legacy protocol
+16:25:06.834 D FitnessScorer: agent-researcher-87438400 gen=1 citation=2.0 kg=0.0 tool=0.0 staging=25.0 task=0.0 total=27.0
+16:25:06.830 D EvoKammerViewModel: engine progress phase=legacy_protocol msg=[group-1] 1 legacy protocol(s) extracted for round 1
+16:25:06.830 D EvoKammerViewModel: received event EngineProgress
+16:25:06.830 I EvoKammerRunService: extracted 1 legacy protocol(s) for group=group-1 round=1
+16:25:06.830 I LegacyProtocolExtractor: extracted protocol for role=Researcher from 1 agents (gen=1 expires=3)
+16:25:06.825 D EvoKammerViewModel: engine progress phase=fitness msg=[group-1] Fitness scored 1 agents (round 1) — top 1 extracting legacy protocol
+16:25:06.825 D EvoKammerViewModel: received event EngineProgress
+16:25:06.825 I EvoKammerRunService: fitness scored 1 agents for group=group-1 round=1; top 1 eligible for legacy protocol
+16:25:06.825 D FitnessScorer: agent-researcher-95c3c19e gen=1 citation=2.0 kg=0.0 tool=0.0 staging=25.0 task=0.0 total=27.0
+16:25:06.824 D EvoKammerViewModel: engine progress phase=legacy_protocol msg=[group-0] 1 legacy protocol(s) extracted for round 1
+16:25:06.824 D EvoKammerViewModel: received event EngineProgress
+16:25:06.824 I EvoKammerRunService: extracted 1 legacy protocol(s) for group=group-0 round=1
+16:25:06.823 I LegacyProtocolExtractor: extracted protocol for role=Researcher from 1 agents (gen=1 expires=3)
+16:25:06.821 D EvoKammerViewModel: engine progress phase=fitness msg=[group-0] Fitness scored 1 agents (round 1) — top 1 extracting legacy protocol
+16:25:06.819 D EvoKammerViewModel: received event EngineProgress
+16:25:06.819 I EvoKammerRunService: fitness scored 1 agents for group=group-0 round=1; top 1 eligible for legacy protocol
+16:25:06.819 D FitnessScorer: agent-researcher-b710653f gen=1 citation=2.0 kg=0.0 tool=0.0 staging=25.0 task=0.0 total=27.0
+16:25:06.813 D EvoKammerViewModel: unhandled event type CriticPipelineCompleted
+16:25:06.813 D EvoKammerViewModel: received event CriticPipelineCompleted
+16:25:06.813 I EvoKammerRunService: CriticPipeline processed 0 for group=group-2 round=1: promoted=0 rejected=0 arbitrated=0
+16:25:06.813 I [group-2] CriticPipeline gen=1: promoted=0 rejected=0 arbitrated=0
+16:25:06.813 D EvoKammerViewModel: engine progress phase=critic msg=[group-2] CriticPipeline reviewing 0 pending submissions
+16:25:06.813 D EvoKammerViewModel: received event EngineProgress
+16:25:06.813 I EvoKammerRunService: CriticPipeline starting for group=group-2 round=1 pending=0
+16:25:06.811 D EvoKammerViewModel: unhandled event type CriticPipelineCompleted
+16:25:06.811 D EvoKammerViewModel: received event CriticPipelineCompleted
+16:25:06.811 I EvoKammerRunService: CriticPipeline processed 0 for group=group-1 round=1: promoted=0 rejected=0 arbitrated=0
+16:25:06.811 I [group-1] CriticPipeline gen=1: promoted=0 rejected=0 arbitrated=0
+16:25:06.811 D EvoKammerViewModel: engine progress phase=critic msg=[group-1] CriticPipeline reviewing 0 pending submissions
+16:25:06.811 D EvoKammerViewModel: received event EngineProgress
+16:25:06.810 I EvoKammerRunService: CriticPipeline starting for group=group-1 round=1 pending=0
+16:25:06.809 D EvoKammerViewModel: unhandled event type CriticPipelineCompleted
+16:25:06.809 D EvoKammerViewModel: received event CriticPipelineCompleted
+16:25:06.809 I EvoKammerRunService: CriticPipeline processed 0 for group=group-0 round=1: promoted=0 rejected=0 arbitrated=0
+16:25:06.808 I [group-0] CriticPipeline gen=1: promoted=0 rejected=0 arbitrated=0
+16:25:06.806 D EvoKammerViewModel: engine progress phase=critic msg=[group-0] CriticPipeline reviewing 0 pending submissions
+16:25:06.806 D EvoKammerViewModel: received event EngineProgress
+16:25:06.805 I EvoKammerRunService: CriticPipeline starting for group=group-0 round=1 pending=0
+16:25:06.800 D EvoKammerViewModel: engine progress phase=round_end msg=Round 1 time up — terminating agents and running post-round evaluation
+16:25:06.800 D EvoKammerViewModel: received event EngineProgress
+16:25:06.800 D EvoKammerViewModel: engine progress phase=round_early_end msg=Round 1 — all agents completed, advancing to post-round evaluation
+16:25:06.800 D EvoKammerViewModel: received event EngineProgress
+16:25:06.800 D EvoKammerViewModel: engine progress phase=round_wait msg=Round 1 — 1/5 min elapsed, 0 agents active
+16:25:06.799 D EvoKammerViewModel: received event EngineProgress
+16:25:06.799 I EvoKammerRunService: round 1 duration elapsed — terminating remaining agents
+16:25:06.799 I EvoKammerRunService: all agents completed for round 1 — ending round early
+16:25:06.797 I EvoKammerRunService: Round 1 — 1/5 min elapsed, 0 agents active
+16:24:50.896 D EvoKammerViewModel: received event GroupBudgetChanged
+16:24:50.896 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-2] WiP task html5_semantics abandoned by agent-researcher-7f3b5e55 at generation 1
+16:24:50.896 D EvoKammerViewModel: received event EngineProgress
+16:24:50.896 I [group-2] Agent agent-researcher-7f3b5e55 exited (wasKilled=false, inProcess=true)
+16:24:50.895 I [group-2] WiP task html5_semantics abandoned by agent-researcher-7f3b5e55 (wasKilled=false)
+16:24:50.895 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-2] Agent agent-researcher-7f3b5e55 completed
+16:24:50.895 D EvoKammerViewModel: received event EngineProgress
+16:24:50.895 D EvoKammerViewModel: received event AgentDied
+16:24:50.895 I [group-2] Agent died: agent-researcher-7f3b5e55 (completed)
+16:24:50.891 I [group-2] Agent agent-researcher-7f3b5e55 final budget: initial=30.0 remaining=30.0 actions=0 spent=0.0
+16:24:50.891 I [group-2] In-process agent agent-researcher-7f3b5e55 completed normally in 44103ms
+16:24:50.891 I EvoKammer [group-2]: agent agent-researcher-7f3b5e55 completed in 44101ms — budget: spent=0.00 remaining=30.00 actions=0 result=The previous assistant response was empty. Respond with either a tool call or a concise answer.
+16:24:50.890 I Koog[Researcher/agent-researcher-7f3b5e55] agent completed — result: The previous assistant response was empty. Respond with either a tool call or a concise answer.
+16:24:50.887 D Koog[Researcher/agent-researcher-7f3b5e55] LLM call completed
+16:24:42.692 D EvoKammerViewModel: received event GroupBudgetChanged
+16:24:42.692 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-0] Agent agent-researcher-7ac15136 completed
+16:24:42.692 D EvoKammerViewModel: received event EngineProgress
+16:24:42.690 I [group-0] Agent died: agent-researcher-7ac15136 (completed)
+16:24:42.689 I [group-0] Agent agent-researcher-7ac15136 final budget: initial=50.0 remaining=50.0 actions=0 spent=0.0
+16:24:42.689 I [group-0] In-process agent agent-researcher-7ac15136 completed normally in 35926ms
+16:24:42.688 I EvoKammer [group-0]: agent agent-researcher-7ac15136 completed in 35925ms — budget: spent=0.00 remaining=50.00 actions=0 result=The previous assistant response was empty. Respond with either a tool call or a concise answer.
+16:24:42.688 I Koog[Researcher/agent-researcher-7ac15136] agent completed — result: The previous assistant response was empty. Respond with either a tool call or a concise answer.
+16:24:42.688 D Koog[Researcher/agent-researcher-7ac15136] LLM call completed
+16:24:38.592 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-1] WiP task seo_keywords abandoned by agent-researcher-63e9ae66 at generation 1
+16:24:38.592 D EvoKammerViewModel: received event EngineProgress
+16:24:38.592 D EvoKammerViewModel: received event GroupBudgetChanged
+16:24:38.592 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-1] Agent agent-researcher-63e9ae66 completed
+16:24:38.591 D EvoKammerViewModel: received event EngineProgress
+16:24:38.591 D EvoKammerViewModel: received event AgentDied
+16:24:38.590 I [group-1] Agent died: agent-researcher-63e9ae66 (completed)
+16:24:38.588 I [group-1] Agent agent-researcher-63e9ae66 final budget: initial=60.0 remaining=60.0 actions=0 spent=0.0
+16:24:38.588 I [group-1] In-process agent agent-researcher-63e9ae66 completed normally in 31815ms
+16:24:38.588 I EvoKammer [group-1]: agent agent-researcher-63e9ae66 completed in 31814ms — budget: spent=0.00 remaining=60.00 actions=0 result=The previous assistant response was empty. Respond with either a tool call or a concise answer.
+16:24:38.587 I Koog[Researcher/agent-researcher-63e9ae66] agent completed — result: The previous assistant response was empty. Respond with either a tool call or a concise answer.
+16:24:38.585 D Koog[Researcher/agent-researcher-63e9ae66] LLM call completed
+16:24:36.792 D EvoKammerViewModel: engine progress phase=round_wait msg=Round 1 — 0/5 min elapsed, 3 agents active
+16:24:36.792 D EvoKammerViewModel: received event EngineProgress
+16:24:36.791 I EvoKammerRunService: Round 1 — 0/5 min elapsed, 3 agents active
+16:24:34.731 D Koog[Researcher/agent-researcher-7f3b5e55] LLM call starting
+16:24:34.731 D Koog[Researcher/agent-researcher-7f3b5e55] ← read_kg = "Found 1 KG facts:
+
+--- Fact 1 ---
+ID: fact_4-group-2
+Subject: mindvortex.app
+Relation: TARGETS
+Object: ADHD_Users
+Confidence: 0.98
+Trust Score: 0.90
+Generation: 0
+"
+16:24:34.729 D Koog[Researcher/agent-researcher-7f3b5e55] → read_kg({"subject":"mindvortex.app", "relation":"*", "obj":"*", "maxResults":20})
+16:24:34.728 D Koog[Researcher/agent-researcher-7f3b5e55] ← read_kb = "No results found for query: "ADHD neurodivergent web design patterns HTML5 semantics" in domain: accessibility"
+16:24:34.728 D Koog[Researcher/agent-researcher-7f3b5e55] → read_kb({"query":"ADHD neurodivergent web design patterns HTML5 semantics", "domain":"accessibility", "maxResults":10})
+16:24:34.728 D Koog[Researcher/agent-researcher-7f3b5e55] ← read_kb = "No results found for query: "mindvortex.app HTML semantic skeleton accessibility landmarks" in domain: web"
+16:24:34.727 D Koog[Researcher/agent-researcher-7f3b5e55] → read_kb({"query":"mindvortex.app HTML semantic skeleton accessibility landmarks", "domain":"web", "maxResults":10})
+16:24:34.726 D Koog[Researcher/agent-researcher-7f3b5e55] LLM call completed
+16:24:33.332 D EvoKammerViewModel: received event GroupBudgetChanged
+16:24:33.332 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-2] WiP task seo_keywords abandoned by agent-researcher-87438400 at generation 1
+16:24:33.332 D EvoKammerViewModel: received event EngineProgress
+16:24:33.332 I [group-2] Agent agent-researcher-87438400 exited (wasKilled=true, inProcess=true)
+16:24:33.332 I [group-2] WiP task seo_keywords abandoned by agent-researcher-87438400 (wasKilled=true)
+16:24:33.332 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-2] Agent agent-researcher-87438400 killed
+16:24:33.332 D EvoKammerViewModel: received event EngineProgress
+16:24:33.332 I [group-2] Agent died: agent-researcher-87438400 (killed)
+16:24:33.331 I [group-2] Agent agent-researcher-87438400 final budget: initial=30.0 remaining=30.0 actions=0 spent=0.0
+16:24:33.331 W [group-2] In-process agent agent-researcher-87438400 aborted due to blocking runtime error after 26543ms: [Koog[Researcher/agent-researcher-87438400]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-87438400]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:24:33.330 I EvoKammerAgentFactory: emergency death note written for agent-researcher-87438400 (id=death-auto-agent-researcher-87438400-1779978273329)
+16:24:33.329 E EvoKammer [group-2]: agent agent-researcher-87438400 (Researcher) RUN FAILED after 26542ms [BlockingAgentAbortException]: [Koog[Researcher/agent-researcher-87438400]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-87438400]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:24:33.329 E Koog[Researcher/agent-researcher-87438400] agent FAILED: [Koog[Researcher/agent-researcher-87438400]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-87438400]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:24:33.327 W [Koog[Researcher/agent-researcher-87438400]] aborting agent due to blocking runtime error: tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+16:24:33.327 D Koog[Researcher/agent-researcher-87438400] → read_run_artifact({"listOnly":true})
+16:24:33.327 D Koog[Researcher/agent-researcher-87438400] LLM call completed
+16:24:32.432 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-1] WiP task adhd_understanding abandoned by agent-critic-0c7e8282 at generation 1
+16:24:32.432 D EvoKammerViewModel: received event EngineProgress
+16:24:32.432 D EvoKammerViewModel: received event GroupBudgetChanged
+16:24:32.432 I [group-1] Agent agent-critic-0c7e8282 exited (wasKilled=false, inProcess=true)
+16:24:32.432 I [group-1] WiP task adhd_understanding abandoned by agent-critic-0c7e8282 (wasKilled=false)
+16:24:32.432 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-1] Agent agent-critic-0c7e8282 completed
+16:24:32.432 D EvoKammerViewModel: received event EngineProgress
+16:24:32.432 D EvoKammerViewModel: received event AgentDied
+16:24:32.431 I [group-1] Agent died: agent-critic-0c7e8282 (completed)
+16:24:32.429 I [group-1] Agent agent-critic-0c7e8282 final budget: initial=60.0 remaining=60.0 actions=0 spent=0.0
+16:24:32.429 I [group-1] In-process agent agent-critic-0c7e8282 completed normally in 25658ms
+16:24:32.429 I EvoKammer [group-1]: agent agent-critic-0c7e8282 completed in 25658ms — budget: spent=0.00 remaining=60.00 actions=0 result=Let me check for staging submissions, Dead Ends, and run artifacts to understand what's already in p
+16:24:32.428 I Koog[Critic/agent-critic-0c7e8282] agent completed — result: Let me check for staging submissions, Dead Ends, and run artifacts to understand what's already in play.
+
+
+16:24:32.427 D Koog[Critic/agent-critic-0c7e8282] LLM call completed
+16:24:31.651 D Koog[Researcher/agent-researcher-87438400] LLM call starting
+16:24:31.650 D Koog[Researcher/agent-researcher-87438400] ← read_kb = "No results found for query: "adhd tools search volume long tail""
+16:24:31.650 D Koog[Researcher/agent-researcher-87438400] → read_kb({"query":"adhd tools search volume long tail", "maxResults":10})
+16:24:31.650 D Koog[Researcher/agent-researcher-87438400] ← read_kb = "No results found for query: "dead ends ADHD SEO keywords""
+16:24:31.650 D Koog[Researcher/agent-researcher-87438400] → read_kb({"query":"dead ends ADHD SEO keywords", "maxResults":10})
+16:24:31.650 D Koog[Researcher/agent-researcher-87438400] ← read_kb = "No results found for query: "mindvortex.app keywords""
+16:24:31.649 D Koog[Researcher/agent-researcher-87438400] → read_kb({"query":"mindvortex.app keywords", "maxResults":10})
+16:24:31.649 D Koog[Researcher/agent-researcher-87438400] LLM call completed
+16:24:29.550 D EvoKammerViewModel: received event GroupBudgetChanged
+16:24:29.550 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-0] WiP task seo_keywords abandoned by agent-researcher-b710653f at generation 1
+16:24:29.550 D EvoKammerViewModel: received event EngineProgress
+16:24:29.550 I [group-0] WiP task seo_keywords abandoned by agent-researcher-b710653f (wasKilled=true)
+16:24:29.550 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-0] Agent agent-researcher-b710653f killed
+16:24:29.550 D EvoKammerViewModel: received event EngineProgress
+16:24:29.550 D EvoKammerViewModel: received event AgentDied
+16:24:29.549 I [group-0] Agent died: agent-researcher-b710653f (killed)
+16:24:29.548 I [group-0] Agent agent-researcher-b710653f final budget: initial=50.0 remaining=50.0 actions=0 spent=0.0
+16:24:29.547 W [group-0] In-process agent agent-researcher-b710653f aborted due to blocking runtime error after 22783ms: [Koog[Researcher/agent-researcher-b710653f]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-b710653f]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:24:29.545 I EvoKammerAgentFactory: emergency death note written for agent-researcher-b710653f (id=death-auto-agent-researcher-b710653f-1779978269543)
+16:24:29.543 E EvoKammer [group-0]: agent agent-researcher-b710653f (Researcher) RUN FAILED after 22780ms [BlockingAgentAbortException]: [Koog[Researcher/agent-researcher-b710653f]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-b710653f]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:24:29.542 E Koog[Researcher/agent-researcher-b710653f] agent FAILED: [Koog[Researcher/agent-researcher-b710653f]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-b710653f]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:24:29.541 W [Koog[Researcher/agent-researcher-b710653f]] aborting agent due to blocking runtime error: tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+16:24:29.541 D Koog[Researcher/agent-researcher-b710653f] → read_run_artifact({"listOnly":true})
+16:24:29.540 D Koog[Researcher/agent-researcher-b710653f] ← search_kb = "Found 4 semantically related KB entries (query: "high intent keywords ADHD productivity focus tools"):
+
+--- Entry 1 ---
+ID: seed_2-group-0
+Domain: general
+Similarity: 0.357
+Trust Score: 0.90
+Generation: 0
+Citations: 3
+[Note: embedding not yet computed — keyword fallback match]
+Content:
+SEO for ADHD
+16:24:29.538 D Koog[Researcher/agent-researcher-b710653f] → search_kb({"maxResults":10, "query":"high intent keywords ADHD productivity focus tools"})
+16:24:29.538 D Koog[Researcher/agent-researcher-b710653f] ← read_kb = "No results found for query: "ADHD tools categories neurodivergent""
+16:24:29.533 D Koog[Researcher/agent-researcher-b710653f] → read_kb({"maxResults":10, "query":"ADHD tools categories neurodivergent"})
+16:24:29.533 D Koog[Researcher/agent-researcher-b710653f] LLM call completed
+16:24:25.152 D Koog[Researcher/agent-researcher-7ac15136] LLM call starting
+16:24:25.152 D Koog[Researcher/agent-researcher-7ac15136] ← read_kb = "No results found for query: "adhd friendly website structure landmark regions""
+16:24:25.151 D Koog[Researcher/agent-researcher-7ac15136] → read_kb({"query":"adhd friendly website structure landmark regions", "maxResults":10})
+16:24:25.151 D Koog[Researcher/agent-researcher-7ac15136] ← search_kb = "Found 4 semantically related KB entries (query: "mindvortex app neurodivergent content strategy"):
+
+--- Entry 1 ---
+ID: seed_2-group-0
+Domain: general
+Similarity: 0.200
+Trust Score: 0.90
+Generation: 0
+Citations: 2
+[Note: embedding not yet computed — keyword fallback match]
+Content:
+SEO for ADHD-rel
+16:24:25.147 D Koog[Researcher/agent-researcher-7ac15136] → search_kb({"query":"mindvortex app neurodivergent content strategy", "maxResults":10})
+16:24:25.146 D Koog[Researcher/agent-researcher-7ac15136] ← search_kb = "Found 5 semantically related KB entries (query: "ADHD web design patterns accessibility HTML semantics"):
+
+--- Entry 1 ---
+ID: seed_3-group-0
+Domain: general
+Similarity: 0.143
+Trust Score: 0.90
+Generation: 0
+Citations: 1
+[Note: embedding not yet computed — keyword fallback match]
+Content:
+A beautif
+16:24:25.138 D Koog[Researcher/agent-researcher-7ac15136] → search_kb({"query":"ADHD web design patterns accessibility HTML semantics", "maxResults":10})
+16:24:25.137 D Koog[Researcher/agent-researcher-7ac15136] LLM call completed
+16:24:25.032 I [group-2] Agent agent-critic-bf8edc76 exited (wasKilled=false, inProcess=true)
+16:24:25.032 I [group-2] WiP task adhd_understanding abandoned by agent-critic-bf8edc76 (wasKilled=false)
+16:24:25.032 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-2] Agent agent-critic-bf8edc76 completed
+16:24:25.032 D EvoKammerViewModel: received event EngineProgress
+16:24:25.031 D EvoKammerViewModel: received event AgentDied
+16:24:25.031 I [group-2] Agent died: agent-critic-bf8edc76 (completed)
+16:24:25.031 I [group-2] Agent agent-critic-bf8edc76 final budget: initial=30.0 remaining=30.0 actions=0 spent=0.0
+16:24:25.031 I [group-2] In-process agent agent-critic-bf8edc76 completed normally in 18245ms
+16:24:25.031 I EvoKammer [group-2]: agent agent-critic-bf8edc76 completed in 18244ms — budget: spent=0.00 remaining=30.00 actions=0 result=Now let me look at the Knowledge Graph to see what facts have already been established about ADHD.
+
+
+16:24:25.030 I Koog[Critic/agent-critic-bf8edc76] agent completed — result: Now let me look at the Knowledge Graph to see what facts have already been established about ADHD.
+
+
+16:24:25.030 D Koog[Critic/agent-critic-bf8edc76] LLM call completed
+16:24:24.556 D Koog[Researcher/agent-researcher-87438400] LLM call starting
+16:24:24.555 D Koog[Researcher/agent-researcher-87438400] ← read_kg = "No KG facts found for pattern: (ADHD, *, *)"
+16:24:24.553 D Koog[Researcher/agent-researcher-87438400] → read_kg({"subject":"ADHD", "maxResults":20, "minTrustScore":0.5})
+16:24:24.553 D Koog[Researcher/agent-researcher-87438400] ← search_kb = "Found 4 semantically related KB entries (query: "neurodivergent web design patterns SEO strategy"):
+
+--- Entry 1 ---
+ID: eb3be538-a6f0-4d01-ab5f-b99638b7b925
+Domain: general
+Similarity: 0.122
+Trust Score: 0.80
+Generation: 0
+Citations: 2
+Content:
+Foundational research summary for ADHD audience conte
+16:24:24.550 D Koog[Researcher/agent-researcher-87438400] → search_kb({"query":"neurodivergent web design patterns SEO strategy", "maxResults":10})
+16:24:24.550 D Koog[Researcher/agent-researcher-87438400] ← search_kb = "Found 6 semantically related KB entries (query: "ADHD keywords search volume semantic clusters"):
+
+--- Entry 1 ---
+ID: eb3be538-a6f0-4d01-ab5f-b99638b7b925
+Domain: general
+Similarity: 0.271
+Trust Score: 0.80
+Generation: 0
+Citations: 1
+Content:
+Foundational research summary for ADHD audience content
+16:24:24.543 D Koog[Researcher/agent-researcher-87438400] → search_kb({"query":"ADHD keywords search volume semantic clusters", "maxResults":10})
+16:24:24.539 D Koog[Researcher/agent-researcher-87438400] LLM call completed
+16:24:23.151 D EvoKammerViewModel: received event GroupBudgetChanged
+16:24:23.151 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-1] WiP task html5_semantics abandoned by agent-researcher-95c3c19e at generation 1
+16:24:23.151 D EvoKammerViewModel: received event EngineProgress
+16:24:23.151 I [group-1] Agent agent-researcher-95c3c19e exited (wasKilled=true, inProcess=true)
+16:24:23.151 I [group-1] WiP task html5_semantics abandoned by agent-researcher-95c3c19e (wasKilled=true)
+16:24:23.151 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-1] Agent agent-researcher-95c3c19e killed
+16:24:23.151 D EvoKammerViewModel: received event EngineProgress
+16:24:23.150 D EvoKammerViewModel: received event AgentDied
+16:24:23.150 I [group-1] Agent died: agent-researcher-95c3c19e (killed)
+16:24:23.147 I [group-1] Agent agent-researcher-95c3c19e final budget: initial=60.0 remaining=60.0 actions=0 spent=0.0
+16:24:23.147 W [group-1] In-process agent agent-researcher-95c3c19e aborted due to blocking runtime error after 16359ms: [Koog[Researcher/agent-researcher-95c3c19e]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-95c3c19e]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:24:23.133 I EvoKammerAgentFactory: emergency death note written for agent-researcher-95c3c19e (id=death-auto-agent-researcher-95c3c19e-1779978263125)
+16:24:23.125 E EvoKammer [group-1]: agent agent-researcher-95c3c19e (Researcher) RUN FAILED after 16336ms [BlockingAgentAbortException]: [Koog[Researcher/agent-researcher-95c3c19e]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-95c3c19e]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:24:23.110 E Koog[Researcher/agent-researcher-95c3c19e] agent FAILED: [Koog[Researcher/agent-researcher-95c3c19e]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-95c3c19e]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:24:23.090 W [Koog[Researcher/agent-researcher-95c3c19e]] aborting agent due to blocking runtime error: tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+16:24:23.090 D Koog[Researcher/agent-researcher-95c3c19e] → read_run_artifact({"listOnly":true})
+16:24:23.090 D Koog[Researcher/agent-researcher-95c3c19e] LLM call completed
+16:24:23.089 D Koog[Researcher/agent-researcher-b710653f] LLM call starting
+16:24:23.088 D Koog[Researcher/agent-researcher-b710653f] ← read_kg = "Found 6 KG facts:
+
+--- Fact 1 ---
+ID: fact_1-group-0
+Subject: ADHD_Content
+Relation: REQUIRES
+Object: Short_Segments
+Confidence: 0.95
+Trust Score: 0.90
+Generation: 0
+
+--- Fact 2 ---
+ID: fact_2-group-0
+Subject: HTML5_Article
+Relation: DEPENDS_ON
+Object: Semantic_Markup
+Confidence: 0.90
+Trust Score:
+16:24:23.084 D Koog[Researcher/agent-researcher-b710653f] → read_kg({"subject":"*", "relation":"*", "obj":"*", "maxResults":30})
+16:24:23.084 D Koog[Researcher/agent-researcher-b710653f] ← read_kb = "No results found for query: "ADHD keyword research semantic clusters""
+16:24:23.083 D Koog[Researcher/agent-researcher-b710653f] → read_kb({"query":"ADHD keyword research semantic clusters", "maxResults":10})
+16:24:23.082 D Koog[Researcher/agent-researcher-b710653f] ← read_kb = "No results found for query: "ADHD tools SEO keywords" in domain: seo"
+16:24:23.058 D Koog[Researcher/agent-researcher-b710653f] → read_kb({"query":"ADHD tools SEO keywords", "domain":"seo", "maxResults":10})
+16:24:23.057 D Koog[Researcher/agent-researcher-b710653f] LLM call completed
+16:24:22.204 D Koog[Researcher/agent-researcher-63e9ae66] LLM call starting
+16:24:22.204 D Koog[Researcher/agent-researcher-63e9ae66] ← read_kg = "Found 6 KG facts:
+
+--- Fact 1 ---
+ID: fact_1-group-1
+Subject: ADHD_Content
+Relation: REQUIRES
+Object: Short_Segments
+Confidence: 0.95
+Trust Score: 0.90
+Generation: 0
+
+--- Fact 2 ---
+ID: fact_2-group-1
+Subject: HTML5_Article
+Relation: DEPENDS_ON
+Object: Semantic_Markup
+Confidence: 0.90
+Trust Score:
+16:24:22.203 D Koog[Researcher/agent-researcher-63e9ae66] → read_kg({"subject":"*", "relation":"*", "obj":"*", "maxResults":20})
+16:24:22.203 D Koog[Researcher/agent-researcher-63e9ae66] ← read_kb = "No results found for query: "ADHD tools semantic clusters" in domain: adhd"
+16:24:22.201 D Koog[Researcher/agent-researcher-63e9ae66] → read_kb({"query":"ADHD tools semantic clusters", "domain":"adhd", "maxResults":10})
+16:24:22.201 D Koog[Researcher/agent-researcher-63e9ae66] ← read_kb = "No results found for query: "ADHD keywords SEO search volume" in domain: adhd"
+16:24:22.200 D Koog[Researcher/agent-researcher-63e9ae66] → read_kb({"query":"ADHD keywords SEO search volume", "domain":"adhd", "maxResults":10})
+16:24:22.200 D Koog[Researcher/agent-researcher-63e9ae66] LLM call completed
+16:24:20.931 D EvoKammerViewModel: received event GroupBudgetChanged
+16:24:20.931 I [group-0] Agent agent-critic-dce4d17a exited (wasKilled=false, inProcess=true)
+16:24:20.930 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-0] WiP task adhd_understanding abandoned by agent-critic-dce4d17a at generation 1
+16:24:20.930 D EvoKammerViewModel: received event EngineProgress
+16:24:20.930 I [group-0] WiP task adhd_understanding abandoned by agent-critic-dce4d17a (wasKilled=false)
+16:24:20.926 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-0] Agent agent-critic-dce4d17a completed
+16:24:20.926 D EvoKammerViewModel: received event EngineProgress
+16:24:20.925 D EvoKammerViewModel: received event AgentDied
+16:24:20.925 I [group-0] Agent died: agent-critic-dce4d17a (completed)
+16:24:20.921 I [group-0] Agent agent-critic-dce4d17a final budget: initial=50.0 remaining=50.0 actions=0 spent=0.0
+16:24:20.920 I [group-0] In-process agent agent-critic-dce4d17a completed normally in 14161ms
+16:24:20.919 I EvoKammer [group-0]: agent agent-critic-dce4d17a completed in 14155ms — budget: spent=0.00 remaining=50.00 actions=0 result=Let me try a broader search to see what's in the knowledge base about our current project context.
+
+
+16:24:20.915 I Koog[Critic/agent-critic-dce4d17a] agent completed — result: Let me try a broader search to see what's in the knowledge base about our current project context.
+
+
+16:24:20.914 D Koog[Critic/agent-critic-dce4d17a] LLM call completed
+16:24:17.387 D Koog[Critic/agent-critic-bf8edc76] LLM call starting
+16:24:17.387 D Koog[Critic/agent-critic-bf8edc76] ← search_kb = "Found 6 semantically related KB entries (query: "ADHD symptoms lived experiences attention patterns"):
+
+--- Entry 1 ---
+ID: eb3be538-a6f0-4d01-ab5f-b99638b7b925
+Domain: general
+Similarity: 0.434
+Trust Score: 0.80
+Generation: 0
+Citations: 0
+Content:
+Foundational research summary for ADHD audience co
+16:24:17.376 D Koog[Critic/agent-critic-bf8edc76] → search_kb({"query":"ADHD symptoms lived experiences attention patterns", "maxResults":10})
+16:24:17.375 D Koog[Critic/agent-critic-bf8edc76] LLM call completed
+16:24:14.964 D Koog[Researcher/agent-researcher-87438400] LLM call starting
+16:24:14.964 D Koog[Researcher/agent-researcher-87438400] ← read_kb = "No results found for query: "semantic clusters neurodivergent""
+16:24:14.963 D Koog[Researcher/agent-researcher-87438400] → read_kb({"query":"semantic clusters neurodivergent", "maxResults":10})
+16:24:14.963 D Koog[Researcher/agent-researcher-87438400] ← read_kb = "No results found for query: "high-intent keywords ADHD" in domain: seo"
+16:24:14.963 D Koog[Researcher/agent-researcher-87438400] → read_kb({"query":"high-intent keywords ADHD", "domain":"seo", "maxResults":10})
+16:24:14.963 D Koog[Researcher/agent-researcher-87438400] ← read_kb = "No results found for query: "ADHD tools keywords SEO" in domain: seo"
+16:24:14.962 D Koog[Researcher/agent-researcher-87438400] → read_kb({"query":"ADHD tools keywords SEO", "domain":"seo", "maxResults":10})
+16:24:14.962 D Koog[Researcher/agent-researcher-87438400] LLM call completed
+16:24:12.928 D Koog[Critic/agent-critic-0c7e8282] LLM call starting
+16:24:12.927 D Koog[Critic/agent-critic-0c7e8282] ← read_kg = "No KG facts found for pattern: (*, *, *ADHD*)"
+16:24:12.926 D Koog[Critic/agent-critic-0c7e8282] → read_kg({"subject":"*", "relation":"*", "obj":"*ADHD*", "maxResults":20})
+16:24:12.926 D Koog[Critic/agent-critic-0c7e8282] ← read_kb = "No results found for query: "ADHD core symptoms lived experience attention patterns""
+16:24:12.925 D Koog[Critic/agent-critic-0c7e8282] → read_kb({"query":"ADHD core symptoms lived experience attention patterns", "maxResults":10})
+16:24:12.925 D Koog[Critic/agent-critic-0c7e8282] ← claim_task = "Task 'adhd_understanding' is already claimed by agent agent-critic-0c7e8282."
+16:24:12.918 D Koog[Critic/agent-critic-0c7e8282] → claim_task({"nodeId":"adhd_understanding"})
+16:24:12.916 D Koog[Critic/agent-critic-0c7e8282] LLM call completed
+16:24:12.067 D Koog[Researcher/agent-researcher-7ac15136] LLM call starting
+16:24:12.067 D Koog[Researcher/agent-researcher-7ac15136] ← read_kb = "No results found for query: "article section nav aside aria landmarks ADHD friendly""
+16:24:12.067 D Koog[Researcher/agent-researcher-7ac15136] → read_kb({"query":"article section nav aside aria landmarks ADHD friendly", "maxResults":10})
+16:24:12.067 D Koog[Researcher/agent-researcher-7ac15136] ← read_kb = "No results found for query: "HTML5 semantic elements accessibility landmarks neurodivergent""
+16:24:12.067 D Koog[Researcher/agent-researcher-7ac15136] → read_kb({"query":"HTML5 semantic elements accessibility landmarks neurodivergent", "maxResults":10})
+16:24:12.066 D Koog[Researcher/agent-researcher-7ac15136] ← read_kb = "No results found for query: "mindvortex.app ADHD web design""
+16:24:12.066 D Koog[Researcher/agent-researcher-7ac15136] → read_kb({"query":"mindvortex.app ADHD web design", "maxResults":10})
+16:24:12.066 D Koog[Researcher/agent-researcher-7ac15136] LLM call completed
+16:24:11.688 D Koog[Critic/agent-critic-dce4d17a] LLM call starting
+16:24:11.687 D Koog[Critic/agent-critic-dce4d17a] ← read_kb = "No results found for query: "ADHD symptoms lived experiences attention patterns""
+16:24:11.686 D Koog[Critic/agent-critic-dce4d17a] → read_kb({"query":"ADHD symptoms lived experiences attention patterns"})
+16:24:11.685 D Koog[Critic/agent-critic-dce4d17a] LLM call completed
+16:24:06.793 I GraderRunner.criteria: launching criteria-graderresearcher-1dcdd75c (GraderResearcher)
+16:24:06.793 D GraderAgentFactory: created criteria agent criteria-graderresearcher-1dcdd75c (role=GraderResearcher round=1 model=openai/gpt-oss-120b)
+16:24:06.792 D Koog[Researcher/agent-researcher-7f3b5e55] LLM call starting
+16:24:06.791 D GraderRunner: criteria phase spawning GraderResearcher for grader-0 round=1
+16:24:06.789 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-2] Researcher agent agent-researcher-7f3b5e55 started (model=deepseek/deepseek-v4-flash)
+16:24:06.789 D EvoKammerViewModel: received event EngineProgress
+16:24:06.789 D EvoKammerViewModel: engine progress phase=grader_criteria_start msg=Grader criteria agents starting (round 1) — developing scoring rubric…
+16:24:06.788 D EvoKammerViewModel: received event EngineProgress
+16:24:06.788 D EvoKammerViewModel: received event AgentSpawned
+16:24:06.788 D EvoKammerViewModel: engine progress phase=spawning msg=[group-2] All agents spawned for round 1
+16:24:06.788 D EvoKammerViewModel: received event EngineProgress
+16:24:06.788 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-2] Researcher agent agent-researcher-87438400 started (model=deepseek/deepseek-v4-flash)
+16:24:06.788 D EvoKammerViewModel: received event EngineProgress
+16:24:06.787 D EvoKammerViewModel: received event AgentSpawned
+16:24:06.787 I [group-2] Agent spawned: agent-researcher-87438400 (Researcher) model=deepseek/deepseek-v4-flash
+16:24:06.787 I [group-2] Launched in-process agent: agent-researcher-87438400 (Researcher) model=deepseek/deepseek-v4-flash
+16:24:06.787 I EvoKammer [group-2]: launching agent agent-researcher-87438400 (Researcher) model=deepseek/deepseek-v4-flash allocatedBudget=30.0
+16:24:06.787 I [group-2] In-process agent agent-researcher-87438400 (Researcher) starting — model=deepseek/deepseek-v4-flash budget=30.0
+16:24:06.787 D Koog[Critic/agent-critic-bf8edc76] LLM call starting
+16:24:06.787 I Koog[Critic/agent-critic-bf8edc76] agent starting
+16:24:06.787 D EvoKammer [group-2]: agent agent-critic-bf8edc76 task prompt (324 chars): === STAGE DISCLOSURE ===
+Stage 1: HTML semantic skeleton and copy draft
+
+=== YOUR ASSIGNED TASK ===
+Core symptoms, lived experiences and attention patterns for ADHD audience
+
+You are a Critic agent pe…
+16:24:06.787 I EvoKammer [group-2]: agent agent-critic-bf8edc76 BudgetLedger registered (initial=30.0)
+16:24:06.787 D [group-2] Agent agent-critic-bf8edc76 registered BudgetLedger (initialBudget=30.0)
+16:24:06.786 I [group-2] Launched in-process agent: agent-critic-bf8edc76 (Critic) model=deepseek/deepseek-v3.2
+16:24:06.786 I EvoKammer [group-2]: launching agent agent-critic-bf8edc76 (Critic) model=deepseek/deepseek-v3.2 allocatedBudget=30.0
+16:24:06.786 I [group-2] In-process agent agent-critic-bf8edc76 (Critic) starting — model=deepseek/deepseek-v3.2 budget=30.0
+16:24:06.780 D EvoKammerViewModel: engine progress phase=spawning msg=[group-2] Spawning 3 agents: 1×Critic, 1×Researcher, 1×Researcher
+16:24:06.780 D EvoKammerViewModel: received event EngineProgress
+16:24:06.780 I [group-2] Spawning generation 1: 3 agents (mode=in-process)
+16:24:06.780 I EvoKammerRunService: allocation for group=group-2 round=1: 3 agents — Gen 1: KB=6 entries, backlog=0, toolFailRate=0.0%, unclaimedTasks=8 → allocating: 1xCritic, 1xResearcher, 1xResearcher
+16:24:06.777 D Koog[Researcher/agent-researcher-95c3c19e] LLM call starting
+16:24:06.777 I Koog[Researcher/agent-researcher-95c3c19e] agent starting
+16:24:06.777 D EvoKammer [group-1]: agent agent-researcher-95c3c19e task prompt (355 chars): === STAGE DISCLOSURE ===
+Stage 1: HTML semantic skeleton and copy draft
+
+=== YOUR ASSIGNED TASK ===
+Proper use of article, section, nav, aside and accessibility landmarks
+
+You are a Researcher agent f…
+16:24:06.777 I EvoKammer [group-1]: agent agent-researcher-95c3c19e BudgetLedger registered (initial=60.0)
+16:24:06.776 D [group-1] Agent agent-researcher-95c3c19e registered BudgetLedger (initialBudget=60.0)
+16:24:06.776 D GroupCoordinator: migration ceiling for group-2 = 1 (kbEntries=6)
+16:24:06.776 D LeakOracle: migration ceiling for group-2 set to 1
+16:24:06.776 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-1] Researcher agent agent-researcher-95c3c19e started (model=deepseek/deepseek-v4-flash)
+16:24:06.776 D EvoKammerViewModel: received event EngineProgress
+16:24:06.776 D EvoKammerViewModel: engine progress phase=spawning msg=[group-2] Computing role allocation for round 1
+16:24:06.776 D EvoKammerViewModel: received event EngineProgress
+16:24:06.776 D EvoKammerViewModel: engine progress phase=spawning msg=[group-1] All agents spawned for round 1
+16:24:06.776 D EvoKammerViewModel: received event EngineProgress
+16:24:06.776 I EvoKammerRunService: computing role allocation for group=group-2 round=1 budgetCeiling=60.0 nodeBudgetMultiplier=1.0
+16:24:06.776 I EvoKammerRunService: spawn complete for group=group-1 round=1
+16:24:06.775 D Koog[Researcher/agent-researcher-63e9ae66] LLM call starting
+16:24:06.775 D EvoKammerViewModel: received event AgentSpawned
+16:24:06.775 I [group-1] Launched in-process agent: agent-researcher-95c3c19e (Researcher) model=deepseek/deepseek-v4-flash
+16:24:06.775 I Koog[Researcher/agent-researcher-63e9ae66] agent starting
+16:24:06.774 D EvoKammer [group-1]: agent agent-researcher-63e9ae66 task prompt (360 chars): === STAGE DISCLOSURE ===
+Stage 1: HTML semantic skeleton and copy draft
+
+=== YOUR ASSIGNED TASK ===
+High-intent keywords, search volume and semantic clusters around ADHD tools
+
+You are a Researcher ag…
+16:24:06.774 I EvoKammer [group-1]: agent agent-researcher-63e9ae66 BudgetLedger registered (initial=60.0)
+16:24:06.774 D [group-1] Agent agent-researcher-63e9ae66 registered BudgetLedger (initialBudget=60.0)
+16:24:06.774 D Koog[Researcher/agent-researcher-7ac15136] LLM call starting
+16:24:06.774 D Koog[Critic/agent-critic-dce4d17a] LLM call starting
+16:24:06.773 I Koog[Researcher/agent-researcher-7ac15136] agent starting
+16:24:06.773 D Koog[Researcher/agent-researcher-b710653f] LLM call starting
+16:24:06.773 I Koog[Critic/agent-critic-dce4d17a] agent starting
+16:24:06.773 D EvoKammer [group-1]: agent agent-critic-0c7e8282 task prompt (324 chars): === STAGE DISCLOSURE ===
+Stage 1: HTML semantic skeleton and copy draft
+
+=== YOUR ASSIGNED TASK ===
+Core symptoms, lived experiences and attention patterns for ADHD audience
+
+You are a Critic agent pe…
+16:24:06.773 D EvoKammer [group-0]: agent agent-critic-dce4d17a task prompt (324 chars): === STAGE DISCLOSURE ===
+Stage 1: HTML semantic skeleton and copy draft
+
+=== YOUR ASSIGNED TASK ===
+Core symptoms, lived experiences and attention patterns for ADHD audience
+
+You are a Critic agent pe…
+16:24:06.773 D EvoKammer [group-0]: agent agent-researcher-b710653f task prompt (360 chars): === STAGE DISCLOSURE ===
+Stage 1: HTML semantic skeleton and copy draft
+
+=== YOUR ASSIGNED TASK ===
+High-intent keywords, search volume and semantic clusters around ADHD tools
+
+You are a Researcher ag…
+16:24:06.773 I EvoKammer [group-1]: launching agent agent-researcher-63e9ae66 (Researcher) model=deepseek/deepseek-v4-flash allocatedBudget=60.0
+16:24:06.773 I [group-1] In-process agent agent-researcher-63e9ae66 (Researcher) starting — model=deepseek/deepseek-v4-flash budget=60.0
+16:24:06.772 I EvoKammer [group-1]: agent agent-critic-0c7e8282 BudgetLedger registered (initial=60.0)
+16:24:06.772 D [group-1] Agent agent-critic-0c7e8282 registered BudgetLedger (initialBudget=60.0)
+16:24:06.772 I EvoKammer [group-0]: agent agent-researcher-b710653f BudgetLedger registered (initial=50.0)
+16:24:06.772 D [group-0] Agent agent-researcher-b710653f registered BudgetLedger (initialBudget=50.0)
+16:24:06.772 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-1] Critic agent agent-critic-0c7e8282 started (model=deepseek/deepseek-v4-pro)
+16:24:06.772 D EvoKammerViewModel: received event EngineProgress
+16:24:06.772 D EvoKammerViewModel: received event AgentSpawned
+16:24:06.772 I [group-1] Agent spawned: agent-critic-0c7e8282 (Critic) model=deepseek/deepseek-v4-pro
+16:24:06.772 I [group-1] Launched in-process agent: agent-critic-0c7e8282 (Critic) model=deepseek/deepseek-v4-pro
+16:24:06.771 I EvoKammer [group-1]: launching agent agent-critic-0c7e8282 (Critic) model=deepseek/deepseek-v4-pro allocatedBudget=60.0
+16:24:06.771 I [group-1] In-process agent agent-critic-0c7e8282 (Critic) starting — model=deepseek/deepseek-v4-pro budget=60.0
+16:24:06.769 D EvoKammerViewModel: engine progress phase=spawning msg=[group-1] Spawning 3 agents: 1×Critic, 1×Researcher, 1×Researcher
+16:24:06.769 D EvoKammerViewModel: received event EngineProgress
+16:24:06.769 I [group-1] Spawning generation 1: 3 agents (mode=in-process)
+16:24:06.769 I EvoKammerRunService: allocation for group=group-1 round=1: 3 agents — Gen 1: KB=5 entries, backlog=0, toolFailRate=0.0%, unclaimedTasks=8 → allocating: 1xCritic, 1xResearcher, 1xResearcher
+16:24:06.765 D [group-1] Signals for gen 1: SelectionSignals(kbSize=5, stagingBacklog=0, toolFailureRate=0.0, unclaimedTasks=8, planIsStale=true, noRecentPromotions=true, generation=1)
+16:24:06.764 D GroupCoordinator: migration ceiling for group-1 = 1 (kbEntries=5)
+16:24:06.764 D LeakOracle: migration ceiling for group-1 set to 1
+16:24:06.764 D EvoKammerViewModel: engine progress phase=spawning msg=[group-1] Computing role allocation for round 1
+16:24:06.764 D EvoKammerViewModel: received event EngineProgress
+16:24:06.764 D EvoKammerViewModel: engine progress phase=spawning msg=[group-0] All agents spawned for round 1
+16:24:06.764 D EvoKammerViewModel: received event EngineProgress
+16:24:06.764 I EvoKammerRunService: computing role allocation for group=group-1 round=1 budgetCeiling=0.0 nodeBudgetMultiplier=1.0
+16:24:06.763 I EvoKammerRunService: spawn complete for group=group-0 round=1
+16:24:06.763 I [group-0] Launched in-process agent: agent-researcher-7ac15136 (Researcher) model=deepseek/deepseek-v4-flash
+16:24:06.763 I EvoKammer [group-0]: launching agent agent-researcher-7ac15136 (Researcher) model=deepseek/deepseek-v4-flash allocatedBudget=50.0
+16:24:06.763 I [group-0] In-process agent agent-researcher-7ac15136 (Researcher) starting — model=deepseek/deepseek-v4-flash budget=50.0
+16:24:06.762 D EvoKammerViewModel: received event AgentSpawned
+16:24:06.762 I [group-0] Launched in-process agent: agent-researcher-b710653f (Researcher) model=deepseek/deepseek-v4-flash
+16:24:06.762 I EvoKammer [group-0]: launching agent agent-researcher-b710653f (Researcher) model=deepseek/deepseek-v4-flash allocatedBudget=50.0
+16:24:06.762 I [group-0] In-process agent agent-researcher-b710653f (Researcher) starting — model=deepseek/deepseek-v4-flash budget=50.0
+16:24:06.759 I EvoKammer [group-0]: launching agent agent-critic-dce4d17a (Critic) model=deepseek/deepseek-v3.2 allocatedBudget=50.0
+16:24:06.759 D EvoKammerViewModel: received event AgentSpawned
+16:24:06.759 I [group-0] Agent spawned: agent-critic-dce4d17a (Critic) model=deepseek/deepseek-v3.2
+16:24:06.759 I [group-0] In-process agent agent-critic-dce4d17a (Critic) starting — model=deepseek/deepseek-v3.2 budget=50.0
+16:24:06.759 I [group-0] Launched in-process agent: agent-critic-dce4d17a (Critic) model=deepseek/deepseek-v3.2
+16:24:06.756 I [group-0] Spawning generation 1: 3 agents (mode=in-process)
+16:24:06.755 D EvoKammerViewModel: engine progress phase=spawning msg=[group-0] Spawning 3 agents: 1×Critic, 1×Researcher, 1×Researcher
+16:24:06.755 D EvoKammerViewModel: received event EngineProgress
+16:24:06.755 I EvoKammerRunService: allocation for group=group-0 round=1: 3 agents — Gen 1: KB=5 entries, backlog=0, toolFailRate=0.0%, unclaimedTasks=8 → allocating: 1xCritic, 1xResearcher, 1xResearcher
+16:24:06.752 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 total=31 records loaded=true
+16:24:06.752 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 total=31 records loaded=true
+16:24:06.750 D [group-0] Signals for gen 1: SelectionSignals(kbSize=5, stagingBacklog=0, toolFailureRate=0.0, unclaimedTasks=8, planIsStale=true, noRecentPromotions=true, generation=1)
+16:24:06.746 D GroupCoordinator: migration ceiling for group-0 = 1 (kbEntries=5)
+16:24:06.746 D LeakOracle: migration ceiling for group-0 set to 1
+16:24:06.746 D EvoKammerViewModel: engine progress phase=spawning msg=[group-0] Computing role allocation for round 1
+16:24:06.746 D EvoKammerViewModel: received event EngineProgress
+16:24:06.746 D EvoKammerViewModel: engine progress phase=round_start msg=Round 1 started — spawning agents for 3 group(s)
+16:24:06.746 D EvoKammerViewModel: received event EngineProgress
+16:24:06.746 I EvoKammerRunService: computing role allocation for group=group-0 round=1 budgetCeiling=50.0 nodeBudgetMultiplier=1.0
+16:24:06.746 I EvoKammerRunService: round 1 started (duration=5m)
+16:24:06.745 D EvoKammerViewModel: refreshState status=RUNNING runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 groups=3
+16:24:06.745 I EvoKammerViewModel: round started round=1 runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0
+16:24:06.745 D EvoKammerViewModel: received event RoundStarted
+16:24:06.744 D LeakOracle: quotas reset for new round
+16:24:06.744 I GroupCoordinator: round 1 starting — resetting leak quotas
+16:24:06.744 I GroupCoordinator: round 0 winner=group-0
+16:24:06.743 D Scorer: dim=plan_execution avg=100.0 capped=100.0 group=group-2 round=0
+16:24:06.743 D Scorer: dim=tool_utility avg=100.0 capped=100.0 group=group-2 round=0
+16:24:06.743 D Scorer: dim=kg_coherence avg=100.0 capped=100.0 group=group-2 round=0
+16:24:06.743 D Scorer: dim=kb_density avg=100.0 capped=100.0 group=group-2 round=0
+16:24:06.742 D Scorer: dim=plan_execution avg=100.0 capped=100.0 group=group-1 round=0
+16:24:06.742 D Scorer: dim=tool_utility avg=100.0 capped=100.0 group=group-1 round=0
+16:24:06.742 D Scorer: dim=kg_coherence avg=100.0 capped=100.0 group=group-1 round=0
+16:24:06.742 D Scorer: dim=kb_density avg=100.0 capped=100.0 group=group-1 round=0
+16:24:06.742 D Scorer: dim=plan_execution avg=100.0 capped=100.0 group=group-0 round=0
+16:24:06.742 D Scorer: dim=tool_utility avg=100.0 capped=100.0 group=group-0 round=0
+16:24:06.742 D Scorer: dim=kg_coherence avg=100.0 capped=100.0 group=group-0 round=0
+16:24:06.742 D Scorer: dim=kb_density avg=100.0 capped=100.0 group=group-0 round=0
+16:24:06.742 I GroupCoordinator: computing scores for round 0
+16:24:06.740 D EvoKammerViewModel: refreshState status=EVALUATING runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 groups=3
+16:24:06.739 D EvoKammerViewModel: refreshState status=EVALUATING runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 groups=3
+16:24:06.739 I EvoKammerViewModel: round completed round=0
+16:24:06.739 D EvoKammerViewModel: received event RoundCompleted
+16:24:06.739 I EvoKammerViewModel: round completed round=0
+16:24:06.739 D EvoKammerViewModel: received event RoundCompleted
+16:24:06.739 I ScoringEngine: round 0 scored — winner=group-0 (forced=false, missing=[])
+16:24:06.734 I MetaJudge: verdict for round 0 — 4 dims, 0 contested, quality=0.5700000000000001
+16:24:06.734 I MetaJudge: verdict for round 0 — 4 dims, 0 contested, quality=0.5700000000000001
+16:24:06.733 I BlindSubmissionGate: gate CLOSED for round 0 — scores revealed (forced=false)
+16:24:06.731 D BlindSubmissionGate: received submission from group-2 (3/3)
+16:24:06.731 D BlindSubmissionGate: received submission from group-1 (2/3)
+16:24:06.731 D BlindSubmissionGate: received submission from group-0 (1/3)
+16:24:06.730 I BlindSubmissionGate: gate OPEN for round 0 (waiting for 3 submissions)
+16:24:06.730 D ScoringEngine: registered grading sheet sealed-suite-0-c28ab4299444 for round 0
+16:24:06.730 D MetaJudge: registered sheet sealed-suite-0-c28ab4299444 from grader=sealed-suite quality=null
+16:24:06.726 D EvoKammerRunService: check-in gate closed for round 0
+16:24:06.726 D Watchdog: check-in gate CLOSED for round 0
+16:24:06.726 I ProgressiveDisclosureEngine: group-2 advanced stage 0 → 1 (checkin score=1.0)
+16:24:06.726 I ProgressiveDisclosureEngine: group-1 advanced stage 0 → 1 (checkin score=1.0)
+16:24:06.726 I ProgressiveDisclosureEngine: group-0 advanced stage 0 → 1 (checkin score=1.0)
+16:24:06.720 D EvoKammerRunService: check-in gate opened for round 0
+16:24:06.716 D EvoKammerViewModel: engine progress phase=scoring msg=[group-2] Scores submitted round=0: kb_density=100.0, kg_coherence=100.0, tool_utility=100.0, plan_execution=100.0
+16:24:06.716 D EvoKammerViewModel: received event EngineProgress
+16:24:06.716 D Watchdog: check-in gate OPEN for round 0
+16:24:06.716 I [group-2] Deterministic suite scores round=0: kb_density=100.0, kg_coherence=100.0, tool_utility=100.0, plan_execution=100.0 tests=3/3 mandatoryFailure=false
+16:24:06.716 D GraderGroup: received 4 dimension scores for group-2 round=0
+16:24:06.713 D EvoKammerViewModel: engine progress phase=scoring msg=[group-1] Scores submitted round=0: kb_density=100.0, kg_coherence=100.0, tool_utility=100.0, plan_execution=100.0
+16:24:06.713 D EvoKammerViewModel: received event EngineProgress
+16:24:06.713 I [group-1] Deterministic suite scores round=0: kb_density=100.0, kg_coherence=100.0, tool_utility=100.0, plan_execution=100.0 tests=3/3 mandatoryFailure=false
+16:24:06.713 D GraderGroup: received 4 dimension scores for group-1 round=0
+16:24:06.712 D CanonSnapshotExporter [group-1] round=0: kbTotal=5 kgTotal=6 exporting kb=5 kg=6 staging=0
+16:24:06.711 D EvoKammerViewModel: engine progress phase=scoring msg=[group-0] Scores submitted round=0: kb_density=100.0, kg_coherence=100.0, tool_utility=100.0, plan_execution=100.0
+16:24:06.711 D EvoKammerViewModel: received event EngineProgress
+16:24:06.710 I [group-0] Deterministic suite scores round=0: kb_density=100.0, kg_coherence=100.0, tool_utility=100.0, plan_execution=100.0 tests=3/3 mandatoryFailure=false
+16:24:06.704 D GraderGroup: received 4 dimension scores for group-0 round=0
+16:24:06.697 D CanonSnapshotExporter [group-0] round=0: kbTotal=5 kgTotal=6 exporting kb=5 kg=6 staging=1
+16:24:06.695 D EvoKammerViewModel: engine progress phase=grader_manager_verdict msg=Grader manager verdict completed for round 0 — winner group-2
+16:24:06.695 D EvoKammerViewModel: received event EngineProgress
+16:24:06.694 I EvoKammerRunService: grader-manager verdict round=0 winner=group-2 scores=3
+16:24:06.693 D Scorer: dim=plan_execution avg=30.0 capped=30.0 group=group-2 round=0
+16:24:06.693 D Scorer: dim=tool_utility avg=50.0 capped=50.0 group=group-2 round=0
+16:24:06.693 D Scorer: dim=kg_coherence avg=20.0 capped=20.0 group=group-2 round=0
+16:24:06.693 D Scorer: dim=kb_density avg=30.0 capped=30.0 group=group-2 round=0
+16:24:06.693 D Scorer: dim=plan_execution avg=10.0 capped=10.0 group=group-1 round=0
+16:24:06.693 D Scorer: dim=tool_utility avg=50.0 capped=50.0 group=group-1 round=0
+16:24:06.693 D Scorer: dim=kg_coherence avg=20.0 capped=20.0 group=group-1 round=0
+16:24:06.693 D Scorer: dim=kb_density avg=30.0 capped=30.0 group=group-1 round=0
+16:24:06.693 D Scorer: dim=plan_execution avg=10.0 capped=10.0 group=group-0 round=0
+16:24:06.693 D Scorer: dim=tool_utility avg=50.0 capped=50.0 group=group-0 round=0
+16:24:06.693 D Scorer: dim=kg_coherence avg=20.0 capped=20.0 group=group-0 round=0
+16:24:06.692 D Scorer: dim=kb_density avg=30.0 capped=30.0 group=group-0 round=0
+16:24:06.692 D GraderGroup: received 4 dimension scores for group-2 round=0
+16:24:06.692 D GraderGroup: received 4 dimension scores for group-1 round=0
+16:24:06.691 D GraderGroup: received 4 dimension scores for group-0 round=0
+16:24:06.691 D Scorer: dim=plan_execution avg=30.0 capped=30.0 group=group-2 round=0
+16:24:06.691 D Scorer: dim=tool_utility avg=50.0 capped=50.0 group=group-2 round=0
+16:24:06.691 D Scorer: dim=kg_coherence avg=20.0 capped=20.0 group=group-2 round=0
+16:24:06.691 D Scorer: dim=kb_density avg=30.0 capped=30.0 group=group-2 round=0
+16:24:06.691 D Scorer: dim=plan_execution avg=10.0 capped=10.0 group=group-1 round=0
+16:24:06.691 D Scorer: dim=tool_utility avg=50.0 capped=50.0 group=group-1 round=0
+16:24:06.691 D Scorer: dim=kg_coherence avg=20.0 capped=20.0 group=group-1 round=0
+16:24:06.690 D Scorer: dim=kb_density avg=30.0 capped=30.0 group=group-1 round=0
+16:24:06.685 D Scorer: dim=plan_execution avg=10.0 capped=10.0 group=group-0 round=0
+16:24:06.685 D Scorer: dim=tool_utility avg=50.0 capped=50.0 group=group-0 round=0
+16:24:06.685 D Scorer: dim=kg_coherence avg=20.0 capped=20.0 group=group-0 round=0
+16:24:06.685 D Scorer: dim=kb_density avg=30.0 capped=30.0 group=group-0 round=0
+16:24:06.677 D GraderGroupManager: verdict ready for round=0 sheets=1
+16:24:06.677 I MetaJudge: verdict for round 0 — 4 dims, 0 contested, quality=0.5700000000000001
+16:24:06.659 D MetaJudge: registered sheet e9332ec7-171d-4384-8950-a1d97378277d from grader=grader-default quality=null
+16:24:06.644 D EvoKammerViewModel: unhandled event type GraderRoundCompleted
+16:24:06.644 D EvoKammerViewModel: received event GraderRoundCompleted
+16:24:06.644 I EvoKammerRunService: RoundJudge evaluation complete round=0
+16:24:06.624 D EvoKammerViewModel: engine progress phase=grader_judge msg=[grader-0] judging phase complete for round 0 — 12 scores submitted
+16:24:06.622 D EvoKammerViewModel: received event EngineProgress
+16:24:06.621 I GraderRunner: judging phase complete round=0
+16:24:06.619 I GraderRunner.judge [grader-0] submitted 4 scores for group-2
+16:24:06.619 D GraderGroup: received 4 dimension scores for group-2 round=0
+16:24:06.619 I GraderRunner.judge [grader-0] submitted 4 scores for group-1
+16:24:06.619 D GraderGroup: received 4 dimension scores for group-1 round=0
+16:24:06.619 I GraderRunner.judge [grader-0] submitted 4 scores for group-0
+16:24:06.619 D GraderGroup: received 4 dimension scores for group-0 round=0
+16:24:06.615 I GraderRunner.judge [grader-0] collected 12 scores from RoundJudge
+16:24:06.613 I GraderRunner.judge: round-judge-47ef737a completed in 301156ms
+16:23:53.059 D GraderRunner.judge [grader-0] score: group-2 | plan_execution = 30.0
+16:23:35.753 D GraderRunner.judge [grader-0] score: group-2 | tool_utility = 50.0
+16:23:23.058 D GraderRunner.judge [grader-0] score: group-2 | kg_coherence = 20.0
+16:23:08.882 D GraderRunner.judge [grader-0] score: group-2 | kb_density = 30.0
+16:22:31.265 D GraderRunner.judge [grader-0] score: group-1 | plan_execution = 10.0
+16:21:52.658 D GraderRunner.judge [grader-0] score: group-1 | tool_utility = 50.0
+16:21:10.902 D GraderRunner.judge [grader-0] score: group-1 | kg_coherence = 20.0
+16:20:44.207 D GraderRunner.judge [grader-0] score: group-1 | kb_density = 30.0
+16:20:23.334 D GraderRunner.judge [grader-0] score: group-0 | plan_execution = 10.0
+16:20:12.381 D GraderRunner.judge [grader-0] score: group-0 | tool_utility = 50.0
+16:19:52.921 D GraderRunner.judge [grader-0] score: group-0 | kg_coherence = 20.0
+16:19:30.191 D GraderRunner.judge [grader-0] score: group-0 | kb_density = 30.0
+16:19:05.454 I GraderRunner.judge: launching round-judge-47ef737a (GraderCritic) targeting all-groups
+16:19:05.453 D GraderAgentFactory: created RoundJudge round-judge-47ef737a (round=0 groups=[group-0, group-1, group-2] model=openai/gpt-oss-120b)
+16:19:05.440 D EvoKammerViewModel: engine progress phase=grader_judge msg=[grader-0] RoundJudge spawning for round 0 — 3 groups to score
+16:19:05.440 D EvoKammerViewModel: received event EngineProgress
+16:19:05.440 I GraderRunner: spawning RoundJudge for grader-0 round=0
+16:19:05.438 D CanonSnapshotExporter [group-2] round=0: kbTotal=6 kgTotal=6 exporting kb=6 kg=6 staging=4
+16:19:05.436 D CanonSnapshotExporter [group-1] round=0: kbTotal=5 kgTotal=6 exporting kb=5 kg=6 staging=0
+16:19:05.431 D CanonSnapshotExporter [group-0] round=0: kbTotal=5 kgTotal=6 exporting kb=5 kg=6 staging=1
+16:19:05.421 I GraderRunner: starting judging phase round=0 graders=1 targets=3
+16:19:05.418 D EvoKammerViewModel: engine progress phase=grader_judge_start msg=RoundJudge starting for round 0 — scoring 3 groups
+16:19:05.418 D EvoKammerViewModel: received event EngineProgress
+16:19:05.418 I EvoKammerViewModel: grader round started graderGroupId=grader-0 round=0
+16:19:05.418 D EvoKammerViewModel: received event GraderRoundStarted
+16:19:05.417 I EvoKammerRunService: starting RoundJudge evaluation round=0
+16:19:05.412 D EvoKammerViewModel: engine progress phase=grader_criteria_review msg=[grader-0] grader criteria review complete: promoted=5 rejected=0
+16:19:05.412 D EvoKammerViewModel: received event EngineProgress
+16:19:05.411 I EvoKammerRunService: Grader criteria CriticPipeline processed 5 for grader=grader-0 round=0: promoted=5 rejected=0 arbitrated=0
+16:19:05.409 I [grader-0] CriticPipeline gen=0: promoted=5 rejected=0 arbitrated=0
+16:19:05.407 D [grader-0] Non-KB submission promoted: PLAN_UPDATE 29c5d398-c3dc-4048-8e46-532149ffc11b
+16:19:01.533 D [grader-0] Non-KB submission promoted: PLAN_UPDATE 11f027b1-24b6-407d-ae4a-303ba4e87920
+16:18:58.483 D [grader-0] Non-KB submission promoted: PLAN_UPDATE 59888775-cd95-40ce-a247-2ce3eb9a3250
+16:18:54.100 D [grader-0] Non-KB submission promoted: PLAN_UPDATE 04ea6e0b-9dd4-411a-a6f1-f71a3e9aee37
+16:18:48.686 D [grader-0] Non-KB submission promoted: PLAN_UPDATE 7f2c741e-7b90-4156-8d52-d057e0a5ad56
+16:18:43.990 D EvoKammerViewModel: engine progress phase=grader_criteria_review msg=[grader-0] CriticPipeline reviewing 5 grader criteria submissions
+16:18:43.990 D EvoKammerViewModel: received event EngineProgress
+16:18:43.988 I EvoKammerRunService: Grader criteria CriticPipeline starting for grader=grader-0 round=0 pending=5
+16:18:43.976 D EvoKammerViewModel: engine progress phase=grader_criteria_done msg=Grader criteria phase complete (round 0)
+16:18:43.976 D EvoKammerViewModel: received event EngineProgress
+16:18:43.976 D EvoKammerViewModel: engine progress phase=grader_criteria msg=[grader-0] criteria phase complete for round 0
+16:18:43.976 D EvoKammerViewModel: received event EngineProgress
+16:18:43.976 I GraderRunner: criteria phase complete round=0
+16:18:43.975 D GraderRunner: criteria GraderBuilder completed for grader-0 round=0 (101 chars)
+16:18:43.975 I GraderRunner.criteria: criteria-graderbuilder-aac67210 completed in 60460ms
+16:17:43.515 I GraderRunner.criteria: launching criteria-graderbuilder-aac67210 (GraderBuilder)
+16:17:43.514 D GraderAgentFactory: created criteria agent criteria-graderbuilder-aac67210 (role=GraderBuilder round=0 model=openai/gpt-oss-120b)
+16:17:43.499 D EvoKammerViewModel: engine progress phase=grader_criteria msg=[grader-0] criteria phase: spawning GraderBuilder for round 0
+16:17:43.496 D EvoKammerViewModel: received event EngineProgress
+16:17:43.491 D GraderRunner: criteria phase spawning GraderBuilder for grader-0 round=0
+16:17:43.491 D GraderRunner: criteria GraderResearcher completed for grader-0 round=0 (82 chars)
+16:17:43.484 I GraderRunner.criteria: criteria-graderresearcher-51157365 completed in 125932ms
+16:17:04.521 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 total=31 records loaded=true
+16:17:04.215 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-1 total=29 records loaded=true
+16:17:03.814 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-2 total=36 records loaded=true
+16:17:03.418 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-1 total=29 records loaded=true
+16:17:02.009 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 total=31 records loaded=true
+16:17:00.930 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-1 total=29 records loaded=true
+16:16:55.827 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-2 total=36 records loaded=true
+16:16:55.542 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-1 total=29 records loaded=true
+16:16:55.257 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 total=31 records loaded=true
+16:16:54.971 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-1 total=29 records loaded=true
+16:16:54.694 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-2 total=36 records loaded=true
+16:16:54.387 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-1 total=29 records loaded=true
+16:16:54.072 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 total=31 records loaded=true
+16:16:53.728 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-1 total=29 records loaded=true
+16:16:53.382 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-2 total=36 records loaded=true
+16:16:52.964 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-1 total=29 records loaded=true
+16:16:40.716 D EvoKammerViewModel: engine progress phase=legacy_protocol msg=[group-2] 1 legacy protocol(s) extracted for round 0
+16:16:40.716 D EvoKammerViewModel: received event EngineProgress
+16:16:40.716 I EvoKammerRunService: extracted 1 legacy protocol(s) for group=group-2 round=0
+16:16:40.716 I LegacyProtocolExtractor: extracted protocol for role=Critic from 1 agents (gen=0 expires=2)
+16:16:40.715 D EvoKammerViewModel: engine progress phase=fitness msg=[group-2] Fitness scored 3 agents (round 0) — top 1 extracting legacy protocol
+16:16:40.714 D EvoKammerViewModel: received event EngineProgress
+16:16:40.714 I EvoKammerRunService: fitness scored 3 agents for group=group-2 round=0; top 1 eligible for legacy protocol
+16:16:40.714 D FitnessScorer: agent-researcher-7f3b842d gen=0 citation=2.0 kg=0.0 tool=0.0 staging=25.0 task=0.0 total=27.0
+16:16:40.714 D FitnessScorer: agent-critic-136f594b gen=0 citation=4.0 kg=0.0 tool=0.0 staging=25.0 task=0.0 total=29.0
+16:16:40.713 D FitnessScorer: agent-researcher-7985440c gen=0 citation=2.0 kg=0.0 tool=0.0 staging=25.0 task=0.0 total=27.0
+16:16:40.711 D EvoKammerViewModel: engine progress phase=legacy_protocol msg=[group-0] 1 legacy protocol(s) extracted for round 0
+16:16:40.711 D EvoKammerViewModel: received event EngineProgress
+16:16:40.711 I EvoKammerRunService: extracted 1 legacy protocol(s) for group=group-0 round=0
+16:16:40.710 I LegacyProtocolExtractor: extracted protocol for role=Researcher from 1 agents (gen=0 expires=2)
+16:16:40.702 D EvoKammerViewModel: engine progress phase=fitness msg=[group-0] Fitness scored 1 agents (round 0) — top 1 extracting legacy protocol
+16:16:40.702 D EvoKammerViewModel: received event EngineProgress
+16:16:40.700 I EvoKammerRunService: fitness scored 1 agents for group=group-0 round=0; top 1 eligible for legacy protocol
+16:16:40.697 D FitnessScorer: agent-researcher-71e36393 gen=0 citation=2.0 kg=0.0 tool=0.0 staging=25.0 task=0.0 total=27.0
+16:16:40.691 D EvoKammerViewModel: unhandled event type CriticPipelineCompleted
+16:16:40.691 D EvoKammerViewModel: received event CriticPipelineCompleted
+16:16:40.691 I EvoKammerRunService: CriticPipeline processed 1 for group=group-2 round=0: promoted=1 rejected=0 arbitrated=0
+16:16:40.691 I [group-2] CriticPipeline gen=0: promoted=1 rejected=0 arbitrated=0
+16:16:40.690 W [group-2] WiP task adhd_understanding could not be marked completed for agent-critic-136f594b
+16:16:37.340 D EvoKammerViewModel: engine progress phase=critic msg=[group-2] CriticPipeline reviewing 1 pending submissions
+16:16:37.340 D EvoKammerViewModel: received event EngineProgress
+16:16:37.340 I EvoKammerRunService: CriticPipeline starting for group=group-2 round=0 pending=1
+16:16:37.340 D EvoKammerViewModel: unhandled event type CriticPipelineCompleted
+16:16:37.340 D EvoKammerViewModel: received event CriticPipelineCompleted
+16:16:37.340 I EvoKammerRunService: CriticPipeline processed 0 for group=group-1 round=0: promoted=0 rejected=0 arbitrated=0
+16:16:37.340 I [group-1] CriticPipeline gen=0: promoted=0 rejected=0 arbitrated=0
+16:16:37.339 D EvoKammerViewModel: engine progress phase=critic msg=[group-1] CriticPipeline reviewing 0 pending submissions
+16:16:37.339 D EvoKammerViewModel: received event EngineProgress
+16:16:37.339 I EvoKammerRunService: CriticPipeline starting for group=group-1 round=0 pending=0
+16:16:37.339 D EvoKammerViewModel: unhandled event type CriticPipelineCompleted
+16:16:37.339 D EvoKammerViewModel: received event CriticPipelineCompleted
+16:16:37.339 I EvoKammerRunService: CriticPipeline processed 0 for group=group-0 round=0: promoted=0 rejected=0 arbitrated=0
+16:16:37.336 I [group-0] CriticPipeline gen=0: promoted=0 rejected=0 arbitrated=0
+16:16:37.322 D EvoKammerViewModel: engine progress phase=critic msg=[group-0] CriticPipeline reviewing 0 pending submissions
+16:16:37.322 D EvoKammerViewModel: received event EngineProgress
+16:16:37.322 I EvoKammerRunService: CriticPipeline starting for group=group-0 round=0 pending=0
+16:16:37.320 D EvoKammerViewModel: engine progress phase=round_end msg=Round 0 time up — terminating agents and running post-round evaluation
+16:16:37.319 D EvoKammerViewModel: received event EngineProgress
+16:16:37.319 D EvoKammerViewModel: engine progress phase=round_early_end msg=Round 0 — all agents completed, advancing to post-round evaluation
+16:16:37.319 D EvoKammerViewModel: received event EngineProgress
+16:16:37.319 I EvoKammerRunService: round 0 duration elapsed — terminating remaining agents
+16:16:37.319 D EvoKammerViewModel: engine progress phase=round_wait msg=Round 0 — 1/5 min elapsed, 0 agents active
+16:16:37.319 I EvoKammerRunService: all agents completed for round 0 — ending round early
+16:16:37.319 D EvoKammerViewModel: received event EngineProgress
+16:16:37.318 I EvoKammerRunService: Round 0 — 1/5 min elapsed, 0 agents active
+16:16:36.792 D EvoKammerViewModel: substrate snapshot loaded run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 total=30 records loaded=true
+16:16:09.568 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-1] WiP task html5_semantics abandoned by agent-researcher-e11fd19f at generation 0
+16:16:09.568 D EvoKammerViewModel: received event EngineProgress
+16:16:09.568 D EvoKammerViewModel: received event GroupBudgetChanged
+16:16:09.568 I [group-1] Agent agent-researcher-e11fd19f exited (wasKilled=false, inProcess=true)
+16:16:09.568 I [group-1] WiP task html5_semantics abandoned by agent-researcher-e11fd19f (wasKilled=false)
+16:16:09.568 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-1] Agent agent-researcher-e11fd19f completed
+16:16:09.568 D EvoKammerViewModel: received event EngineProgress
+16:16:09.568 D EvoKammerViewModel: received event AgentDied
+16:16:09.568 I [group-1] Agent died: agent-researcher-e11fd19f (completed)
+16:16:09.566 I [group-1] Agent agent-researcher-e11fd19f final budget: initial=60.0 remaining=60.0 actions=0 spent=0.0
+16:16:09.566 I [group-1] In-process agent agent-researcher-e11fd19f completed normally in 33120ms
+16:16:09.566 I EvoKammer [group-1]: agent agent-researcher-e11fd19f completed in 33119ms — budget: spent=0.00 remaining=60.00 actions=0 result=The previous assistant response was empty. Respond with either a tool call or a concise answer.
+16:16:09.565 I Koog[Researcher/agent-researcher-e11fd19f] agent completed — result: The previous assistant response was empty. Respond with either a tool call or a concise answer.
+16:16:09.564 D Koog[Researcher/agent-researcher-e11fd19f] LLM call completed
+16:16:07.313 D EvoKammerViewModel: engine progress phase=round_wait msg=Round 0 — 0/5 min elapsed, 1 agents active
+16:16:07.313 D EvoKammerViewModel: received event EngineProgress
+16:16:07.312 I EvoKammerRunService: Round 0 — 0/5 min elapsed, 1 agents active
+16:15:55.992 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-2] WiP task html5_semantics abandoned by agent-researcher-7f3b842d at generation 0
+16:15:55.992 D EvoKammerViewModel: received event EngineProgress
+16:15:55.992 D EvoKammerViewModel: received event GroupBudgetChanged
+16:15:55.992 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-0] WiP task seo_keywords abandoned by agent-researcher-bb04e883 at generation 0
+16:15:55.992 D EvoKammerViewModel: received event EngineProgress
+16:15:55.992 I [group-0] Agent agent-researcher-bb04e883 exited (wasKilled=false, inProcess=true)
+16:15:55.992 D EvoKammerViewModel: received event GroupBudgetChanged
+16:15:55.992 I [group-2] Agent agent-researcher-7f3b842d exited (wasKilled=true, inProcess=true)
+16:15:55.992 I [group-0] WiP task seo_keywords abandoned by agent-researcher-bb04e883 (wasKilled=false)
+16:15:55.992 I [group-2] WiP task html5_semantics abandoned by agent-researcher-7f3b842d (wasKilled=true)
+16:15:55.989 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-2] Agent agent-researcher-7f3b842d killed
+16:15:55.989 D EvoKammerViewModel: received event EngineProgress
+16:15:55.989 D EvoKammerViewModel: received event AgentDied
+16:15:55.988 I [group-2] Agent died: agent-researcher-7f3b842d (killed)
+16:15:55.987 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-0] Agent agent-researcher-bb04e883 completed
+16:15:55.987 D EvoKammerViewModel: received event EngineProgress
+16:15:55.987 D EvoKammerViewModel: received event AgentDied
+16:15:55.987 I [group-0] Agent died: agent-researcher-bb04e883 (completed)
+16:15:55.984 I [group-2] Agent agent-researcher-7f3b842d final budget: initial=30.0 remaining=30.0 actions=0 spent=0.0
+16:15:55.984 W [group-2] In-process agent agent-researcher-7f3b842d aborted due to blocking runtime error after 19215ms: [Koog[Researcher/agent-researcher-7f3b842d]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-7f3b842d]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:15:55.984 I EvoKammerAgentFactory: emergency death note written for agent-researcher-7f3b842d (id=death-auto-agent-researcher-7f3b842d-1779977755902)
+16:15:55.979 I [group-0] Agent agent-researcher-bb04e883 final budget: initial=50.0 remaining=50.0 actions=0 spent=0.0
+16:15:55.979 I [group-0] In-process agent agent-researcher-bb04e883 completed normally in 19556ms
+16:15:55.978 I EvoKammer [group-0]: agent agent-researcher-bb04e883 completed in 19549ms — budget: spent=0.00 remaining=50.00 actions=0 result=Let me search more broadly for ADHD tools, neurodivergent design, and SEO patterns already in the KB
+16:15:55.978 I Koog[Researcher/agent-researcher-bb04e883] agent completed — result: Let me search more broadly for ADHD tools, neurodivergent design, and SEO patterns already in the KB.
+
+
+16:15:55.978 D Koog[Researcher/agent-researcher-bb04e883] LLM call completed
+16:15:55.902 E EvoKammer [group-2]: agent agent-researcher-7f3b842d (Researcher) RUN FAILED after 19132ms [BlockingAgentAbortException]: [Koog[Researcher/agent-researcher-7f3b842d]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-7f3b842d]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:15:55.902 E Koog[Researcher/agent-researcher-7f3b842d] agent FAILED: [Koog[Researcher/agent-researcher-7f3b842d]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-7f3b842d]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:15:55.902 W [Koog[Researcher/agent-researcher-7f3b842d]] aborting agent due to blocking runtime error: tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+16:15:55.901 D Koog[Researcher/agent-researcher-7f3b842d] → read_run_artifact({"listOnly":true})
+16:15:55.901 D Koog[Researcher/agent-researcher-7f3b842d] ← read_kg = "Found 6 KG facts:
+
+--- Fact 1 ---
+ID: fact_1-group-2
+Subject: ADHD_Content
+Relation: REQUIRES
+Object: Short_Segments
+Confidence: 0.95
+Trust Score: 0.90
+Generation: 0
+
+--- Fact 2 ---
+ID: fact_2-group-2
+Subject: HTML5_Article
+Relation: DEPENDS_ON
+Object: Semantic_Markup
+Confidence: 0.90
+Trust Score:
+16:15:55.355 D Koog[Researcher/agent-researcher-7f3b842d] → read_kg({"subject":"*", "maxResults":20})
+16:15:55.354 D Koog[Researcher/agent-researcher-7f3b842d] LLM call completed
+16:15:53.996 D Koog[Researcher/agent-researcher-e11fd19f] LLM call starting
+16:15:53.995 D Koog[Researcher/agent-researcher-e11fd19f] ← read_kb = "No results found for query: "ADHD web design accessible content structure" in domain: adhd"
+16:15:53.995 D Koog[Researcher/agent-researcher-e11fd19f] → read_kb({"query":"ADHD web design accessible content structure", "domain":"adhd", "maxResults":15})
+16:15:53.995 D Koog[Researcher/agent-researcher-e11fd19f] ← read_kb = "No results found for query: "neurodivergent web design patterns accessibility" in domain: web_design"
+16:15:53.994 D Koog[Researcher/agent-researcher-e11fd19f] → read_kb({"query":"neurodivergent web design patterns accessibility", "domain":"web_design", "maxResults":15})
+16:15:53.994 D Koog[Researcher/agent-researcher-e11fd19f] ← read_kb = "No results found for query: "HTML5 semantics article section nav aside accessibility landmarks" in domain: web_design"
+16:15:53.986 D Koog[Researcher/agent-researcher-e11fd19f] → read_kb({"query":"HTML5 semantics article section nav aside accessibility landmarks", "domain":"web_design", "maxResults":15})
+16:15:53.985 D Koog[Researcher/agent-researcher-e11fd19f] LLM call completed
+16:15:50.217 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-2] WiP task adhd_understanding abandoned by agent-critic-136f594b at generation 0
+16:15:50.217 D EvoKammerViewModel: received event EngineProgress
+16:15:50.217 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-2] Agent agent-critic-136f594b completed
+16:15:50.217 D EvoKammerViewModel: received event EngineProgress
+16:15:50.216 D EvoKammerViewModel: received event AgentDied
+16:15:50.216 I [group-2] Agent died: agent-critic-136f594b (completed)
+16:15:50.216 D EvoKammerViewModel: received event GroupBudgetChanged
+16:15:50.216 I [group-2] Agent agent-critic-136f594b exited (wasKilled=false, inProcess=true)
+16:15:50.216 I [group-2] WiP task adhd_understanding abandoned by agent-critic-136f594b (wasKilled=false)
+16:15:50.207 D [group-2] Agent agent-critic-136f594b action breakdown: WRITE_STAGING=1
+16:15:50.206 I [group-2] Agent agent-critic-136f594b final budget: initial=30.0 remaining=29.0 actions=1 spent=1.0
+16:15:50.206 I [group-2] In-process agent agent-critic-136f594b completed normally in 13592ms
+16:15:50.206 I EvoKammer [group-2]: agent agent-critic-136f594b completed in 13590ms — budget: spent=1.00 remaining=29.00 actions=1 result=**Task complete.**
+- Staging submission accepted (ID: e25f5025-384d-4c98-8e79-77a8a23ade89)
+- De
+16:15:50.205 I Koog[Critic/agent-critic-136f594b] agent completed — result: **Task complete.**
+- Staging submission accepted (ID: e25f5025-384d-4c98-8e79-77a8a23ade89)
+- Death Note filed (ID: 058d53a1-6063-445c-a56a-b8ddb8bee1dd)
+
+No further actions required.
+16:15:50.205 D Koog[Critic/agent-critic-136f594b] LLM call completed
+16:15:49.859 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-0] WiP task html5_semantics abandoned by agent-researcher-71e36393 at generation 0
+16:15:49.859 D EvoKammerViewModel: received event EngineProgress
+16:15:49.859 D EvoKammerViewModel: received event GroupBudgetChanged
+16:15:49.859 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-0] Agent agent-researcher-71e36393 killed
+16:15:49.859 D EvoKammerViewModel: received event EngineProgress
+16:15:49.859 D EvoKammerViewModel: received event AgentDied
+16:15:49.859 I [group-0] Agent agent-researcher-71e36393 exited (wasKilled=true, inProcess=true)
+16:15:49.859 I [group-0] WiP task html5_semantics abandoned by agent-researcher-71e36393 (wasKilled=true)
+16:15:49.859 I [group-0] Agent died: agent-researcher-71e36393 (killed)
+16:15:49.857 I [group-0] Agent agent-researcher-71e36393 final budget: initial=50.0 remaining=50.0 actions=0 spent=0.0
+16:15:49.857 W [group-0] In-process agent agent-researcher-71e36393 aborted due to blocking runtime error after 13431ms: [Koog[Researcher/agent-researcher-71e36393]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-71e36393]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:15:49.857 I EvoKammerAgentFactory: emergency death note written for agent-researcher-71e36393 (id=death-auto-agent-researcher-71e36393-1779977749854)
+16:15:49.854 E EvoKammer [group-0]: agent agent-researcher-71e36393 (Researcher) RUN FAILED after 13425ms [BlockingAgentAbortException]: [Koog[Researcher/agent-researcher-71e36393]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-71e36393]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:15:49.854 E Koog[Researcher/agent-researcher-71e36393] agent FAILED: [Koog[Researcher/agent-researcher-71e36393]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-71e36393]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:15:49.849 W [Koog[Researcher/agent-researcher-71e36393]] aborting agent due to blocking runtime error: tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+16:15:49.849 D Koog[Researcher/agent-researcher-71e36393] → read_run_artifact({"listOnly":true})
+16:15:49.846 D Koog[Researcher/agent-researcher-71e36393] ← read_kb = "No results found for query: "WAI-ARIA landmarks web accessibility ADHD""
+16:15:49.845 D Koog[Researcher/agent-researcher-71e36393] → read_kb({"query":"WAI-ARIA landmarks web accessibility ADHD"})
+16:15:49.845 D Koog[Researcher/agent-researcher-71e36393] ← read_kb = "No results found for query: "html5_semantics""
+16:15:49.844 D Koog[Researcher/agent-researcher-71e36393] → read_kb({"query":"html5_semantics"})
+16:15:49.844 D Koog[Researcher/agent-researcher-71e36393] ← read_kb = "No results found for query: "HTML5 semantics article section nav aside accessibility landmarks""
+16:15:49.830 D Koog[Researcher/agent-researcher-71e36393] → read_kb({"query":"HTML5 semantics article section nav aside accessibility landmarks"})
+16:15:49.829 D Koog[Researcher/agent-researcher-71e36393] LLM call completed
+16:15:49.641 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-0] WiP task adhd_understanding abandoned by agent-critic-159cf520 at generation 0
+16:15:49.641 D EvoKammerViewModel: received event EngineProgress
+16:15:49.641 D EvoKammerViewModel: received event GroupBudgetChanged
+16:15:49.641 I [group-0] Agent agent-critic-159cf520 exited (wasKilled=false, inProcess=true)
+16:15:49.641 I [group-0] WiP task adhd_understanding abandoned by agent-critic-159cf520 (wasKilled=false)
+16:15:49.641 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-0] Agent agent-critic-159cf520 completed
+16:15:49.641 D EvoKammerViewModel: received event EngineProgress
+16:15:49.641 D EvoKammerViewModel: received event AgentDied
+16:15:49.641 I [group-0] Agent died: agent-critic-159cf520 (completed)
+16:15:49.637 I [group-0] Agent agent-critic-159cf520 final budget: initial=50.0 remaining=50.0 actions=0 spent=0.0
+16:15:49.637 I [group-0] In-process agent agent-critic-159cf520 completed normally in 13224ms
+16:15:49.637 I EvoKammer [group-0]: agent agent-critic-159cf520 completed in 13207ms — budget: spent=0.00 remaining=50.00 actions=0 result=Now let me check for more specific ADHD knowledge in the Knowledge Graph
+16:15:49.636 I Koog[Critic/agent-critic-159cf520] agent completed — result: Now let me check for more specific ADHD knowledge in the Knowledge Graph
+16:15:49.635 D Koog[Critic/agent-critic-159cf520] LLM call completed
+16:15:48.450 D EvoKammerViewModel: received event GroupBudgetChanged
+16:15:48.450 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-1] WiP task adhd_understanding abandoned by agent-critic-94c4c6b9 at generation 0
+16:15:48.450 D EvoKammerViewModel: received event EngineProgress
+16:15:48.450 I [group-1] Agent agent-critic-94c4c6b9 exited (wasKilled=false, inProcess=true)
+16:15:48.450 I [group-1] WiP task adhd_understanding abandoned by agent-critic-94c4c6b9 (wasKilled=false)
+16:15:48.449 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-1] Agent agent-critic-94c4c6b9 completed
+16:15:48.449 D EvoKammerViewModel: received event EngineProgress
+16:15:48.449 D EvoKammerViewModel: received event AgentDied
+16:15:48.449 I [group-1] Agent died: agent-critic-94c4c6b9 (completed)
+16:15:48.447 I [group-1] Agent agent-critic-94c4c6b9 final budget: initial=60.0 remaining=60.0 actions=0 spent=0.0
+16:15:48.447 I [group-1] In-process agent agent-critic-94c4c6b9 completed normally in 12010ms
+16:15:48.447 I EvoKammer [group-1]: agent agent-critic-94c4c6b9 completed in 12001ms — budget: spent=0.00 remaining=60.00 actions=0 result=Let me search more broadly for ADHD-related content in the knowledge base
+16:15:48.446 I Koog[Critic/agent-critic-94c4c6b9] agent completed — result: Let me search more broadly for ADHD-related content in the knowledge base
+16:15:48.445 D Koog[Critic/agent-critic-94c4c6b9] LLM call completed
+16:15:48.428 I [group-1] Agent agent-researcher-230b233b exited (wasKilled=false, inProcess=true)
+16:15:48.427 D EvoKammerViewModel: received event GroupBudgetChanged
+16:15:48.427 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-1] WiP task seo_keywords abandoned by agent-researcher-230b233b at generation 0
+16:15:48.427 D EvoKammerViewModel: received event EngineProgress
+16:15:48.427 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-1] Agent agent-researcher-230b233b completed
+16:15:48.427 D EvoKammerViewModel: received event EngineProgress
+16:15:48.427 D EvoKammerViewModel: received event AgentDied
+16:15:48.427 I [group-1] WiP task seo_keywords abandoned by agent-researcher-230b233b (wasKilled=false)
+16:15:48.426 I [group-1] Agent died: agent-researcher-230b233b (completed)
+16:15:48.420 I [group-1] Agent agent-researcher-230b233b final budget: initial=60.0 remaining=60.0 actions=0 spent=0.0
+16:15:48.420 I [group-1] In-process agent agent-researcher-230b233b completed normally in 11976ms
+16:15:48.418 I EvoKammer [group-1]: agent agent-researcher-230b233b completed in 11969ms — budget: spent=0.00 remaining=60.00 actions=0 result=No existing KB entries found. Let me check what run artifacts we have and search more broadly.
+
+
+16:15:48.412 I Koog[Researcher/agent-researcher-230b233b] agent completed — result: No existing KB entries found. Let me check what run artifacts we have and search more broadly.
+
+
+16:15:48.411 D Koog[Researcher/agent-researcher-230b233b] LLM call completed
+16:15:47.685 D Koog[Critic/agent-critic-136f594b] LLM call starting
+16:15:47.685 D Koog[Critic/agent-critic-136f594b] ← write_death_note = "Death Note written (ID: 058d53a1-6063-445c-a56a-b8ddb8bee1dd). Your contributions are preserved."
+16:15:47.685 I DeathNoteProtocol: Death Note written for agent agent-critic-136f594b
+16:15:47.680 D Koog[Critic/agent-critic-136f594b] → write_death_note({"summary":"Stage 0 foundation task completed: staged ADHD content guidelines + SEO pointers from existing KB seeds. Used read_kb + search_kb then wrote staging DOC. No new facts emitted because task is foundational stage.", "whatWorked":"Keyword and semantic KB search surfaced relevant seed entries)
+16:15:47.679 D Koog[Critic/agent-critic-136f594b] LLM call completed
+16:15:47.319 D EvoKammerViewModel: received event GroupBudgetChanged
+16:15:47.318 D [group-2] Agent agent-critic-136f594b budget: 29.0 (spent=1.0)
+16:15:45.664 D Koog[Researcher/agent-researcher-7f3b842d] LLM call starting
+16:15:45.664 D Koog[Researcher/agent-researcher-7f3b842d] ← read_kb = "No results found for query: "Dead End""
+16:15:45.663 D Koog[Researcher/agent-researcher-7f3b842d] → read_kb({"query":"Dead End", "maxResults":10})
+16:15:45.663 D Koog[Researcher/agent-researcher-7f3b842d] ← read_kb = "No results found for query: "SEO semantic HTML structure""
+16:15:45.662 D Koog[Researcher/agent-researcher-7f3b842d] → read_kb({"query":"SEO semantic HTML structure", "maxResults":10})
+16:15:45.662 D Koog[Researcher/agent-researcher-7f3b842d] ← read_kb = "No results found for query: "accessibility landmarks ARIA ADHD web design""
+16:15:45.661 D Koog[Researcher/agent-researcher-7f3b842d] → read_kb({"query":"accessibility landmarks ARIA ADHD web design", "maxResults":10})
+16:15:45.660 D Koog[Researcher/agent-researcher-7f3b842d] ← read_kb = "No results found for query: "HTML5 semantics article section nav aside accessibility""
+16:15:45.652 D Koog[Researcher/agent-researcher-7f3b842d] → read_kb({"query":"HTML5 semantics article section nav aside accessibility", "maxResults":10})
+16:15:45.651 D Koog[Researcher/agent-researcher-7f3b842d] LLM call completed
+16:15:45.197 D Koog[Researcher/agent-researcher-bb04e883] LLM call starting
+16:15:45.196 D Koog[Researcher/agent-researcher-bb04e883] ← read_kg = "Found 1 KG facts:
+
+--- Fact 1 ---
+ID: fact_4-group-0
+Subject: mindvortex.app
+Relation: TARGETS
+Object: ADHD_Users
+Confidence: 0.98
+Trust Score: 0.90
+Generation: 0
+"
+16:15:45.196 D Koog[Researcher/agent-researcher-bb04e883] → read_kg({"subject":"mindvortex.app", "maxResults":20})
+16:15:45.196 D Koog[Researcher/agent-researcher-bb04e883] ← read_kg = "No KG facts found for pattern: (ADHD, *, *)"
+16:15:45.194 D Koog[Researcher/agent-researcher-bb04e883] → read_kg({"subject":"ADHD", "maxResults":20})
+16:15:45.194 D Koog[Researcher/agent-researcher-bb04e883] ← read_kb = "No results found for query: "Dead Ends ADHD research""
+16:15:45.194 D Koog[Researcher/agent-researcher-bb04e883] → read_kb({"query":"Dead Ends ADHD research", "maxResults":10})
+16:15:45.194 D Koog[Researcher/agent-researcher-bb04e883] ← read_kb = "No results found for query: "ADHD keywords SEO research""
+16:15:45.193 D Koog[Researcher/agent-researcher-bb04e883] → read_kb({"query":"ADHD keywords SEO research", "maxResults":10})
+16:15:45.193 D Koog[Researcher/agent-researcher-bb04e883] LLM call completed
+16:15:44.758 D Koog[Critic/agent-critic-159cf520] LLM call starting
+16:15:44.758 D Koog[Critic/agent-critic-159cf520] ← search_kb = "Found 5 semantically related KB entries (query: "ADHD symptoms lived experiences attention patterns"):
+
+--- Entry 1 ---
+ID: seed_1-group-0
+Domain: general
+Similarity: 0.083
+Trust Score: 0.90
+Generation: 0
+Citations: 0
+[Note: embedding not yet computed — keyword fallback match]
+Content:
+ADHD audienc
+16:15:44.748 D Koog[Critic/agent-critic-159cf520] → search_kb({"query":"ADHD symptoms lived experiences attention patterns", "maxResults":10})
+16:15:44.748 D Koog[Critic/agent-critic-159cf520] LLM call completed
+16:15:44.625 D Koog[Critic/agent-critic-136f594b] LLM call starting
+16:15:44.617 D Koog[Critic/agent-critic-136f594b] ← write_staging = "Submission accepted (ID: e25f5025-384d-4c98-8e79-77a8a23ade89, type: DOC). Awaiting Critic review."
+16:15:44.575 D Koog[Critic/agent-critic-136f594b] → write_staging({"type":"DOC", "content":"Foundational research summary for ADHD audience content:
+- Core symptoms typically referenced in ADHD: inattention, hyperactivity, impulsivity (but validate against KG later).
+- For ADHD readers: use short paras, bullets, hooks in 3s, value props.
+- SEO: integrate 'ADHD foc)
+16:15:44.566 D Koog[Critic/agent-critic-136f594b] LLM call completed
+16:15:44.554 I [group-2] Agent agent-researcher-7985440c exited (wasKilled=true, inProcess=true)
+16:15:44.554 D EvoKammerViewModel: received event GroupBudgetChanged
+16:15:44.552 I [group-2] WiP task seo_keywords abandoned by agent-researcher-7985440c (wasKilled=true)
+16:15:44.552 D EvoKammerViewModel: engine progress phase=wip_abandoned msg=[group-2] WiP task seo_keywords abandoned by agent-researcher-7985440c at generation 0
+16:15:44.552 D EvoKammerViewModel: received event EngineProgress
+16:15:44.547 D EvoKammerViewModel: engine progress phase=agent_died msg=[group-2] Agent agent-researcher-7985440c killed
+16:15:44.547 D EvoKammerViewModel: received event EngineProgress
+16:15:44.547 I [group-2] Agent died: agent-researcher-7985440c (killed)
+16:15:44.545 D EvoKammerViewModel: received event AgentDied
+16:15:44.541 I [group-2] Agent agent-researcher-7985440c final budget: initial=30.0 remaining=30.0 actions=0 spent=0.0
+16:15:44.509 W [group-2] In-process agent agent-researcher-7985440c aborted due to blocking runtime error after 7874ms: [Koog[Researcher/agent-researcher-7985440c]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-7985440c]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:15:44.499 I EvoKammerAgentFactory: emergency death note written for agent-researcher-7985440c (id=death-auto-agent-researcher-7985440c-1779977743700)
+16:15:43.698 E EvoKammer [group-2]: agent agent-researcher-7985440c (Researcher) RUN FAILED after 7055ms [BlockingAgentAbortException]: [Koog[Researcher/agent-researcher-7985440c]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-7985440c]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:15:43.683 E Koog[Researcher/agent-researcher-7985440c] agent FAILED: [Koog[Researcher/agent-researcher-7985440c]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+com.achulkov.evokammer.core.contract.BlockingAgentAbortException: [Koog[Researcher/agent-researcher-7985440c]] tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.abortBlockingAgent(BlockingAgentFailurePolicy.kt:27)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt.access$abortBlockingAgent(BlockingAgentFailurePolicy.kt:1)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invokeSuspend(BlockingAgentFailurePolicy.kt:21)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at com.achulkov.evokammer.agents.factory.BlockingAgentFailurePolicyKt$installBlockingFailurePolicy$2.invoke(BlockingAgentFailurePolicy.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invokeSuspend(EventHandlerConfigCommon.kt:331)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon$onToolCallFailed$1.invoke(EventHandlerConfigCommon.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandlerConfigCommon.invokeOnToolCallFailed$agents_features_event_handler(EventHandlerConfigCommon.kt:602)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invokeSuspend(EventHandler.kt:184)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.features.eventHandler.feature.EventHandler$Feature$registerCommonPipelineHandlers$10.invoke(EventHandler.kt)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipelineImpl$createConditionalHandler$1.invokeSuspend(AIAgentPipelineImpl.kt:950)
+	at ai.koog.agents.core.feature.pipeline.AIAgentPipel
+…(truncated)
+16:15:43.674 W [Koog[Researcher/agent-researcher-7985440c]] aborting agent due to blocking runtime error: tool call failed: Tool with name 'read_run_artifact' not found in the tool registry. Use one of the available tools.
+16:15:43.669 D Koog[Researcher/agent-researcher-7985440c] → read_run_artifact({"listOnly":true})
+16:15:43.668 D Koog[Researcher/agent-researcher-7985440c] LLM call completed
+16:15:43.586 D Koog[Critic/agent-critic-94c4c6b9] LLM call starting
+16:15:43.586 D Koog[Critic/agent-critic-94c4c6b9] ← read_kb = "No results found for query: "ADHD symptoms attention patterns""
+16:15:43.585 D Koog[Critic/agent-critic-94c4c6b9] → read_kb({"query":"ADHD symptoms attention patterns", "maxResults":10})
+16:15:43.585 D Koog[Critic/agent-critic-94c4c6b9] LLM call completed
+16:15:43.103 D Koog[Researcher/agent-researcher-230b233b] LLM call starting
+16:15:43.102 D Koog[Researcher/agent-researcher-230b233b] ← read_kb = "No results found for query: "ADHD search volume semantic clusters""
+16:15:43.102 D Koog[Researcher/agent-researcher-230b233b] → read_kb({"query":"ADHD search volume semantic clusters", "maxResults":15})
+16:15:43.102 D Koog[Researcher/agent-researcher-230b233b] ← read_kb = "No results found for query: "high-intent keywords ADHD tools""
+16:15:43.101 D Koog[Researcher/agent-researcher-230b233b] → read_kb({"query":"high-intent keywords ADHD tools", "maxResults":15})
+16:15:43.101 D Koog[Researcher/agent-researcher-230b233b] ← read_kb = "No results found for query: "ADHD keywords SEO""
+16:15:43.087 D Koog[Researcher/agent-researcher-230b233b] → read_kb({"query":"ADHD keywords SEO", "maxResults":15})
+16:15:43.084 D Koog[Researcher/agent-researcher-230b233b] LLM call completed
+16:15:39.326 D Koog[Critic/agent-critic-136f594b] LLM call starting
+16:15:39.299 D Koog[Critic/agent-critic-136f594b] ← read_kb = "Found 4 KB entries:
+
+--- Entry 1 ---
+ID: seed_1-group-2
+Domain: general
+Generation: 0
+Trust Score: 0.90
+Citations: 1
+Content:
+ADHD audiences respond best to concise, visually structured content with short paragraphs, bullet points, interactive elements, and immediate value propositions.
+
+--- Entry
+16:15:39.290 D Koog[Critic/agent-critic-136f594b] → read_kb({"query":"ADHD", "domain":null, "maxResults":10})
+16:15:39.290 D Koog[Critic/agent-critic-136f594b] ← search_kb = "Found 5 semantically related KB entries (query: "ADHD core symptoms lived experiences attention patterns"):
+
+--- Entry 1 ---
+ID: seed_1-group-2
+Domain: general
+Similarity: 0.071
+Trust Score: 0.90
+Generation: 0
+Citations: 0
+[Note: embedding not yet computed — keyword fallback match]
+Content:
+ADHD au
+16:15:39.248 D Koog[Critic/agent-critic-136f594b] → search_kb({"query":"ADHD core symptoms lived experiences attention patterns", "domain":null, "maxResults":10})
+16:15:39.240 D Koog[Critic/agent-critic-136f594b] LLM call completed
+16:15:37.562 I EvoKammerViewModel: Shuru OK — shuru 0.5.3
+16:15:37.561 D EvoKammerViewModel: received event ShuruStatus
+16:15:37.551 I EvoKammerRunService: Shuru check — available=true version=shuru 0.5.3 msg=Shuru is installed: shuru 0.5.3
+16:15:37.550 I GraderRunner.criteria: launching criteria-graderresearcher-51157365 (GraderResearcher)
+16:15:37.549 D GraderAgentFactory: created criteria agent criteria-graderresearcher-51157365 (role=GraderResearcher round=0 model=openai/gpt-oss-120b)
+16:15:37.549 I ShuruVmManager: Shuru is available — shuru 0.5.3
+16:15:37.545 D ShuruVmManager: command exit=0 stderr=
+16:15:37.539 D EvoKammerViewModel: engine progress phase=grader_criteria msg=[grader-0] criteria phase: spawning GraderResearcher for round 0
+16:15:37.539 D EvoKammerViewModel: received event EngineProgress
+16:15:37.534 D GraderRunner: criteria phase spawning GraderResearcher for grader-0 round=0
+16:15:37.336 I GraderRunner: starting criteria phase round=0 graderGroups=1
+16:15:37.309 D EvoKammerViewModel: engine progress phase=grader_criteria_start msg=Grader criteria agents starting (round 0) — developing scoring rubric…
+16:15:37.309 D EvoKammerViewModel: received event EngineProgress
+16:15:37.308 D EvoKammerViewModel: engine progress phase=spawning msg=[group-2] All agents spawned for round 0
+16:15:37.308 D EvoKammerViewModel: received event EngineProgress
+16:15:37.308 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-2] Researcher agent agent-researcher-7f3b842d started (model=deepseek/deepseek-v4-pro)
+16:15:37.308 D EvoKammerViewModel: received event EngineProgress
+16:15:37.308 D EvoKammerViewModel: received event AgentSpawned
+16:15:37.308 I EvoKammerRunService: spawn complete for group=group-2 round=0
+16:15:37.308 I [group-2] Launched in-process agent: agent-researcher-7f3b842d (Researcher) model=deepseek/deepseek-v4-pro
+16:15:36.772 D Koog[Researcher/agent-researcher-7f3b842d] LLM call starting
+16:15:36.772 I Koog[Researcher/agent-researcher-7f3b842d] agent starting
+16:15:36.772 D EvoKammer [group-2]: agent agent-researcher-7f3b842d task prompt (350 chars): === STAGE DISCLOSURE ===
+Stage 0: Foundational ADHD + SEO research
+
+=== YOUR ASSIGNED TASK ===
+Proper use of article, section, nav, aside and accessibility landmarks
+
+You are a Researcher agent focuse…
+16:15:36.772 I EvoKammer [group-2]: agent agent-researcher-7f3b842d BudgetLedger registered (initial=30.0)
+16:15:36.772 D [group-2] Agent agent-researcher-7f3b842d registered BudgetLedger (initialBudget=30.0)
+16:15:36.770 I EvoKammer [group-2]: launching agent agent-researcher-7f3b842d (Researcher) model=deepseek/deepseek-v4-pro allocatedBudget=30.0
+16:15:36.770 I [group-2] In-process agent agent-researcher-7f3b842d (Researcher) starting — model=deepseek/deepseek-v4-pro budget=30.0
+16:15:36.762 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-2] Researcher agent agent-researcher-7985440c started (model=deepseek/deepseek-v4-flash)
+16:15:36.762 D EvoKammerViewModel: received event EngineProgress
+16:15:36.762 D EvoKammerViewModel: received event AgentSpawned
+16:15:36.762 I [group-2] Agent spawned: agent-researcher-7985440c (Researcher) model=deepseek/deepseek-v4-flash
+16:15:36.762 I [group-2] Launched in-process agent: agent-researcher-7985440c (Researcher) model=deepseek/deepseek-v4-flash
+16:15:36.739 D Koog[Researcher/agent-researcher-7985440c] LLM call starting
+16:15:36.739 D Koog[Critic/agent-critic-136f594b] LLM call starting
+16:15:36.739 I Koog[Researcher/agent-researcher-7985440c] agent starting
+16:15:36.739 D Koog[Researcher/agent-researcher-e11fd19f] LLM call starting
+16:15:36.739 D Koog[Critic/agent-critic-94c4c6b9] LLM call starting
+16:15:36.739 I Koog[Critic/agent-critic-136f594b] agent starting
+16:15:36.739 D Koog[Researcher/agent-researcher-71e36393] LLM call starting
+16:15:36.739 D Koog[Researcher/agent-researcher-bb04e883] LLM call starting
+16:15:36.739 D Koog[Researcher/agent-researcher-230b233b] LLM call starting
+16:15:36.739 I Koog[Researcher/agent-researcher-71e36393] agent starting
+16:15:36.739 D Koog[Critic/agent-critic-159cf520] LLM call starting
+16:15:36.739 I Koog[Researcher/agent-researcher-230b233b] agent starting
+16:15:36.738 I Koog[Researcher/agent-researcher-bb04e883] agent starting
+16:15:36.738 I Koog[Critic/agent-critic-159cf520] agent starting
+16:15:36.738 I Koog[Critic/agent-critic-94c4c6b9] agent starting
+16:15:36.738 I Koog[Researcher/agent-researcher-e11fd19f] agent starting
+16:15:36.738 D EvoKammer [group-1]: agent agent-critic-94c4c6b9 task prompt (319 chars): === STAGE DISCLOSURE ===
+Stage 0: Foundational ADHD + SEO research
+
+=== YOUR ASSIGNED TASK ===
+Core symptoms, lived experiences and attention patterns for ADHD audience
+
+You are a Critic agent perform…
+16:15:36.738 I EvoKammer [group-1]: agent agent-critic-94c4c6b9 BudgetLedger registered (initial=60.0)
+16:15:36.738 D EvoKammer [group-0]: agent agent-researcher-71e36393 task prompt (350 chars): === STAGE DISCLOSURE ===
+Stage 0: Foundational ADHD + SEO research
+
+=== YOUR ASSIGNED TASK ===
+Proper use of article, section, nav, aside and accessibility landmarks
+
+You are a Researcher agent focuse…
+16:15:36.738 D [group-1] Agent agent-critic-94c4c6b9 registered BudgetLedger (initialBudget=60.0)
+16:15:36.738 I EvoKammer [group-0]: agent agent-researcher-71e36393 BudgetLedger registered (initial=50.0)
+16:15:36.738 D [group-0] Agent agent-researcher-71e36393 registered BudgetLedger (initialBudget=50.0)
+16:15:36.737 D EvoKammer [group-1]: agent agent-researcher-230b233b task prompt (355 chars): === STAGE DISCLOSURE ===
+Stage 0: Foundational ADHD + SEO research
+
+=== YOUR ASSIGNED TASK ===
+High-intent keywords, search volume and semantic clusters around ADHD tools
+
+You are a Researcher agent f…
+16:15:36.737 I EvoKammer [group-1]: agent agent-researcher-230b233b BudgetLedger registered (initial=60.0)
+16:15:36.737 D EvoKammer [group-0]: agent agent-critic-159cf520 task prompt (319 chars): === STAGE DISCLOSURE ===
+Stage 0: Foundational ADHD + SEO research
+
+=== YOUR ASSIGNED TASK ===
+Core symptoms, lived experiences and attention patterns for ADHD audience
+
+You are a Critic agent perform…
+16:15:36.737 D EvoKammer [group-2]: agent agent-researcher-7985440c task prompt (355 chars): === STAGE DISCLOSURE ===
+Stage 0: Foundational ADHD + SEO research
+
+=== YOUR ASSIGNED TASK ===
+High-intent keywords, search volume and semantic clusters around ADHD tools
+
+You are a Researcher agent f…
+16:15:36.737 D [group-1] Agent agent-researcher-230b233b registered BudgetLedger (initialBudget=60.0)
+16:15:36.737 I EvoKammer [group-2]: agent agent-researcher-7985440c BudgetLedger registered (initial=30.0)
+16:15:36.737 D [group-2] Agent agent-researcher-7985440c registered BudgetLedger (initialBudget=30.0)
+16:15:36.737 I EvoKammer [group-0]: agent agent-researcher-bb04e883 BudgetLedger registered (initial=50.0)
+16:15:36.737 I EvoKammer [group-1]: agent agent-researcher-e11fd19f BudgetLedger registered (initial=60.0)
+16:15:36.737 D [group-0] Agent agent-researcher-bb04e883 registered BudgetLedger (initialBudget=50.0)
+16:15:36.737 I EvoKammer [group-2]: agent agent-critic-136f594b BudgetLedger registered (initial=30.0)
+16:15:36.736 D [group-2] Agent agent-critic-136f594b registered BudgetLedger (initialBudget=30.0)
+16:15:36.736 D [group-1] Agent agent-researcher-e11fd19f registered BudgetLedger (initialBudget=60.0)
+16:15:36.629 I EvoKammer [group-2]: launching agent agent-researcher-7985440c (Researcher) model=deepseek/deepseek-v4-flash allocatedBudget=30.0
+16:15:36.629 I [group-2] In-process agent agent-researcher-7985440c (Researcher) starting — model=deepseek/deepseek-v4-flash budget=30.0
+16:15:36.617 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-2] Critic agent agent-critic-136f594b started (model=x-ai/grok-4.3)
+16:15:36.617 D EvoKammerViewModel: received event EngineProgress
+16:15:36.617 D EvoKammerViewModel: received event AgentSpawned
+16:15:36.617 I [group-2] Agent spawned: agent-critic-136f594b (Critic) model=x-ai/grok-4.3
+16:15:36.616 I [group-2] Launched in-process agent: agent-critic-136f594b (Critic) model=x-ai/grok-4.3
+16:15:36.615 I EvoKammer [group-2]: launching agent agent-critic-136f594b (Critic) model=x-ai/grok-4.3 allocatedBudget=30.0
+16:15:36.615 I [group-2] In-process agent agent-critic-136f594b (Critic) starting — model=x-ai/grok-4.3 budget=30.0
+16:15:36.454 D EvoKammerViewModel: engine progress phase=spawning msg=[group-2] Spawning 3 agents: 1×Critic, 1×Researcher, 1×Researcher
+16:15:36.454 D EvoKammerViewModel: received event EngineProgress
+16:15:36.453 I [group-2] Spawning generation 0: 3 agents (mode=in-process)
+16:15:36.453 I EvoKammerRunService: allocation for group=group-2 round=0: 3 agents — Gen 0: KB=5 entries, backlog=0, toolFailRate=0.0%, unclaimedTasks=8 → allocating: 1xCritic, 1xResearcher, 1xResearcher
+16:15:36.450 D [group-2] Signals for gen 0: SelectionSignals(kbSize=5, stagingBacklog=0, toolFailureRate=0.0, unclaimedTasks=8, planIsStale=true, noRecentPromotions=true, generation=0)
+16:15:36.450 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-1] Researcher agent agent-researcher-e11fd19f started (model=deepseek/deepseek-v4-flash)
+16:15:36.450 D EvoKammerViewModel: received event EngineProgress
+16:15:36.450 D EvoKammerViewModel: received event AgentSpawned
+16:15:36.450 D EvoKammerViewModel: engine progress phase=spawning msg=[group-2] Computing role allocation for round 0
+16:15:36.450 D EvoKammerViewModel: received event EngineProgress
+16:15:36.450 D EvoKammerViewModel: engine progress phase=spawning msg=[group-1] All agents spawned for round 0
+16:15:36.450 D EvoKammerViewModel: received event EngineProgress
+16:15:36.448 D GroupCoordinator: migration ceiling for group-2 = 1 (kbEntries=5)
+16:15:36.448 D LeakOracle: migration ceiling for group-2 set to 1
+16:15:36.447 I [group-1] Agent spawned: agent-researcher-e11fd19f (Researcher) model=deepseek/deepseek-v4-flash
+16:15:36.447 I EvoKammerRunService: computing role allocation for group=group-2 round=0 budgetCeiling=90.0 nodeBudgetMultiplier=1.0
+16:15:36.447 I EvoKammerRunService: spawn complete for group=group-1 round=0
+16:15:36.447 I [group-1] Launched in-process agent: agent-researcher-e11fd19f (Researcher) model=deepseek/deepseek-v4-flash
+16:15:36.446 I EvoKammer [group-1]: launching agent agent-researcher-e11fd19f (Researcher) model=deepseek/deepseek-v4-flash allocatedBudget=60.0
+16:15:36.446 I [group-1] In-process agent agent-researcher-e11fd19f (Researcher) starting — model=deepseek/deepseek-v4-flash budget=60.0
+16:15:36.445 I EvoKammer [group-1]: launching agent agent-critic-94c4c6b9 (Critic) model=deepseek/deepseek-v3.2 allocatedBudget=60.0
+16:15:36.445 I [group-1] In-process agent agent-critic-94c4c6b9 (Critic) starting — model=deepseek/deepseek-v3.2 budget=60.0
+16:15:36.443 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-1] Researcher agent agent-researcher-230b233b started (model=deepseek/deepseek-v4-flash)
+16:15:36.443 D EvoKammerViewModel: received event EngineProgress
+16:15:36.443 D EvoKammerViewModel: received event AgentSpawned
+16:15:36.443 I [group-1] Agent spawned: agent-researcher-230b233b (Researcher) model=deepseek/deepseek-v4-flash
+16:15:36.443 I [group-1] Launched in-process agent: agent-researcher-230b233b (Researcher) model=deepseek/deepseek-v4-flash
+16:15:36.443 I EvoKammer [group-1]: launching agent agent-researcher-230b233b (Researcher) model=deepseek/deepseek-v4-flash allocatedBudget=60.0
+16:15:36.443 I [group-1] In-process agent agent-researcher-230b233b (Researcher) starting — model=deepseek/deepseek-v4-flash budget=60.0
+16:15:36.439 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-1] Critic agent agent-critic-94c4c6b9 started (model=deepseek/deepseek-v3.2)
+16:15:36.439 D EvoKammerViewModel: received event EngineProgress
+16:15:36.439 D EvoKammerViewModel: received event AgentSpawned
+16:15:36.439 I [group-1] Agent spawned: agent-critic-94c4c6b9 (Critic) model=deepseek/deepseek-v3.2
+16:15:36.439 I [group-1] Launched in-process agent: agent-critic-94c4c6b9 (Critic) model=deepseek/deepseek-v3.2
+16:15:36.435 D EvoKammerViewModel: engine progress phase=spawning msg=[group-1] Spawning 3 agents: 1×Critic, 1×Researcher, 1×Researcher
+16:15:36.435 D EvoKammerViewModel: received event EngineProgress
+16:15:36.434 I [group-1] Spawning generation 0: 3 agents (mode=in-process)
+16:15:36.434 I EvoKammerRunService: allocation for group=group-1 round=0: 3 agents — Gen 0: KB=5 entries, backlog=0, toolFailRate=0.0%, unclaimedTasks=8 → allocating: 1xCritic, 1xResearcher, 1xResearcher
+16:15:36.430 D [group-1] Signals for gen 0: SelectionSignals(kbSize=5, stagingBacklog=0, toolFailureRate=0.0, unclaimedTasks=8, planIsStale=true, noRecentPromotions=true, generation=0)
+16:15:36.429 D GroupCoordinator: migration ceiling for group-1 = 1 (kbEntries=5)
+16:15:36.429 D LeakOracle: migration ceiling for group-1 set to 1
+16:15:36.429 D EvoKammerViewModel: engine progress phase=spawning msg=[group-1] Computing role allocation for round 0
+16:15:36.429 D EvoKammerViewModel: received event EngineProgress
+16:15:36.429 D EvoKammerViewModel: engine progress phase=spawning msg=[group-0] All agents spawned for round 0
+16:15:36.429 D EvoKammerViewModel: received event EngineProgress
+16:15:36.429 I EvoKammerRunService: computing role allocation for group=group-1 round=0 budgetCeiling=180.0 nodeBudgetMultiplier=1.0
+16:15:36.429 I EvoKammerRunService: spawn complete for group=group-0 round=0
+16:15:36.429 I EvoKammer [group-0]: launching agent agent-researcher-71e36393 (Researcher) model=deepseek/deepseek-v4-pro allocatedBudget=50.0
+16:15:36.428 I EvoKammer [group-0]: launching agent agent-researcher-bb04e883 (Researcher) model=deepseek/deepseek-v4-flash allocatedBudget=50.0
+16:15:36.427 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-0] Researcher agent agent-researcher-71e36393 started (model=deepseek/deepseek-v4-pro)
+16:15:36.427 D EvoKammerViewModel: received event EngineProgress
+16:15:36.427 D EvoKammerViewModel: received event AgentSpawned
+16:15:36.427 I [group-0] Agent spawned: agent-researcher-71e36393 (Researcher) model=deepseek/deepseek-v4-pro
+16:15:36.427 I [group-0] Launched in-process agent: agent-researcher-71e36393 (Researcher) model=deepseek/deepseek-v4-pro
+16:15:36.426 I [group-0] In-process agent agent-researcher-71e36393 (Researcher) starting — model=deepseek/deepseek-v4-pro budget=50.0
+16:15:36.424 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-0] Researcher agent agent-researcher-bb04e883 started (model=deepseek/deepseek-v4-flash)
+16:15:36.424 D EvoKammerViewModel: received event EngineProgress
+16:15:36.424 D EvoKammerViewModel: received event AgentSpawned
+16:15:36.424 I [group-0] Agent spawned: agent-researcher-bb04e883 (Researcher) model=deepseek/deepseek-v4-flash
+16:15:36.423 I [group-0] Launched in-process agent: agent-researcher-bb04e883 (Researcher) model=deepseek/deepseek-v4-flash
+16:15:36.423 I [group-0] In-process agent agent-researcher-bb04e883 (Researcher) starting — model=deepseek/deepseek-v4-flash budget=50.0
+16:15:36.421 I [group-0] In-process agent agent-critic-159cf520 (Critic) starting — model=deepseek/deepseek-v3.2 budget=50.0
+16:15:36.420 D EvoKammerViewModel: engine progress phase=agent_spawned msg=[group-0] Critic agent agent-critic-159cf520 started (model=deepseek/deepseek-v3.2)
+16:15:36.420 D EvoKammerViewModel: received event EngineProgress
+16:15:36.419 D EvoKammerViewModel: received event AgentSpawned
+16:15:36.419 I [group-0] Agent spawned: agent-critic-159cf520 (Critic) model=deepseek/deepseek-v3.2
+16:15:36.419 I [group-0] Launched in-process agent: agent-critic-159cf520 (Critic) model=deepseek/deepseek-v3.2
+16:15:36.381 I [group-0] Spawning generation 0: 3 agents (mode=in-process)
+16:15:36.380 D EvoKammerViewModel: engine progress phase=spawning msg=[group-0] Spawning 3 agents: 1×Critic, 1×Researcher, 1×Researcher
+16:15:36.380 D EvoKammerViewModel: received event EngineProgress
+16:15:36.379 I EvoKammerRunService: allocation for group=group-0 round=0: 3 agents — Gen 0: KB=5 entries, backlog=0, toolFailRate=0.0%, unclaimedTasks=8 → allocating: 1xCritic, 1xResearcher, 1xResearcher
+16:15:36.356 D [group-0] Signals for gen 0: SelectionSignals(kbSize=5, stagingBacklog=0, toolFailureRate=0.0, unclaimedTasks=8, planIsStale=true, noRecentPromotions=true, generation=0)
+16:15:36.318 D GroupCoordinator: migration ceiling for group-0 = 1 (kbEntries=5)
+16:15:36.318 D LeakOracle: migration ceiling for group-0 set to 1
+16:15:36.317 D EvoKammerViewModel: engine progress phase=spawning msg=[group-0] Computing role allocation for round 0
+16:15:36.317 D EvoKammerViewModel: received event EngineProgress
+16:15:36.316 I EvoKammerRunService: computing role allocation for group=group-0 round=0 budgetCeiling=150.0 nodeBudgetMultiplier=1.0
+16:15:36.316 I Watchdog: started (interval=30000ms stasis=300000ms)
+16:15:36.315 D EvoKammerViewModel: refreshState status=RUNNING runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 groups=3
+16:15:36.315 D EvoKammerViewModel: engine progress phase=round_start msg=Round 0 started — spawning agents for 3 group(s)
+16:15:36.315 D EvoKammerViewModel: received event EngineProgress
+16:15:36.315 I EvoKammerViewModel: round started round=0 runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0
+16:15:36.315 D EvoKammerViewModel: received event RoundStarted
+16:15:36.314 I EvoKammerRunService: round 0 started (duration=5m)
+16:15:36.314 D LeakOracle: quotas reset for new round
+16:15:36.314 I GroupCoordinator: round 0 starting — resetting leak quotas
+16:15:36.314 I EvoKammerRunService: run loop started effectiveRounds=5
+16:15:36.314 D EvoKammerViewModel: refreshState status=GENESIS runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 groups=3
+16:15:36.314 I EvoKammerViewModel: startRun accepted by engine, runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0
+16:15:36.314 I InspectorRunner: started for group group-2
+16:15:36.313 I InspectorRunner: started for group group-1
+16:15:36.313 I InspectorRunner: started for group group-0
+16:15:36.313 D ShuruVmManager: running command: shuru --version
+16:15:36.313 I ShuruVmManager: checking Shuru availability at 'shuru'
+16:15:36.310 I EvoKammerRunService: ProgressiveDisclosureEngine initialised with 3 stages
+16:15:36.310 D ProgressiveDisclosureEngine: registered group group-2 at stage 0
+16:15:36.310 D ProgressiveDisclosureEngine: registered group group-1 at stage 0
+16:15:36.310 D ProgressiveDisclosureEngine: registered group group-0 at stage 0
+16:15:36.308 I EvoKammer: creating LifecycleManager for runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 groupId=group-2 profile=Commune (in-process mode)
+16:15:36.307 I EvoKammer: creating LifecycleManager for runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 groupId=group-1 profile=Factory (in-process mode)
+16:15:36.284 D EvoKammerViewModel: discovered 19 run(s) on disk
+16:15:36.280 I EvoKammer: creating LifecycleManager for runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 groupId=group-0 profile=Library (in-process mode)
+16:15:36.265 I EvoKammer: creating GraderGroupManager with 4 dimensions
+16:15:36.257 D EvoKammerViewModel: refreshState status=GENESIS runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 groups=3
+16:15:36.257 I EvoKammerViewModel: run started runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0
+16:15:36.257 D EvoKammerViewModel: received event RunStarted
+16:15:36.257 I EvoKammer: creating GroupCoordinator for groups=[group-0, group-1, group-2]
+16:15:36.256 I EvoKammerRunService: emitted RunStarted for run bb59d4a9-a533-4ca0-93b5-a38fca424cc0
+16:15:36.256 I EvoKammerRunService: initialised 3 group summaries for run bb59d4a9-a533-4ca0-93b5-a38fca424cc0
+16:15:36.253 I EvoKammerRunService: primordial seeding complete — KB=20 KG=24 WIP=32 tools=12 (across 4 groups: 3 competing + 1 grader)
+16:15:36.248 I EvoKammerRunService: seeded 3 primordial tools for group=grader-0
+16:15:36.243 I EvoKammerRunService: seeded 8 WIP tasks for group=grader-0
+16:15:36.241 I EvoKammerRunService: seeded 6 primordial KG facts for group=grader-0
+16:15:36.239 I EvoKammerRunService: seeded 5 primordial KB docs for group=grader-0
+16:15:36.223 I EvoKammerRunService: seeded 3 primordial tools for group=group-2
+16:15:36.221 I EvoKammerRunService: seeded 8 WIP tasks for group=group-2
+16:15:36.220 I EvoKammerRunService: seeded 6 primordial KG facts for group=group-2
+16:15:36.219 I EvoKammerRunService: seeded 5 primordial KB docs for group=group-2
+16:15:36.196 I EvoKammerRunService: seeded 3 primordial tools for group=group-1
+16:15:36.192 I EvoKammerRunService: seeded 8 WIP tasks for group=group-1
+16:15:36.191 I EvoKammerRunService: seeded 6 primordial KG facts for group=group-1
+16:15:36.189 I EvoKammerRunService: seeded 5 primordial KB docs for group=group-1
+16:15:36.158 I EvoKammerRunService: seeded 3 primordial tools for group=group-0
+16:15:36.146 I EvoKammerRunService: seeded 8 WIP tasks for group=group-0
+16:15:36.145 I EvoKammerRunService: seeded 6 primordial KG facts for group=group-0
+16:15:36.141 I EvoKammerRunService: seeded 5 primordial KB docs for group=group-0
+16:15:36.137 I EvoKammerRunService: sealed test suite verified for run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0
+16:15:36.134 I EvoKammerRunService: sealed test suite stored for run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 group=group-0 hash=c28ab42994443d85293ccd3e40f656439dcf5fd3fe909888e80638985e0b44fb
+16:15:36.121 I EvoKammerRunService: stored 8 model assignments, 8 model pools, and 8 role prompts from Genesis Council (generationCeiling=25)
+16:15:36.120 I EvoKammerRunService: sealed StartingField stored for run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 stageCount=3
+16:15:36.052 D EvoKammerViewModel: unhandled event type GenesisCouncilCompleted
+16:15:36.052 D EvoKammerViewModel: received event GenesisCouncilCompleted
+16:15:36.049 D EvoKammerViewModel: engine progress phase=genesis_complete msg=Genesis Council complete — 3 groups, models: Researcher→deepseek/deepseek-v4-flash, Planner→qwen/qwen3-next-80b-a3b-instruct, Builder→openai/gpt-oss-120b, Critic→x-ai/grok-4.3, Auditor→x-ai/grok-4.3, Inspector→x-ai/grok-4.3, Outlier→deepseek/deepseek-v4-pro, Archivist→deepseek/deepseek-v4-flash
+16:15:36.049 D EvoKammerViewModel: received event EngineProgress
+16:15:36.049 I EvoKammerRunService: Genesis Council complete — models=[Researcher→deepseek/deepseek-v4-flash, Planner→qwen/qwen3-next-80b-a3b-instruct, Builder→openai/gpt-oss-120b, Critic→x-ai/grok-4.3, Auditor→x-ai/grok-4.3, Inspector→x-ai/grok-4.3, Outlier→deepseek/deepseek-v4-pro, Archivist→deepseek/deepseek-v4-flash]
+16:15:36.003 D EvoKammerViewModel: engine progress phase=genesis_agent msg=Genesis Council complete — 3 groups designed
+16:15:36.003 D EvoKammerViewModel: received event EngineProgress
+16:15:36.003 I GenesisCouncil: Genesis Council complete — 3 groups designed
+16:15:36.002 I GenesisCouncil: council complete — groups=3 models=8 stages=3
+16:15:35.925 D EvoKammerViewModel: engine progress phase=genesis_agent msg=[8/8] CouncilSynthesis complete (10595 chars): {   "runId": "mindvortex_adhd_article_evo1",   "objective": "Compose an SEO-optimized, engaging HTML5 article that attracts visitors to mindvortex.app focusing on ADHD psychology, semantic structure, visual design and accessibility",   "globalBudgetCeiling": 10000.0,   "generationCeiling": 25,   "gr
+16:15:35.925 D EvoKammerViewModel: received event EngineProgress
+16:15:35.924 I GenesisCouncil: [8/8] CouncilSynthesis complete (10595 chars): {   "runId": "mindvortex_adhd_article_evo1",   "objective": "Compose an SEO-optimized, engaging HTML5 article that attracts visitors to mindvortex.app focusing on ADHD psychology, semantic structure, visual design and accessibility",   "globalBudgetCeiling": 10000.0,   "generationCeiling": 25,   "gr
+16:15:35.918 I GenesisCouncil: CouncilSynthesis done (len=10595)
+16:15:35.916 I CouncilRunner: CouncilSynthesis produced 10595 chars
+16:15:15.742 D EvoKammerViewModel: engine progress phase=genesis_agent msg=[8/8] CouncilSynthesis — synthesising…
+16:15:15.742 D EvoKammerViewModel: received event EngineProgress
+16:15:15.742 I GenesisCouncil: [8/8] CouncilSynthesis — synthesising…
+16:15:15.742 I CouncilRunner: spawning CouncilSynthesis agent
+16:15:15.742 I GenesisCouncil: CouncilSynthesis starting (attempt=1)
+16:15:15.740 D EvoKammerViewModel: engine progress phase=genesis_agent msg=[7/8] CouncilSeedCurator complete (2684 chars): {   "seedDocuments": [     { "id": "seed_1", "domain": "general", "content": "ADHD audiences respond best to concise, visually structured content with short paragraphs, bullet points, interactive elements, and immediate value propositions." },     { "id": "seed_2", "domain": "general", "content": "S
+16:15:15.740 D EvoKammerViewModel: received event EngineProgress
+16:15:15.740 I GenesisCouncil: [7/8] CouncilSeedCurator complete (2684 chars): {   "seedDocuments": [     { "id": "seed_1", "domain": "general", "content": "ADHD audiences respond best to concise, visually structured content with short paragraphs, bullet points, interactive elements, and immediate value propositions." },     { "id": "seed_2", "domain": "general", "content": "S
+16:15:15.740 D GenesisCouncil: CouncilSeedCurator preview: {   "seedDocuments": [     { "id": "seed_1", "domain": "general", "content": "ADHD audiences respond best to concise, visually structured content with short paragraphs, bullet points, interactive elements, and immediate value propositions." },     { "id": "seed_2", "domain": "general", "content": "S
+16:15:15.740 I GenesisCouncil: [parallel] CouncilSeedCurator done (len=2684)
+16:15:15.740 I CouncilRunner: CouncilSeedCurator produced 2684 chars
+16:15:15.514 D EvoKammerViewModel: engine progress phase=genesis_agent msg=[2/8] CouncilIncentiveDesigner complete (742 chars): {   "domainCostMultipliers": {"html5": 1.0, "seo": 1.5, "content": 1.2, "adhd": 1.3},   "scoringDimensions": [     {"id": "visual", "name": "Visual Design", "description": "Beauty and engagement of HTML5 article", "weight": 0.3},     {"id": "seo", "name": "SEO Performance", "description": "Optimizat
+16:15:15.514 D EvoKammerViewModel: received event EngineProgress
+16:15:15.514 I GenesisCouncil: [2/8] CouncilIncentiveDesigner complete (742 chars): {   "domainCostMultipliers": {"html5": 1.0, "seo": 1.5, "content": 1.2, "adhd": 1.3},   "scoringDimensions": [     {"id": "visual", "name": "Visual Design", "description": "Beauty and engagement of HTML5 article", "weight": 0.3},     {"id": "seo", "name": "SEO Performance", "description": "Optimizat
+16:15:15.514 D GenesisCouncil: CouncilIncentiveDesigner preview: {   "domainCostMultipliers": {"html5": 1.0, "seo": 1.5, "content": 1.2, "adhd": 1.3},   "scoringDimensions": [     {"id": "visual", "name": "Visual Design", "description": "Beauty and engagement of HTML5 article", "weight": 0.3},     {"id": "seo", "name": "SEO Performance", "description": "Optimizat
+16:15:15.514 I GenesisCouncil: [parallel] CouncilIncentiveDesigner done (len=742)
+16:15:15.514 I CouncilRunner: CouncilIncentiveDesigner produced 742 chars
+16:15:15.136 D EvoKammerViewModel: engine progress phase=genesis_agent msg=[1/8] CouncilTaskAnatomist complete (2066 chars): {   "knowledgeNodes": [     { "id": "adhd_understanding", "domain": "ADHD Psychology", "description": "Core symptoms, lived experiences and attention patterns for ADHD audience", "prerequisites": [], "stage": 0 },     { "id": "seo_keywords", "domain": "ADHD SEO Research", "description": "High-intent
+16:15:15.136 D EvoKammerViewModel: received event EngineProgress
+16:15:15.136 I GenesisCouncil: [1/8] CouncilTaskAnatomist complete (2066 chars): {   "knowledgeNodes": [     { "id": "adhd_understanding", "domain": "ADHD Psychology", "description": "Core symptoms, lived experiences and attention patterns for ADHD audience", "prerequisites": [], "stage": 0 },     { "id": "seo_keywords", "domain": "ADHD SEO Research", "description": "High-intent
+16:15:15.136 D GenesisCouncil: CouncilTaskAnatomist preview: {   "knowledgeNodes": [     { "id": "adhd_understanding", "domain": "ADHD Psychology", "description": "Core symptoms, lived experiences and attention patterns for ADHD audience", "prerequisites": [], "stage": 0 },     { "id": "seo_keywords", "domain": "ADHD SEO Research", "description": "High-intent
+16:15:15.136 I GenesisCouncil: [parallel] CouncilTaskAnatomist done (len=2066)
+16:15:15.136 I CouncilRunner: CouncilTaskAnatomist produced 2066 chars
+16:15:14.182 D EvoKammerViewModel: engine progress phase=genesis_agent msg=[4/8] CouncilPromptArchitect complete (1670 chars): {   "rolePrompts": {     "Researcher": "You are a Researcher agent focused on domain exploration and KB building around ADHD topics, SEO keywords, neurodivergent web design patterns, and engaging content for mindvortex.app.",     "Builder": "You are a Builder agent responsible for tool creation and
+16:15:14.182 D EvoKammerViewModel: received event EngineProgress
+16:15:14.182 I GenesisCouncil: [4/8] CouncilPromptArchitect complete (1670 chars): {   "rolePrompts": {     "Researcher": "You are a Researcher agent focused on domain exploration and KB building around ADHD topics, SEO keywords, neurodivergent web design patterns, and engaging content for mindvortex.app.",     "Builder": "You are a Builder agent responsible for tool creation and
+16:15:14.182 D GenesisCouncil: CouncilPromptArchitect preview: {   "rolePrompts": {     "Researcher": "You are a Researcher agent focused on domain exploration and KB building around ADHD topics, SEO keywords, neurodivergent web design patterns, and engaging content for mindvortex.app.",     "Builder": "You are a Builder agent responsible for tool creation and
+16:15:14.182 I GenesisCouncil: [parallel] CouncilPromptArchitect done (len=1670)
+16:15:14.182 I CouncilRunner: CouncilPromptArchitect produced 1670 chars
+16:15:13.470 D EvoKammerViewModel: engine progress phase=genesis_agent msg=[5/8] CouncilKGArchitect complete (1455 chars): {   "entityTypes": [     { "id": "ADHDConcept", "description": "Core ADHD-related idea, symptom, strategy or experience" },     { "id": "AppFeature", "description": "Functional capability of the mindvortex.app product" },     { "id": "ContentSection", "description": "HTML5 article component such as
+16:15:13.470 D EvoKammerViewModel: received event EngineProgress
+16:15:13.470 I GenesisCouncil: [5/8] CouncilKGArchitect complete (1455 chars): {   "entityTypes": [     { "id": "ADHDConcept", "description": "Core ADHD-related idea, symptom, strategy or experience" },     { "id": "AppFeature", "description": "Functional capability of the mindvortex.app product" },     { "id": "ContentSection", "description": "HTML5 article component such as
+16:15:13.469 D GenesisCouncil: CouncilKGArchitect preview: {   "entityTypes": [     { "id": "ADHDConcept", "description": "Core ADHD-related idea, symptom, strategy or experience" },     { "id": "AppFeature", "description": "Functional capability of the mindvortex.app product" },     { "id": "ContentSection", "description": "HTML5 article component such as
+16:15:13.469 I GenesisCouncil: [parallel] CouncilKGArchitect done (len=1455)
+16:15:13.469 I CouncilRunner: CouncilKGArchitect produced 1455 chars
+16:15:13.442 D EvoKammerViewModel: engine progress phase=genesis_agent msg=[6/8] CouncilModelEcologist complete (1342 chars): {   "modelPools": {     "Researcher": [       "deepseek/deepseek-v4-flash",       "deepseek/deepseek-v4-flash",       "deepseek/deepseek-v4-pro"     ],     "Planner": [       "qwen/qwen3-next-80b-a3b-instruct",       "deepseek/deepseek-v3.2",       "deepseek/deepseek-v4-pro"     ],     "Builder": [
+16:15:13.442 D EvoKammerViewModel: received event EngineProgress
+16:15:13.442 I GenesisCouncil: [6/8] CouncilModelEcologist complete (1342 chars): {   "modelPools": {     "Researcher": [       "deepseek/deepseek-v4-flash",       "deepseek/deepseek-v4-flash",       "deepseek/deepseek-v4-pro"     ],     "Planner": [       "qwen/qwen3-next-80b-a3b-instruct",       "deepseek/deepseek-v3.2",       "deepseek/deepseek-v4-pro"     ],     "Builder": [
+16:15:13.442 D GenesisCouncil: CouncilModelEcologist preview: {   "modelPools": {     "Researcher": [       "deepseek/deepseek-v4-flash",       "deepseek/deepseek-v4-flash",       "deepseek/deepseek-v4-pro"     ],     "Planner": [       "qwen/qwen3-next-80b-a3b-instruct",       "deepseek/deepseek-v3.2",       "deepseek/deepseek-v4-pro"     ],     "Builder": [
+16:15:13.442 I GenesisCouncil: [parallel] CouncilModelEcologist done (len=1342)
+16:15:13.442 I CouncilRunner: CouncilModelEcologist produced 1342 chars
+16:15:13.170 D EvoKammerViewModel: engine progress phase=genesis_agent msg=[3/8] CouncilEcologist complete (446 chars): {   "groupCount": 3,   "groups": [     { "id": "group_a", "profile": "Library", "ringPosition": 0 },     { "id": "group_b", "profile": "Factory", "ringPosition": 1 },     { "id": "group_c", "profile": "Monastery", "ringPosition": 2 }   ],   "ringTopology": ["group_a", "group_b", "group_c"],   "leakC
+16:15:13.170 D EvoKammerViewModel: received event EngineProgress
+16:15:13.170 I GenesisCouncil: [3/8] CouncilEcologist complete (446 chars): {   "groupCount": 3,   "groups": [     { "id": "group_a", "profile": "Library", "ringPosition": 0 },     { "id": "group_b", "profile": "Factory", "ringPosition": 1 },     { "id": "group_c", "profile": "Monastery", "ringPosition": 2 }   ],   "ringTopology": ["group_a", "group_b", "group_c"],   "leakC
+16:15:13.168 D GenesisCouncil: CouncilEcologist preview: {   "groupCount": 3,   "groups": [     { "id": "group_a", "profile": "Library", "ringPosition": 0 },     { "id": "group_b", "profile": "Factory", "ringPosition": 1 },     { "id": "group_c", "profile": "Monastery", "ringPosition": 2 }   ],   "ringTopology": ["group_a", "group_b", "group_c"],   "leakC
+16:15:13.168 I GenesisCouncil: [parallel] CouncilEcologist done (len=446)
+16:15:13.168 I CouncilRunner: CouncilEcologist produced 446 chars
+16:15:04.518 I CouncilRunner: spawning CouncilTaskAnatomist agent
+16:15:04.518 I CouncilRunner: spawning CouncilPromptArchitect agent
+16:15:04.518 I CouncilRunner: spawning CouncilKGArchitect agent
+16:15:04.518 I CouncilRunner: spawning CouncilEcologist agent
+16:15:04.518 I CouncilRunner: spawning CouncilSeedCurator agent
+16:15:04.518 I CouncilRunner: spawning CouncilModelEcologist agent
+16:15:04.518 I CouncilRunner: spawning CouncilIncentiveDesigner agent
+16:15:04.501 I GenesisCouncil: [parallel] CouncilModelEcologist starting (6/7)
+16:15:04.501 I GenesisCouncil: [parallel] CouncilSeedCurator starting (7/7)
+16:15:04.499 I GenesisCouncil: [parallel] CouncilPromptArchitect starting (4/7)
+16:15:04.499 I GenesisCouncil: [parallel] CouncilKGArchitect starting (5/7)
+16:15:04.499 D EvoKammerViewModel: engine progress phase=genesis_agent msg=[parallel] Running 7 council agents concurrently…
+16:15:04.499 D EvoKammerViewModel: received event EngineProgress
+16:15:04.499 I GenesisCouncil: [parallel] Running 7 council agents concurrently…
+16:15:04.498 I GenesisCouncil: [parallel] CouncilIncentiveDesigner starting (2/7)
+16:15:04.497 I GenesisCouncil: [parallel] CouncilTaskAnatomist starting (1/7)
+16:15:04.496 I GenesisCouncil: starting (parallel phase) for objective: Compose a beautiful engaging HTML5 article for a ADHD app website mindvortex.app…
+16:15:04.496 D EvoKammerViewModel: engine progress phase=genesis_agent msg=Genesis Council running 8 specialist agents in sequence…
+16:15:04.496 D EvoKammerViewModel: received event EngineProgress
+16:15:04.496 I GenesisCouncil: Genesis Council running 8 specialist agents in sequence…
+16:15:04.495 I GenesisCouncil: running council agents (this may take 1–3 minutes)
+16:15:04.491 D EvoKammerViewModel: engine progress phase=genesis_agent msg=Genesis Council initialising — assembling council agents…
+16:15:04.491 D EvoKammerViewModel: received event EngineProgress
+16:15:04.490 D EvoKammerViewModel: engine progress phase=genesis msg=Genesis Council starting — designing this run…
+16:15:04.488 I GenesisCouncil: Genesis Council initialising — assembling council agents…
+16:15:04.487 I GenesisCouncil: starting council for run=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 objective='Compose a beautiful engaging HTML5 article for a ADHD app website mindvortex.app'
+16:15:04.485 D EvoKammerViewModel: received event EngineProgress
+16:15:04.482 I EvoKammerRunService: starting Genesis Council for run bb59d4a9-a533-4ca0-93b5-a38fca424cc0
+16:15:04.482 I EvoKammerRunService: starting run bb59d4a9-a533-4ca0-93b5-a38fca424cc0 groups=3 rounds=5
+16:15:04.476 I EvoKammerViewModel: startRun called runId=bb59d4a9-a533-4ca0-93b5-a38fca424cc0 objective='Compose a beautiful engaging HTML5 article for a ADHD app website mindvortex.app to attract visitors, optimised for SEO and for ADHD-related topic.'
+16:13:38.714 D EvoKammerViewModel: substrate snapshot loaded run=96dd729c-a6dc-43f8-b7a5-5f1716df7b79 group=__meta_archive__ total=0 records loaded=true
+16:13:38.195 D EvoKammerViewModel: discovered 18 run(s) on disk
+16:13:38.111 D EvoKammerViewModel: refreshState status=IDLE runId=null groups=0
+16:13:38.091 D CUrrent user is updated
+16:13:38.089 I EvoKammer: data root = /Users/treend/.evokammer

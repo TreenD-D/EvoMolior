@@ -6,8 +6,10 @@ import com.achulkov.evokammer.competition.grader.GraderGroup
 import com.achulkov.evokammer.competition.leaks.DifferentialPrivacyTransform
 import com.achulkov.evokammer.competition.leaks.LeakOracle
 import com.achulkov.evokammer.competition.leaks.LeakOracleConfig
+import com.achulkov.evokammer.competition.resourcemap.NodeYieldApplier
 import com.achulkov.evokammer.competition.resourcemap.ResourceMap
 import com.achulkov.evokammer.competition.resourcemap.ResourceNode
+import com.achulkov.evokammer.core.contract.LeakPacket
 import com.achulkov.evokammer.core.model.GradingResult
 import com.achulkov.evokammer.core.model.ScoringDimension
 import io.github.aakira.napier.Napier
@@ -44,13 +46,22 @@ class GroupCoordinator(
 ) {
 
     val leakOracle = LeakOracle(leakConfig)
-    val dispatchRelay = DispatchRelay(groupIds, leakOracle)
-    val graderGroup = GraderGroup(dimensions)
-    val resourceMap = ResourceMap(resourceNodes)
-
     /** Phase 5: differential privacy transform for leak content. Null if no API key is provided. */
     val privacyTransform: DifferentialPrivacyTransform? =
         openRouterApiKey?.let { DifferentialPrivacyTransform(it) }
+
+    val dispatchRelay = DispatchRelay(
+        groupIds = groupIds,
+        leakOracle = leakOracle,
+        leakTransformer = privacyTransform?.let { transform ->
+            { packet: LeakPacket ->
+                packet.copy(content = transform.transform(packet.content, packet.domain))
+            }
+        }
+    )
+    val graderGroup = GraderGroup(dimensions)
+    val resourceMap = ResourceMap(resourceNodes)
+    private val nodeYieldApplier = NodeYieldApplier(resourceMap)
 
     private val _gradingResults = MutableSharedFlow<GradingResult>(extraBufferCapacity = 64)
 
@@ -101,6 +112,16 @@ class GroupCoordinator(
     }
 
     /**
+     * Returns the multiplicative budget bonus currently earned by [groupId].
+     *
+     * This folds all held resource nodes into a single spawn-budget multiplier.
+     *
+     * @param groupId Group identifier.
+     * @return Budget multiplier, with `1.0` meaning no bonus.
+     */
+    fun budgetMultiplierFor(groupId: String): Double = nodeYieldApplier.budgetMultiplierFor(groupId)
+
+    /**
      * Dispatches a [DispatchMessage] from [sourceGroupId], applying [DifferentialPrivacyTransform]
      * to [DispatchMessage.Leak] packets when Phase 5 is enabled (A-8).
      *
@@ -113,17 +134,6 @@ class GroupCoordinator(
      * @param message The message to relay.
      */
     suspend fun dispatchLeak(sourceGroupId: String, message: DispatchMessage) {
-        val finalMessage = if (message is DispatchMessage.Leak && privacyTransform != null) {
-            // Apply LLM-based differential privacy before handing to the LeakOracle.
-            Napier.d("GroupCoordinator: applying privacy transform to leak from $sourceGroupId domain=${message.packet.domain}")
-            val transformedContent = privacyTransform.transform(
-                rawContent = message.packet.content,
-                domain = message.packet.domain
-            )
-            message.copy(packet = message.packet.copy(content = transformedContent))
-        } else {
-            message
-        }
-        dispatchRelay.dispatch(sourceGroupId, finalMessage)
+        dispatchRelay.dispatch(sourceGroupId, message)
     }
 }

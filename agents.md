@@ -31,8 +31,8 @@ EvoMolior/
 
 | Concern | Technology |
 |---|---|
-| Agent framework | [Koog](https://github.com/JetBrains/koog/) 0.7.2 (`ai.koog:koog-agents`) |
-| LLM provider | OpenRouter (via Koog `simpleOpenRouterExecutor`) |
+| Agent framework | [Koog](https://github.com/JetBrains/koog/) 1.0.0 (`ai.koog:koog-agents`) |
+| LLM provider | OpenRouter (via the shared OpenRouter executor helper) |
 | Agent isolation | [Shuru](https://github.com/superhq-ai/shuru) microVMs (macOS, Apple Virtualization.framework) |
 | Substrate storage | Room/SQLite (per-group isolated DB files) |
 | UI framework | Compose Multiplatform (JVM desktop target for control panel) |

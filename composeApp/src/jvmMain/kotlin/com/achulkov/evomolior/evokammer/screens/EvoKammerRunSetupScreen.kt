@@ -16,6 +16,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.achulkov.evokammer.api.model.RunConfig
+import com.achulkov.evokammer.api.model.RunInputArtifactUpload
 import com.achulkov.evomolior.common.BuildConfig
 import com.achulkov.evokammer.core.model.GroupProfileType
 import com.achulkov.evokammer.core.model.ScoringDimension
@@ -41,6 +42,7 @@ fun EvoKammerRunSetupScreen(
     viewModel: EvoKammerViewModel = remember { EvoKammerViewModel(StubEvoKammerEngineService()) }
 ) {
     val navigate = LocalEvoKammerNavigator.current
+    val availableRuns by viewModel.availableRuns.collectAsState()
 
     var objective by remember { mutableStateOf("Design a distributed, fault-tolerant knowledge synthesis system") }
     // Pre-fill with the key baked in at build time from local.properties; user can override at runtime
@@ -52,6 +54,8 @@ fun EvoKammerRunSetupScreen(
     var rounds by remember { mutableStateOf(5) }
     var roundDuration by remember { mutableStateOf(30) }
     var maxAgents by remember { mutableStateOf(6) }
+    var contextArtifacts by remember { mutableStateOf(emptyList<RunInputArtifactUpload>()) }
+    var continuationFromRunId by remember { mutableStateOf<String?>(null) }
     var dimensions by remember {
         mutableStateOf(
             listOf(
@@ -150,6 +154,27 @@ fun EvoKammerRunSetupScreen(
                         }
                     }
                 }
+            }
+        }
+
+        // Context files
+        item {
+            SectionCard(title = "Run Context") {
+                RunContextArtifactsSection(
+                    artifacts = contextArtifacts,
+                    onArtifactsChanged = { contextArtifacts = it }
+                )
+            }
+        }
+
+        item {
+            SectionCard(title = "Continuation") {
+                ContinuationRunSelectorSection(
+                    availableRuns = availableRuns,
+                    selectedRunId = continuationFromRunId,
+                    onSelectedRunIdChanged = { continuationFromRunId = it },
+                    helperText = "A continuation starts a fresh run ID seeded from the selected archived StartingField. The source run stays immutable."
+                )
             }
         }
 
@@ -264,7 +289,9 @@ fun EvoKammerRunSetupScreen(
                         roundDurationMinutes = roundDuration,
                         maxAgentsPerGroup = maxAgents,
                         scoringDimensions = dimensions,
-                        openRouterApiKey = apiKey
+                        openRouterApiKey = apiKey,
+                        contextArtifacts = contextArtifacts,
+                        continuationFromRunId = continuationFromRunId
                     )
                     viewModel.startRun(config)
                     navigate(EvoKammerRoute.RunMonitor(config.runId))

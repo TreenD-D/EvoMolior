@@ -33,7 +33,8 @@ class EmitFactTool(
     private val groupId: String,
     private val agentId: String,
     private val role: String,
-    private val generation: Int
+    private val generation: Int,
+    private val defaultWipTaskRef: String? = null
 ) : SimpleTool<EmitFactTool.Args>(
     argsType = typeToken<Args>(),
     name = "emit_fact",
@@ -57,7 +58,9 @@ class EmitFactTool(
         /** Domain this fact belongs to. */
         val domain: String,
         /** Brief provenance note explaining the source or reasoning. */
-        val provenance: String = ""
+        val provenance: String = "",
+        /** Optional WiP task reference for facts produced from a claimed task. */
+        val wipTaskRef: String? = null
     )
 
     override suspend fun execute(args: Args): String {
@@ -84,6 +87,7 @@ class EmitFactTool(
         }
 
         val budgetSig = budgetLedger.generateStagingToken("KG_FACT")
+        val resolvedWipTaskRef = args.wipTaskRef?.takeIf { it.isNotBlank() } ?: defaultWipTaskRef
 
         val entity = StagingSubmissionEntity(
             id = UUID.randomUUID().toString(),
@@ -93,7 +97,7 @@ class EmitFactTool(
             role = role,
             type = "KG_FACT",
             content = content,
-            wipTaskRef = null,
+            wipTaskRef = resolvedWipTaskRef,
             speculative = args.confidence < 0.6,
             outlier = role == "Outlier",
             budgetSignature = budgetSig,

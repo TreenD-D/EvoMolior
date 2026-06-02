@@ -33,6 +33,7 @@ class WriteStagingTool(
     private val agentId: String,
     private val role: String,
     private val generation: Int,
+    private val defaultWipTaskRef: String? = null,
     private val isOutlier: Boolean = false
 ) : SimpleTool<WriteStagingTool.Args>(
     argsType = typeToken<Args>(),
@@ -72,6 +73,7 @@ class WriteStagingTool(
         }
 
         val budgetSignature = budgetLedger.generateStagingToken(submissionType.name)
+        val resolvedWipTaskRef = args.wipTaskRef?.takeIf { it.isNotBlank() } ?: defaultWipTaskRef
         val submissionId = UUID.randomUUID().toString()
 
         val entity = StagingSubmissionEntity(
@@ -80,7 +82,7 @@ class WriteStagingTool(
             role = role,
             type = submissionType.name,
             content = args.content,
-            wipTaskRef = args.wipTaskRef,
+            wipTaskRef = resolvedWipTaskRef,
             speculative = args.speculative,
             outlier = isOutlier,
             budgetSignature = budgetSignature,

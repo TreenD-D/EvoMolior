@@ -38,6 +38,14 @@ interface ToolRegistryDao {
     """)
     suspend fun getLatestByName(runId: String, groupId: String, name: String): ToolRegistryEntryEntity?
 
+    /** Get the highest version of a tool by name, regardless of status. */
+    @Query("""
+        SELECT * FROM tool_registry_entries
+        WHERE runId = :runId AND groupId = :groupId AND name = :name
+        ORDER BY version DESC LIMIT 1
+    """)
+    suspend fun getLatestVersionByName(runId: String, groupId: String, name: String): ToolRegistryEntryEntity?
+
     @Query("""
         SELECT * FROM tool_registry_entries 
         WHERE runId = :runId AND groupId = :groupId AND status = 'active'

@@ -7,6 +7,7 @@ import com.achulkov.evokammer.api.service.RunArchiveService
 import com.achulkov.evokammer.competition.di.GraderGroupManagerProvider
 import com.achulkov.evokammer.competition.di.GroupCoordinatorProvider
 import com.achulkov.evokammer.orchestration.di.LifecycleManagerProvider
+import com.achulkov.evokammer.orchestration.metaplanner.MetaPlannerRunner
 import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
 import org.koin.dsl.module
 
@@ -29,7 +30,8 @@ val evokammerApiModule = module {
             lifecycleManagerProvider = get<LifecycleManagerProvider>(),
             groupCoordinatorProvider = get<GroupCoordinatorProvider>(),
             graderGroupManagerProvider = get<GraderGroupManagerProvider>(),
-            substrateFactory = get<SubstrateDatabaseFactory>()
+            substrateFactory = get<SubstrateDatabaseFactory>(),
+            metaPlannerRunner = get<MetaPlannerRunner>()
         )
     }
 

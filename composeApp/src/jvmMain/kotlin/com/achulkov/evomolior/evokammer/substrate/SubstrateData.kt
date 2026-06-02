@@ -17,11 +17,13 @@ import com.achulkov.evokammer.substrate.db.entity.WipTaskEntity
  * @param runId The run identifier.
  * @param groupIds The list of group IDs that have substrate DB files for this run.
  * @param lastModifiedMs The last-modified timestamp of the most recently touched DB file, in ms.
+ * @param isCompleted True when the run has a finished results bundle on disk.
  */
 data class RunInfo(
     val runId: String,
     val groupIds: List<String>,
-    val lastModifiedMs: Long
+    val lastModifiedMs: Long,
+    val isCompleted: Boolean
 )
 
 /**

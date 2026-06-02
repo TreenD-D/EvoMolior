@@ -6,6 +6,9 @@ import com.achulkov.evokammer.core.budget.BudgetLedger
 import com.achulkov.evokammer.core.model.ActionType
 import com.achulkov.evokammer.core.model.GroupProfile
 import com.achulkov.evokammer.core.model.GroupProfileType
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -120,5 +123,36 @@ class BudgetLedgerTest {
             secondDeductionCost > firstDeductionCost,
             "Retry should cost more than first call: first=$firstDeductionCost second=$secondDeductionCost"
         )
+    }
+
+    @Test
+    fun `tool execution cost ratios are success failure and retry`() = runTest {
+        val config = defaultConfig()
+        val successCost = config.costFor(ActionType.TOOL_EXEC_SUCCESS)
+        val failureCost = config.costFor(ActionType.TOOL_EXEC_FAILURE)
+        val retryCost = config.costFor(ActionType.TOOL_EXEC_RETRY)
+
+        assertEquals(successCost * 2.0, failureCost, 1e-9)
+        assertEquals(successCost * 4.0, retryCost, 1e-9)
+    }
+
+    @Test
+    fun `deductions remain atomic under concurrent pressure`() = runTest {
+        val config = BudgetConfig(
+            groupId = "g0",
+            profile = GroupProfile.default(GroupProfileType.Factory),
+            customCosts = mapOf(ActionType.WRITE_STAGING.name to 1.0)
+        )
+        val ledger = BudgetLedger("agent-1", 1_000.0, 0.0, config)
+
+        coroutineScope {
+            val jobs = List(100) {
+                async { ledger.deduct(ActionType.WRITE_STAGING) }
+            }
+            jobs.awaitAll()
+        }
+
+        assertEquals(900.0, ledger.balance, 1e-9)
+        assertEquals(100, ledger.actionLog.count { it.actionType == ActionType.WRITE_STAGING })
     }
 }

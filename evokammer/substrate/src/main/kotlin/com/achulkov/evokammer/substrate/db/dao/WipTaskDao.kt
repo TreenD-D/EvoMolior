@@ -34,6 +34,20 @@ interface WipTaskDao {
     """)
     suspend fun countUnclaimed(runId: String, groupId: String): Int
 
+    /** Total WiP task count for the group. */
+    @Query("""
+        SELECT COUNT(*) FROM wip_tasks
+        WHERE runId = :runId AND groupId = :groupId
+    """)
+    suspend fun countAll(runId: String, groupId: String): Int
+
+    /** Count completed WiP tasks for the group. */
+    @Query("""
+        SELECT COUNT(*) FROM wip_tasks
+        WHERE runId = :runId AND groupId = :groupId AND status = 'completed'
+    """)
+    suspend fun countCompleted(runId: String, groupId: String): Int
+
     /** Atomically claim a task. Returns 1 if claim succeeded, 0 if already claimed. */
     @Query("""
         UPDATE wip_tasks 
@@ -47,15 +61,15 @@ interface WipTaskDao {
         SET status = 'completed', lastChangedGeneration = :generation
         WHERE nodeId = :nodeId AND runId = :runId AND groupId = :groupId AND claimedByAgentId = :agentId
     """)
-    suspend fun completeTask(nodeId: String, runId: String, groupId: String, agentId: String, generation: Int)
+    suspend fun completeTask(nodeId: String, runId: String, groupId: String, agentId: String, generation: Int): Int
 
     @Query("""
         UPDATE wip_tasks 
         SET status = 'unclaimed', claimedByAgentId = NULL, 
             lastChangedGeneration = :generation, abandonCount = abandonCount + 1
-        WHERE nodeId = :nodeId AND runId = :runId AND groupId = :groupId AND claimedByAgentId = :agentId
+        WHERE nodeId = :nodeId AND runId = :runId AND groupId = :groupId AND claimedByAgentId = :agentId AND status = 'claimed'
     """)
-    suspend fun abandonTask(nodeId: String, runId: String, groupId: String, agentId: String, generation: Int)
+    suspend fun abandonTask(nodeId: String, runId: String, groupId: String, agentId: String, generation: Int): Int
 
     /** Tasks abandoned 3+ times — for Inspector anomaly detection. */
     @Query("""

@@ -1,7 +1,88 @@
 # EvoKammer Remediation Plan
 
 > Based on the §10 misalignment audit from `EvoKammer_Implementation_Plan_v1.0.md`.
-> Updated: 2026-03-22. Items already fixed in the 2026-03-22 session are listed first.
+> Updated: 2026-05-27. Items already fixed in the 2026-03-22 session are listed first.
+
+---
+
+## Run Analysis (2026-05-27)
+
+The newest execution log shows a different failure mix than the 2026-05-25 pass. The sealed-suite path is no longer the primary blocker; the run is now being derailed by model compatibility, agent output shape, and an over-expensive fallback surfacing in routine swarm roles.
+
+### Observed symptoms from `documentation/exec_logs.txt`
+
+- The round-judge / critic path is still hardwired to a deprecated model. The log repeatedly shows `Grok 4 Fast is deprecated. xAI recommends switching to Grok 4.3` and the failing model is `x-ai/grok-4-fast`.
+- `anthropic/claude-sonnet-4.6` is still being selected for a normal Critic spawn in the first round. That model is too expensive for this swarm and should not appear in routine runtime pools.
+- Several agents fail immediately with `AIAgentStuckInTheNodeException` at `nodeSendToolResult` because the model returned an empty assistant message (`Assistant(parts=[], ...)`) rather than a tool-call/result sequence the graph can continue from.
+- Empty assistant turns are now normalized in the runtime factories via an explicit response processor that converts them into a retryable assistant text instead of letting Koog stall the graph.
+- Some agents also hit `AIAgentMaxNumberOfIterationsReachedException` at the current 25-step cap, but the log shows they often fail after long wall-clock time while budget is still intact. The shared default cap has been raised to 40 so budget, not an arbitrary step ceiling, is the primary limiter.
+- The first round is where the run becomes unstable: the spawn logs show low-cost worker models such as `deepseek/deepseek-v4-flash` and `deepseek/deepseek-v3.2` entering the pool, but at least one researcher still fails before producing any actions, which leaves the budget untouched and the round effectively stalled.
+
+### Root-cause interpretation
+
+- `grok-4-fast` is now a hard compatibility bug, not just a soft preference issue. Any path still pointing at it will continue to fail until the runtime and grader defaults are switched to `grok-4.3`.
+- `sonnet-4.6` should not remain in the normal runtime pool set. It is too expensive for the purpose of the swarm and creates the wrong cost profile for routine Critic work.
+- The `nodeSendToolResult` empty-response failures indicate a model/prompt/tool-graph mismatch, not a budget problem. That path is now guarded by an explicit empty-response recovery processor in the agent factories.
+- The current iteration ceiling was too low for some prompts, and that has been increased in the shared budget config so long but productive runs do not die at 25 steps.
+
+### Immediate model policy changes to make
+
+- Remove `anthropic/claude-sonnet-4.6` from all routine runtime pools and prompt examples. Keep expensive models out of the swarm default path entirely.
+- Replace every `x-ai/grok-4-fast` runtime/grader reference with `x-ai/grok-4.3`.
+- Keep `sonnet-4.6` out of the normal runtime config even if it remains listed as a theoretical opt-in elsewhere; the practical runtime policy should not select it.
+- Prefer a smaller, stable candidate set for first-round worker roles over a broad pool that includes models known to return empty assistant messages.
+
+---
+
+## Run Analysis (2026-05-25)
+
+The latest execution log shows the system is not failing in one place. There are three separate failure classes:
+
+1. The post-round scoring path is running against an empty sealed suite, so every deterministic score collapses to `0.0`.
+2. The OpenRouter/Gemini path is unstable in both agent execution and grading, with repeated `Unexpected response: no tool calls and no content` failures.
+3. The runtime is still emitting a large amount of structurally valid but metadata-incomplete content, so the Critic rejects most KG facts before they can contribute to the knowledge base.
+
+### Observed symptoms from `documentation/exec_logs.txt`
+
+- Sealed-suite scoring is the path that collapses to zero. In rounds 3 and 4, every group logged `tests=0/0` and `SealedTestSuiteEvaluator: no tests parsed ... scoring is forced to zero` around `23:16:17.814-23:16:17.825` and again at `23:13:45.045-23:13:45.054`.
+- The grader-manager verdict path is different: it still emitted non-zero scores before the external judge failed. At `23:16:10.190`, `GraderRunner.judge` logged `plan_execution = 50.0`, `tool_utility = 50.0`, `kg_coherence = 50.0`, and `kb_density = 60.0/65.0/75.0` for the three groups.
+- `GraderRunner.criteria` and `GraderRunner.judge` both failed on `OpenRouterLLMClient`, with the raw symptom `Unexpected response: no tool calls and no content` at `23:14:24.451`, `23:14:06.243`, and `23:16:17.807`.
+- The failed grader models were `google/gemini-2.5-flash` for `GraderBuilder` / `RoundJudge` at `23:16:04.034` and `23:14:06.247`.
+- Main-run researchers were using `google/gemini-3-flash-preview`; at least one of those agent calls also failed on `OpenRouterLLMClient` with the same empty-response error at `23:14:12.120` and `23:14:03.961`.
+- Critic agents using `anthropic/claude-sonnet-4.6` completed more often, but several still ended on `AIAgentMaxNumberOfIterationsReachedException` after spending only part of their budget.
+- Concrete budget/iteration examples: `agent-researcher-dfb0dca9` started with `30.0`, spent `14` actions, and still failed on the 25-step cap; `agent-critic-e9a67187` started with `60.0`, spent only `5` actions, and still hit the same cap.
+- The log also shows that KB/KG export is not empty: `CanonSnapshotExporter` exported non-zero counts such as `kbTotal=20 kgTotal=8`, `kbTotal=24 kgTotal=8`, and `kbTotal=19 kgTotal=8`, so the likely failure is persistence/readback/parsing of the sealed suite, not a total absence of round data.
+- Group budgets were not the primary blocker: agents were failing with substantial remaining budget still available.
+- The main metadata regression is still present: many KG facts are auto-rejected because `wip_task_reference` is missing.
+
+### Root-cause interpretation
+
+- The zero scores are not a scoring-weight bug. They are a suite-hydration bug or suite-generation bug until proven otherwise.
+- The judge failures are not a budget exhaustion symptom. They are provider/model contract failures in OpenRouter.
+- The iteration cap is currently too low for some roles or prompts, but that is secondary to the provider failures and the empty-suite problem.
+- The `wip_task_reference` gate is doing its job, but the agents are not consistently populating the required metadata, so useful work is being discarded before it can affect KB/KG density.
+
+### Model and budget diagnosis
+
+- `google/gemini-2.5-flash` is the highest-risk model in this run because both grader phases failed on it.
+- `google/gemini-3-flash-preview` is also unstable for main-run researchers in this run and should be treated as suspect until a minimal tool-call smoke test passes.
+- `anthropic/claude-sonnet-4.6` is comparatively more reliable in this log, but it is also expensive enough that it should not remain the default for this project. Use it only where a role genuinely needs that capability.
+- Budgets are currently not the limiting factor. The run shows failures at remaining budgets like 49/50, 55/60, and 24/30, which means the work is stopping because of provider errors or step caps, not because the ledger is empty.
+- `maxAgentIterations = 25` is too low for at least some of the current role prompts. One researcher reached 26-38 actions before failing, which is a clear sign that the step cap is cutting off otherwise productive work.
+- Model selection must be centralized in a single config file, not scattered across role factories and runner wiring. The canonical file is `evokammer/core/src/main/kotlin/com/achulkov/evokammer/core/config/ModelSelectionConfig.kt`, and it must define the project-approved defaults, the fallback order, and the allowed expensive exceptions in one place so cost creep is visible and reviewable.
+- Expensive models must be explicit opt-ins only. No silent defaults, no hidden per-role overrides, and no prompt-text fallbacks that reintroduce Sonnet by accident.
+- Current call sites to inventory and migrate are `LifecycleManager`, `CriticPipeline`, `CouncilRunner`, `GraderAgentFactory`, `DifferentialPrivacyTransform`, `EvoKammerRunService`, and any UI or prompt-text defaults that duplicate model IDs.
+- A path-based run-log scanner now exists in `:evokammer:api` to catch recurring signatures like `Grok 4 Fast is deprecated`, `AIAgentStuckInTheNodeException`, `AIAgentMaxNumberOfIterationsReachedException`, and `Unexpected response: no tool calls and no content` on generated log artifacts instead of on this committed evidence file.
+
+---
+
+## Residual Gaps Review (2026-05-23)
+
+The 2026-03-22 remediation pass closed most of the original audit. The blind-scoring/check-in harness is now aligned with the sealed test suite and real telemetry path, so the residual gaps in this plan are elsewhere.
+
+An implementation can expose a role or class without closing the runtime route behind it; the remaining gaps below point to those missing end-to-end paths, not just absent type definitions.
+
+The blind scoring / check-in contract is now covered by the deterministic sealed-suite evaluator, the blind gate registration, and the real check-in telemetry bridge.
 
 ---
 
@@ -27,6 +108,7 @@ The following previously-flagged misalignments were resolved before this plan wa
 | 0-14 | Scoring dimensions hardcoded (§10.17 #3) | `computeAndSubmitSubstrateScores` dynamically maps council-designed dimension IDs. |
 | 0-15 | `CriticPipelineCompleted` promoted count wrong (§10.17 #4) | `CriticSummary` data class with per-outcome counts; event emits real `promoted`/`rejected`/`disputed` counts. |
 | 0-16 | `ringTopology` not threaded to `GroupCoordinator` (§10.8 #1) | `startingField.ringTopology` threaded into `groupCoordinatorProvider`. |
+| 0-17 | Deterministic blind-scoring/check-in harness (§10.12 #2) | `SealedTestSuiteEvaluator` now binds the sealed suite to canonical snapshots, `processDisclosureCheckIns` reports actual test counts, and `publishBlindRoundResult` feeds those same counts into the blind reveal path. |
 
 ---
 
@@ -354,6 +436,18 @@ These items require new subsystems or significant cross-cutting changes. Priorit
 
 ## Recommended Implementation Order
 
+### For the failing run specifically
+
+1. Fix sealed-suite hydration first so deterministic scoring is evaluating real tests instead of `0/0`.
+2. Add a provider-level OpenRouter contract smoke test for `google/gemini-2.5-flash` and `google/gemini-3-flash-preview` that captures the raw response body and validates a non-empty, tool-capable response before any long run starts.
+3. Add an OpenRouter fallback path for grading and judge phases, or pin those phases to a proven model until the provider contract is stable.
+4. Centralize model selection in one config file and remove expensive default models like `anthropic/claude-sonnet-4.6` from the general path unless a role is explicitly exempted.
+5. Inventory every current model-selection call site and remove any per-role hardcoded defaults so the new config is authoritative.
+6. Map each existing role to a cheaper default or approved fallback before removing the old defaults.
+7. Thread `wip_task_reference` through every agent path that emits KG facts, constraints, and plan updates so useful submissions are not auto-rejected.
+8. Raise `maxAgentIterations` or reduce prompt/tool loop complexity for the roles that are repeatedly hitting the 25-step ceiling.
+9. Re-run the full round flow and verify that the system now produces non-zero per-dimension scores and non-empty final outputs.
+
 1. **Sprint 1** (1–2 days): All Priority A items — these are small, surgical, and unblock correctness
 2. **Sprint 2** (3–4 days): B-1 (KGConsistencyChecker), B-2 (schema constraints), B-4 (protocol expiry), B-7 (usedDefault fix)
 3. **Sprint 3** (3–4 days): B-3, B-5, B-6, B-8 — remaining Priority B items
@@ -363,4 +457,4 @@ These items require new subsystems or significant cross-cutting changes. Priorit
 
 ---
 
-*EvoKammer Remediation Plan — 2026-03-22*
+*EvoKammer Remediation Plan — 2026-05-27*

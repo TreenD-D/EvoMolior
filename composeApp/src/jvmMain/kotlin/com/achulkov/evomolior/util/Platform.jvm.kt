@@ -1,12 +1,11 @@
 package com.achulkov.evomolior.util
 
-import com.achulkov.evokammer.agents.di.evokammerAgentsModule
 import com.achulkov.evokammer.api.di.evokammerApiModule
 import com.achulkov.evokammer.api.service.EvoKammerIpcServer
 import com.achulkov.evokammer.competition.di.evokammerCompetitionModule
 import com.achulkov.evokammer.core.di.evokammerCoreModule
 import com.achulkov.evokammer.orchestration.di.evokammerOrchestrationModule
-import com.achulkov.evokammer.sandbox.di.evokammerSandboxModule
+import com.achulkov.evokammer.sandbox.di.sandboxBindingsModule
 import com.achulkov.evokammer.substrate.di.evokammerSubstrateModule
 import com.achulkov.evomolior.data.source.featureflag.FeatureFlagManager
 import com.achulkov.evomolior.data.source.featureflag.NoImplFeatureFlagManager
@@ -39,8 +38,7 @@ internal actual val platformModule: Module = module {
     includes(
         evokammerCoreModule,
         evokammerSubstrateModule,
-        evokammerSandboxModule,
-        evokammerAgentsModule,
+        sandboxBindingsModule(),
         evokammerOrchestrationModule,
         evokammerCompetitionModule,
         evokammerApiModule

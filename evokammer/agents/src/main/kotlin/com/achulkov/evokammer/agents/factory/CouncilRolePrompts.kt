@@ -1,5 +1,6 @@
 package com.achulkov.evokammer.agents.factory
 
+import com.achulkov.evokammer.core.config.ModelSelectionConfig
 import com.achulkov.evokammer.core.model.Role
 
 /**
@@ -165,25 +166,42 @@ object CouncilRolePrompts {
         Use cognitive diversity: different architectures for different roles where possible.
         
         Available models (use these exact model ID strings):
-        - "google/gemini-3-flash-preview" — fast multimodal, ideal for Researcher and Archivist roles
-        - "deepseek/deepseek-v3.2" — strong analytical reasoning, ideal for Planner
-        - "minimax/minimax-m2.5" — efficient general-purpose, ideal for Builder
-        - "anthropic/claude-sonnet-4.6" — best reasoning and critique, ideal for Critic and MetaPlanner
-        - "openai/gpt-oss-120b" — large open-weight model, ideal for Outlier (different architecture)
-        - "google/gemini-2.5-flash" — fast, good fallback for search/read tasks
-        - "openai/gpt-5.4" — strong general purpose fallback
-        - "openai/gpt-4o-mini" — fast, cheap fallback for routine tasks
+        - "${ModelSelectionConfig.DEFAULT_RUNTIME_RESEARCHER_MODEL}" — fast, cheap default for Researcher and Archivist roles
+        - "${ModelSelectionConfig.DEFAULT_RUNTIME_PLANNER_MODEL}" — fast planning default
+        - "${ModelSelectionConfig.DEFAULT_RUNTIME_BUILDER_MODEL}" — efficient general-purpose default for Builder
+        - "${ModelSelectionConfig.DEFAULT_RUNTIME_CRITIC_MODEL}" — cheap critique default for Critic, Auditor, and Inspector
+        - "${ModelSelectionConfig.DEFAULT_RUNTIME_OUTLIER_MODEL}" — different-architecture default for Outlier
+        - "${ModelSelectionConfig.DEFAULT_RUNTIME_FALLBACK_MODEL}" — routine fallback for miscellaneous roles
+        - "deepseek/deepseek-v3.2" — DeepSeek reasoning baseline for planner-like work
+        - "deepseek/deepseek-v4-flash" — fast DeepSeek variant for bulk worker diversity
+        - "deepseek/deepseek-v4-pro" — heavier DeepSeek variant for deeper synthesis
+        - "anthropic/claude-opus-4.6" — expensive opt-in only when explicitly justified
         
         Output format (JSON):
         {
+          "modelPools": {
+            "Researcher": [
+              "${ModelSelectionConfig.DEFAULT_RUNTIME_RESEARCHER_MODEL}",
+              "deepseek/deepseek-v4-flash",
+              "${ModelSelectionConfig.DEFAULT_RUNTIME_OUTLIER_MODEL}"
+            ],
+            "Planner": [
+              "${ModelSelectionConfig.DEFAULT_RUNTIME_PLANNER_MODEL}",
+              "deepseek/deepseek-v3.2",
+              "deepseek/deepseek-v4-pro"
+            ]
+          },
           "modelAssignments": {
-            "Researcher": "google/gemini-3-flash-preview",
-            "Builder": "minimax/minimax-m2.5",
-            "Critic": "anthropic/claude-sonnet-4.6"
+            "Researcher": "${ModelSelectionConfig.DEFAULT_RUNTIME_RESEARCHER_MODEL}",
+            "Builder": "${ModelSelectionConfig.DEFAULT_RUNTIME_BUILDER_MODEL}",
+            "Critic": "${ModelSelectionConfig.DEFAULT_RUNTIME_CRITIC_MODEL}",
+            "Auditor": "${ModelSelectionConfig.DEFAULT_RUNTIME_AUDITOR_MODEL}"
           }
         }
         
-        Assign ALL roles. Output ONLY valid JSON.
+        Assign ALL active roles. Each role must have a 2-3 item model pool when a viable diversity set exists,
+        and modelAssignments should choose one specific member of each pool for compatibility.
+        Output ONLY valid JSON.
     """.trimIndent()
 
     private val SEED_CURATOR = """
@@ -222,24 +240,39 @@ object CouncilRolePrompts {
         - Group profiles match ecology design
         - Seed documents reference appropriate domains
         - Model assignments cover all active roles
+        - The sealed test suite is complete, locked, and hashed before any competing group spawns
         
         If inconsistencies exist, resolve them with the most sensible interpretation.
         
         Output a COMPLETE StartingField JSON matching this exact schema:
         {
-          "runObjective": "string",
-          "rolePrompts": { "RoleName": "prompt text" },
-          "groupProfiles": [{ "groupId": "string", "profileType": "Library" }],
-          "scoringDimensions": [{ "id": "string", "name": "string", "description": "string", "weight": 0.3 }],
-          "checkInSchedule": [{ "checkInIndex": 1, "atGeneration": 5, "description": "string" }],
-          "modelAssignments": { "RoleName": "model-id" },
-          "seedDocuments": [{ "id": "string", "domain": "string", "content": "string" }],
-          "seedFacts": [{ "subject": "string", "relation": "string", "object": "string", "confidence": 0.9 }],
-          "hardConstraints": ["string"],
-          "softConstraints": ["string"],
-          "generationCeiling": 20,
+          "runId": "string",
+          "objective": "string",
           "globalBudgetCeiling": 10000.0,
-          "stageContents": ["Stage 0 context...", "Stage 1 unlocked content..."]
+          "generationCeiling": 20,
+          "groupCount": 2,
+          "groupProfiles": { "group-0": "Library", "group-1": "Factory" },
+          "ringTopology": ["group-0", "group-1"],
+          "checkinMilestones": [5, 10],
+          "leakIntervalGenerations": 20,
+          "dispatchLagGenerations": 5,
+          "graderGroupCount": 1,
+          "rolePrompts": { "Researcher": "prompt text" },
+          "modelPools": { "Researcher": ["model-a", "model-b"], "Planner": ["model-c", "model-d"] },
+          "modelAssignment": { "Researcher": "model-id" },
+          "kgSchema": "{...}",
+          "actionCosts": { "WRITE_STAGING": 1.0 },
+          "nodeGraph": "[{ \"nodeId\": \"n1\", \"description\": \"...\" }]",
+          "primordialKb": [{ "id": "seed_1", "content": "...", "domain": "general" }],
+          "primordialKgFacts": [{ "id": "fact_1", "subject": "A", "relation": "DEPENDS_ON", "object": "B", "confidence": 0.9, "domain": "general" }],
+          "primordialTools": [{ "id": "tool_1", "name": "parse_json", "description": "...", "inputSchemaJson": "{...}", "outputSchemaJson": "{...}", "code": "...", "domain": "general" }],
+          "deathNoteSchema": "{...}",
+          "legacyProtocolTemplate": "{...}",
+          "sealedTestSuiteJson": "{ \"tests\": [ { \"id\": \"test_1\", \"description\": \"snapshot must mention alpha\", \"expectedOutputPattern\": \"alpha\", \"isMandatory\": true, \"penaltyOnFailure\": 1.0 } ], \"failureModes\": [ { \"id\": \"failure_1\", \"description\": \"missing alpha\", \"penaltyWeight\": 0.5 } ] }",
+          "sealedTestSuiteHash": "sha256-hex",
+          "norms": "string",
+          "stageContents": ["Stage 0 context...", "Stage 1 unlocked content..."],
+          "consistencyReport": "string"
         }
         
         Output ONLY valid JSON. This will be machine-parsed.

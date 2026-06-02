@@ -46,14 +46,33 @@ private enum class LogFilter {
  */
 @Composable
 fun EvoKammerLogViewerScreen(
-    viewModel: EvoKammerViewModel = remember { EvoKammerViewModel(StubEvoKammerEngineService()) }
+    viewModel: EvoKammerViewModel = remember { EvoKammerViewModel(StubEvoKammerEngineService()) },
+    archivedRunId: String? = null
 ) {
     val navigate = LocalEvoKammerNavigator.current
     val events by viewModel.recentEvents.collectAsState()
+    val archivedLogText by viewModel.archivedLogText.collectAsState()
     var activeFilter by remember { mutableStateOf(LogFilter.ALL) }
     var autoScroll by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(archivedRunId) {
+        if (archivedRunId != null) {
+            viewModel.loadArchivedLog(archivedRunId)
+        } else {
+            viewModel.clearArchivedLog()
+        }
+    }
+
+    if (archivedRunId != null) {
+        ArchivedLogViewer(
+            archivedRunId = archivedRunId,
+            archivedLogText = archivedLogText,
+            onBack = { navigate(EvoKammerRoute.Dashboard) }
+        )
+        return
+    }
 
     val filtered = remember(events, activeFilter) {
         when (activeFilter) {
@@ -75,7 +94,8 @@ fun EvoKammerLogViewerScreen(
                 events.filterIsInstance<EvoKammerEvent.CriticPipelineCompleted>() +
                 events.filterIsInstance<EvoKammerEvent.GenesisCouncilCompleted>()
             LogFilter.GRADERS -> events.filterIsInstance<EvoKammerEvent.GraderRoundStarted>() +
-                events.filterIsInstance<EvoKammerEvent.GraderRoundCompleted>()
+                events.filterIsInstance<EvoKammerEvent.GraderRoundCompleted>() +
+                events.filterIsInstance<EvoKammerEvent.EngineProgress>().filter { it.phase.startsWith("grader_") }
             // Engine-level lifecycle, Shuru VM status, and generic progress events
             LogFilter.ENGINE -> events.filterIsInstance<EvoKammerEvent.EngineProgress>() +
                 events.filterIsInstance<EvoKammerEvent.ShuruStatus>()
@@ -197,6 +217,89 @@ fun EvoKammerLogViewerScreen(
 }
 
 @Composable
+private fun ArchivedLogViewer(
+    archivedRunId: String,
+    archivedLogText: String?,
+    onBack: () -> Unit
+) {
+    val lines = remember(archivedLogText) {
+        archivedLogText
+            ?.lineSequence()
+            ?.filter { it.isNotBlank() }
+            ?.toList()
+            ?: emptyList()
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Archived Run Log", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text(
+                    "Run: ${archivedRunId}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            OutlinedButton(
+                onClick = {
+                    val text = archivedLogText.orEmpty()
+                    copyToClipboard(text)
+                }
+            ) {
+                Text("Copy All")
+            }
+            OutlinedButton(
+                onClick = {
+                    val text = archivedLogText.orEmpty()
+                    saveTextToFile(text, "evokammer-archived-${archivedRunId.take(8)}.txt")
+                }
+            ) {
+                Text("Export…")
+            }
+        }
+
+        if (archivedLogText.isNullOrBlank()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    "No archived log file found for this run.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            Text(
+                "${lines.size} lines",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            HorizontalDivider()
+            SelectionContainer {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    items(lines) { line ->
+                        Text(
+                            line,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun LogViewerRow(event: EvoKammerEvent) {
     val (prefix, text, tint) = when (event) {
         is EvoKammerEvent.RunStarted -> Triple(
@@ -290,12 +393,32 @@ private fun LogViewerRow(event: EvoKammerEvent) {
             "[${event.groupId}] critic R${event.roundIndex}: +${event.promoted} promoted, -${event.rejected} rejected",
             MaterialTheme.colorScheme.secondary
         )
-        is EvoKammerEvent.EngineProgress -> Triple(
-            "⚙️",
-            "[${event.phase.uppercase()}] ${event.message}" +
-                (event.progressFraction?.let { " (${String.format(Locale.US, "%.0f", it * 100)}%)" } ?: ""),
-            MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        is EvoKammerEvent.EngineProgress -> {
+            val icon = when {
+                event.phase.startsWith("grader_") -> "⚖️"
+                event.phase == "final_answer" -> "🏁"
+                else -> "⚙️"
+            }
+            val color = when {
+                event.phase.startsWith("grader_") -> MaterialTheme.colorScheme.primary
+                event.phase == "final_answer" -> MaterialTheme.colorScheme.secondary
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Triple(
+                icon,
+                if (event.phase.startsWith("grader_")) {
+                    "[GRADER ${event.phase.uppercase()}] ${event.message}" +
+                        (event.progressFraction?.let { " (${String.format(Locale.US, "%.0f", it * 100)}%)" } ?: "")
+                } else if (event.phase == "final_answer") {
+                    "[FINAL ANSWER] ${event.message}" +
+                        (event.progressFraction?.let { " (${String.format(Locale.US, "%.0f", it * 100)}%)" } ?: "")
+                } else {
+                    "[${event.phase.uppercase()}] ${event.message}" +
+                        (event.progressFraction?.let { " (${String.format(Locale.US, "%.0f", it * 100)}%)" } ?: "")
+                },
+                color
+            )
+        }
         is EvoKammerEvent.ShuruStatus -> Triple(
             if (event.available) "✅" else "⚠️",
             "[SHURU] ${if (event.available) "v${event.version}" else "UNAVAILABLE"} — ${event.message}",

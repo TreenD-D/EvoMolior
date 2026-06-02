@@ -108,6 +108,45 @@ class ResourceMapEngine(
     }
 
     /**
+     * Applies explicit WiP completion claims to the shared resource map.
+     *
+     * This is the canonical ownership path for completed work. A task-linked submission
+     * has been promoted, so the corresponding node is now claimed by the submitting group.
+     *
+     * @param completedNodeIds Map of groupId → completed task/node IDs.
+     * @return List of [NodeClaimEvent] emitted for ownership changes.
+     */
+    suspend fun applyWipCompletions(completedNodeIds: Map<String, Collection<String>>): List<NodeClaimEvent> {
+        return mutex.withLock {
+            val events = mutableListOf<NodeClaimEvent>()
+
+            completedNodeIds.forEach { (groupId, nodeIds) ->
+                nodeIds.distinct().forEach { nodeId ->
+                    val node = resourceMap.all().firstOrNull { it.id == nodeId } ?: return@forEach
+                    val floorOwner = floorNodes.entries.firstOrNull { (_, nodeIdsForGroup) -> node.id in nodeIdsForGroup }?.key
+                    val targetOwner = floorOwner ?: groupId
+                    val previousOwner = node.claimedByGroupId
+                    if (previousOwner == targetOwner) return@forEach
+
+                    resourceMap.claim(node.id, targetOwner)
+                    Napier.d("ResourceMapEngine: $targetOwner claims completed node '${node.name}' (${node.resourceType}) prev=${previousOwner ?: "none"}")
+                    events += NodeClaimEvent(
+                        nodeId = node.id,
+                        resourceType = node.resourceType,
+                        previousOwnerId = previousOwner,
+                        newOwnerId = targetOwner,
+                        isFloorReclaim = floorOwner != null,
+                        winnerScore = 1.0,
+                        runnerUpScore = 0.0
+                    )
+                }
+            }
+
+            events
+        }
+    }
+
+    /**
      * Returns the cost multiplier for a [groupId] performing [actionType].
      *
      * Checks all nodes claimed by the group and returns the minimum multiplier

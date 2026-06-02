@@ -19,7 +19,8 @@ import kotlinx.coroutines.flow.receiveAsFlow
  */
 class DispatchRelay(
     private val groupIds: List<String>,
-    private val leakOracle: LeakOracle
+    private val leakOracle: LeakOracle,
+    private val leakTransformer: (suspend (LeakPacket) -> LeakPacket)? = null
 ) {
 
     init {
@@ -45,7 +46,8 @@ class DispatchRelay(
         val neighbours = neighboursOf(sourceGroupId)
         for (targetId in neighbours) {
             val finalMessage = if (message is DispatchMessage.Leak) {
-                val relayedPacket = leakOracle.process(sourceGroupId, targetId, message.packet) ?: continue
+                val preparedPacket = leakTransformer?.invoke(message.packet) ?: message.packet
+                val relayedPacket = leakOracle.process(sourceGroupId, targetId, preparedPacket) ?: continue
                 message.copy(packet = relayedPacket)
             } else {
                 message

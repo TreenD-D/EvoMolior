@@ -102,6 +102,14 @@ class EvolutionarySelector(
         // Unclaimed tasks
         val unclaimedTasks = try { db.wipTaskDao().countUnclaimed(runId, groupId) } catch (e: Exception) { 0 }
 
+        // Plan freshness: stale or absent PLAN_UPDATEs should bias toward Planner allocation.
+        val planIsStale = try {
+            val latestPlan = db.planRegistryDao().getLatest(runId, groupId, limit = 1).firstOrNull()
+            latestPlan == null || (generation - latestPlan.generation) >= 2
+        } catch (e: Exception) {
+            true
+        }
+
         // Recent promotions (stasis proxy)
         val recentPromotions = try {
             db.stagingDao().countPendingByType(runId, groupId, "DOC") == 0 &&
@@ -113,6 +121,7 @@ class EvolutionarySelector(
             stagingBacklog = stagingBacklog,
             toolFailureRate = toolFailureRate,
             unclaimedTasks = unclaimedTasks,
+            planIsStale = planIsStale,
             noRecentPromotions = recentPromotions,
             generation = generation
         )
@@ -164,7 +173,7 @@ class EvolutionarySelector(
             }
 
             // Phase 2+ roles: Planner (once per few generations)
-            if (generation >= 2 && generation % 3 == 0 && remainingSlots >= 1) {
+            if (remainingSlots >= 1 && (signals.planIsStale || (generation >= 2 && generation % 3 == 0))) {
                 entries.add(RoleAllocationEntry(Role.Planner, 1, budgetPerAgent * 1.5))
             }
         }
@@ -212,6 +221,7 @@ class EvolutionarySelector(
         val stagingBacklog: Int,
         val toolFailureRate: Double,
         val unclaimedTasks: Int,
+        val planIsStale: Boolean,
         val noRecentPromotions: Boolean,
         val generation: Int
     )

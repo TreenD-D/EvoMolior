@@ -52,12 +52,12 @@ class ScoringEngine(
      *
      * This should be called by the Watchdog each time [BlindSubmissionGate.revealedScores] emits.
      */
-    suspend fun processRevealedScores(revealed: RevealedScores) {
+    suspend fun processRevealedScores(revealed: RevealedScores): GradingResult? {
         val verdict = try {
             metaJudge.verdict(revealed.roundIndex)
         } catch (e: Exception) {
             Napier.e("ScoringEngine: MetaJudge could not produce verdict for round ${revealed.roundIndex}: ${e.message}")
-            return
+            return null
         }
 
         val roundScores = computeRoundScores(revealed, verdict)
@@ -89,6 +89,8 @@ class ScoringEngine(
                 _failureTelemetry.emit(telemetry)
             }
         }
+
+        return result
     }
 
     // ── Private helpers ─────────────────────────────────────────────────────────

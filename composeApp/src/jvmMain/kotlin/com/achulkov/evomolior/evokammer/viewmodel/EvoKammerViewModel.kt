@@ -5,6 +5,7 @@ import com.achulkov.evokammer.api.model.RunConfig
 import com.achulkov.evokammer.api.service.EngineState
 import com.achulkov.evokammer.api.service.EngineStatus
 import com.achulkov.evokammer.api.service.EvoKammerEngineService
+import com.achulkov.evokammer.api.service.MetaArchiveEntryRecord
 import com.achulkov.evokammer.api.service.MetaArchiveSummary
 import com.achulkov.evokammer.core.model.GradingResult
 import com.achulkov.evokammer.core.model.GroupProfileType
@@ -13,8 +14,12 @@ import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
 import com.achulkov.evomolior.evokammer.substrate.RunInfo
 import com.achulkov.evomolior.evokammer.substrate.SubstrateRepository
 import com.achulkov.evomolior.evokammer.substrate.SubstrateSnapshot
+import com.achulkov.evomolior.evokammer.debug.DebugLogBridge
+import com.achulkov.evomolior.evokammer.toLogLine
+import com.achulkov.evomolior.evokammer.screens.buildArchivedGradingHistory
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -43,10 +48,11 @@ import java.io.File
 class EvoKammerViewModel(
     private val engineService: EvoKammerEngineService,
     substrateFactory: SubstrateDatabaseFactory? = null,
-    dataRootDir: File? = null
+    private val dataRootDir: File? = null,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    externalScope: CoroutineScope? = null
 ) {
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = externalScope ?: CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     // ── Substrate Browser state ────────────────────────────────────────────────
     private val substrateRepository: SubstrateRepository? =
@@ -104,6 +110,16 @@ class EvoKammerViewModel(
     private val _metaArchiveSummary = MutableStateFlow<MetaArchiveSummary?>(null)
     val metaArchiveSummary: StateFlow<MetaArchiveSummary?> = _metaArchiveSummary.asStateFlow()
 
+    private val _roundSummaryEntries = MutableStateFlow<List<MetaArchiveEntryRecord>>(emptyList())
+    val roundSummaryEntries: StateFlow<List<MetaArchiveEntryRecord>> = _roundSummaryEntries.asStateFlow()
+
+    private val _runCompletionEntries = MutableStateFlow<List<MetaArchiveEntryRecord>>(emptyList())
+    val runCompletionEntries: StateFlow<List<MetaArchiveEntryRecord>> = _runCompletionEntries.asStateFlow()
+
+    private val _archivedLogText = MutableStateFlow<String?>(null)
+    /** Archived log text for a historical run, if one has been opened from disk. */
+    val archivedLogText: StateFlow<String?> = _archivedLogText.asStateFlow()
+
     init {
         scope.launch {
             engineService.events.collect { event ->
@@ -124,7 +140,7 @@ class EvoKammerViewModel(
      */
     fun refreshAvailableRuns() {
         val repo = substrateRepository ?: return
-        scope.launch(Dispatchers.IO) {
+        scope.launch(ioDispatcher) {
             val runs = repo.discoverRuns()
             Napier.d("EvoKammerViewModel: discovered ${runs.size} run(s) on disk")
             _availableRuns.value = runs
@@ -167,7 +183,7 @@ class EvoKammerViewModel(
         val runId = _selectedBrowserRunId.value ?: return
         val groupId = _selectedBrowserGroupId.value ?: return
 
-        scope.launch(Dispatchers.IO) {
+        scope.launch(ioDispatcher) {
             _substrateLoading.value = true
             try {
                 val snapshot = repo.loadSnapshot(runId, groupId)
@@ -260,6 +276,95 @@ class EvoKammerViewModel(
         }
     }
 
+    /**
+     * Loads archive state for a historical run so the dashboard, analysis screen, and log viewer
+     * can reopen it after app restart.
+     *
+     * @param runId The archived run identifier.
+     */
+    fun loadArchivedRun(runId: String) {
+        Napier.i("EvoKammerViewModel: loadArchivedRun runId=$runId")
+        _engineState.value = _engineState.value.copy(
+            status = EngineStatus.COMPLETED,
+            activeRunId = runId,
+            currentRound = null
+        )
+        _gradingHistory.value = emptyList()
+
+        scope.launch {
+            try {
+                val summary = engineService.getMetaArchiveSummary(runId)
+                _metaArchiveSummary.value = summary
+                Napier.i("EvoKammerViewModel: archived meta-archive summary loaded total=${summary?.total}")
+            } catch (e: Exception) {
+                Napier.w("EvoKammerViewModel: failed to load archived meta-archive summary: ${e.message}")
+            }
+        }
+        scope.launch {
+            try {
+                val roundSummaries = engineService.getMetaArchiveEntries(runId, "ROUND_SUMMARY")
+                _roundSummaryEntries.value = roundSummaries
+                Napier.i("EvoKammerViewModel: archived round summaries loaded count=${roundSummaries.size}")
+                _gradingHistory.value = buildArchivedGradingHistory(roundSummaries)
+            } catch (e: Exception) {
+                Napier.w("EvoKammerViewModel: failed to load archived round summaries: ${e.message}")
+            }
+        }
+        scope.launch {
+            try {
+                val completionEntries = engineService.getMetaArchiveEntries(runId, "RUN_COMPLETED")
+                _runCompletionEntries.value = completionEntries
+                Napier.i("EvoKammerViewModel: archived run completion entries loaded count=${completionEntries.size}")
+            } catch (e: Exception) {
+                Napier.w("EvoKammerViewModel: failed to load archived run completion entries: ${e.message}")
+            }
+        }
+        loadArchivedLog(runId)
+    }
+
+    /** Clears any archived log text currently displayed by the log viewer. */
+    fun clearArchivedLog() {
+        _archivedLogText.value = null
+    }
+
+    /**
+     * Loads the persisted debug log for an archived run into [archivedLogText].
+     *
+     * @param runId The archived run identifier.
+     */
+    fun loadArchivedLog(runId: String) {
+        scope.launch(ioDispatcher) {
+            try {
+                val logFile = runDebugLogFile(runId)
+                _archivedLogText.value = if (logFile?.exists() == true) logFile.readText() else null
+                Napier.i(
+                    "EvoKammerViewModel: archived log loaded runId=$runId chars=${_archivedLogText.value?.length ?: 0}"
+                )
+            } catch (e: Exception) {
+                Napier.w("EvoKammerViewModel: failed to load archived log for $runId: ${e.message}")
+            }
+        }
+    }
+
+    private fun persistRunDebugLog(runId: String) {
+        scope.launch(ioDispatcher) {
+            try {
+                val logFile = runDebugLogFile(runId) ?: return@launch
+                logFile.parentFile?.mkdirs()
+                val lines = DebugLogBridge.logs.value
+                    .asReversed()
+                    .joinToString(separator = "\n") { it.toLogLine() }
+                logFile.writeText(lines)
+                Napier.i("EvoKammerViewModel: persisted run debug log runId=$runId path=${logFile.absolutePath}")
+            } catch (e: Exception) {
+                Napier.w("EvoKammerViewModel: failed to persist run debug log for $runId: ${e.message}")
+            }
+        }
+    }
+
+    private fun runDebugLogFile(runId: String): File? =
+        dataRootDir?.let { File(it, "evokammer/runs/$runId/results/debug-log.txt") }
+
     private fun handleEvent(event: EvoKammerEvent) {
         // Append to recent events (cap at 500)
         val current = _recentEvents.value.toMutableList()
@@ -277,6 +382,9 @@ class EvoKammerViewModel(
                 _activeGraderGroupIds.value = emptyList() // reset for new run
                 // Refresh to pick up group summaries populated by EvoKammerRunService.startRun
                 refreshState()
+                _roundSummaryEntries.value = emptyList()
+                _runCompletionEntries.value = emptyList()
+                _metaArchiveSummary.value = null
                 // Auto-select this run in the Substrate Browser so data is visible immediately
                 val startedRunId = event.runId
                 if (_selectedBrowserRunId.value != startedRunId) {
@@ -316,6 +424,25 @@ class EvoKammerViewModel(
                         Napier.w("EvoKammerViewModel: failed to load meta-archive summary: ${e.message}")
                     }
                 }
+                scope.launch {
+                    try {
+                        val roundSummaries = engineService.getMetaArchiveEntries(event.runId, "ROUND_SUMMARY")
+                        _roundSummaryEntries.value = roundSummaries
+                        Napier.i("EvoKammerViewModel: round summaries loaded count=${roundSummaries.size}")
+                    } catch (e: Exception) {
+                        Napier.w("EvoKammerViewModel: failed to load round summaries: ${e.message}")
+                    }
+                }
+                scope.launch {
+                    try {
+                        val completionEntries = engineService.getMetaArchiveEntries(event.runId, "RUN_COMPLETED")
+                        _runCompletionEntries.value = completionEntries
+                        Napier.i("EvoKammerViewModel: run completion entries loaded count=${completionEntries.size}")
+                    } catch (e: Exception) {
+                        Napier.w("EvoKammerViewModel: failed to load run completion entries: ${e.message}")
+                    }
+                }
+                persistRunDebugLog(event.runId)
             }
             is EvoKammerEvent.RunAborted -> {
                 Napier.w("EvoKammerViewModel: run aborted runId=${event.runId} reason=${event.reason}")
@@ -325,6 +452,18 @@ class EvoKammerViewModel(
             is EvoKammerEvent.GroupBudgetChanged -> {
                 val summaries = _engineState.value.groupSummaries.map { s ->
                     if (s.groupId == event.groupId) s.copy(remainingBudget = event.remainingBudget) else s
+                }
+                _engineState.value = _engineState.value.copy(groupSummaries = summaries)
+            }
+            is EvoKammerEvent.AgentSpawned -> {
+                val summaries = _engineState.value.groupSummaries.map { s ->
+                    if (s.groupId == event.groupId) s.copy(activeAgents = s.activeAgents + 1) else s
+                }
+                _engineState.value = _engineState.value.copy(groupSummaries = summaries)
+            }
+            is EvoKammerEvent.AgentDied -> {
+                val summaries = _engineState.value.groupSummaries.map { s ->
+                    if (s.groupId == event.groupId) s.copy(activeAgents = maxOf(0, s.activeAgents - 1)) else s
                 }
                 _engineState.value = _engineState.value.copy(groupSummaries = summaries)
             }
@@ -396,6 +535,8 @@ class StubEvoKammerEngineService : EvoKammerEngineService {
         groupSummaries = emptyList()
     )
     override suspend fun getMetaArchiveSummary(runId: String): MetaArchiveSummary? = null
+    override suspend fun getMetaArchiveEntries(runId: String, entryType: String?): List<MetaArchiveEntryRecord> = emptyList()
+    override suspend fun getResultsBundle(runId: String): ByteArray? = null
 }
 
 /** Builds a default [RunConfig] for the setup form. */

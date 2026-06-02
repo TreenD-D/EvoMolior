@@ -23,7 +23,7 @@ data class BudgetConfig(
     val profile: GroupProfile,
     val customCosts: Map<String, Double> = emptyMap(),
     val budgetFloorRatio: Double = 0.05,
-    val maxIterations: Int = 100,
+    val maxIterations: Int = 40,
     val retryHashWindowSize: Int = 20
 ) {
     /**
@@ -50,8 +50,8 @@ data class BudgetConfig(
             ActionType.WEB_FETCH -> profile.webFetchMultiplier
             ActionType.SEARCH_KB -> profile.webFetchMultiplier * 0.5 // Cheaper than web fetch
             ActionType.TOOL_EXEC_SUCCESS -> profile.toolExecMultiplier
-            ActionType.TOOL_EXEC_FAILURE -> profile.toolExecMultiplier * 2.0
-            ActionType.TOOL_EXEC_RETRY -> profile.toolExecMultiplier * 4.0
+            ActionType.TOOL_EXEC_FAILURE -> profile.toolExecMultiplier
+            ActionType.TOOL_EXEC_RETRY -> profile.toolExecMultiplier
             ActionType.INTER_AGENT_MESSAGE -> profile.interAgentMessageMultiplier
             ActionType.WRITE_STAGING -> profile.writeStagingMultiplier
             ActionType.EMIT_FACT -> profile.writeStagingMultiplier

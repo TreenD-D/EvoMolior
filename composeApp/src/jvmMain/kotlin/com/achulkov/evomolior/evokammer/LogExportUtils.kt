@@ -92,7 +92,13 @@ fun EvoKammerEvent.toLogLine(): String = when (this) {
         "🔬 [$groupId] critic R$roundIndex: +$promoted promoted, -$rejected rejected"
 
     is EvoKammerEvent.EngineProgress ->
-        "⚙️ [${phase.uppercase()}] $message${progressFraction?.let { " (${String.format(Locale.US, "%.0f", it * 100)}%)" } ?: ""}"
+        if (phase.startsWith("grader_")) {
+            "⚖️ [GRADER ${phase.uppercase()}] $message${progressFraction?.let { " (${String.format(Locale.US, "%.0f", it * 100)}%)" } ?: ""}"
+        } else if (phase == "final_answer") {
+            "🏁 [FINAL ANSWER] $message${progressFraction?.let { " (${String.format(Locale.US, "%.0f", it * 100)}%)" } ?: ""}"
+        } else {
+            "⚙️ [${phase.uppercase()}] $message${progressFraction?.let { " (${String.format(Locale.US, "%.0f", it * 100)}%)" } ?: ""}"
+        }
 
     is EvoKammerEvent.ShuruStatus ->
         "${if (available) "✅" else "⚠️"} [SHURU] ${if (available) "v$version" else "UNAVAILABLE"} — $message"

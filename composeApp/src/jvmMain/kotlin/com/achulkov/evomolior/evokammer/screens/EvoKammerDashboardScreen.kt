@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.achulkov.evokammer.api.events.EvoKammerEvent
+import com.achulkov.evokammer.api.events.EvoKammerEvent.EngineProgress
 import com.achulkov.evokammer.api.service.EngineStatus
 import com.achulkov.evokammer.api.service.GroupSummary
 import com.achulkov.evomolior.evokammer.EvoKammerRoute
@@ -43,6 +44,7 @@ fun EvoKammerDashboardScreen(
     val state by viewModel.engineState.collectAsState()
     val events by viewModel.recentEvents.collectAsState()
     val history by viewModel.gradingHistory.collectAsState()
+    val availableRuns by viewModel.availableRuns.collectAsState()
     val graderGroupIds by viewModel.activeGraderGroupIds.collectAsState()
 
     Row(modifier = Modifier.fillMaxSize()) {
@@ -172,23 +174,13 @@ fun EvoKammerDashboardScreen(
                 val graderEvents = remember(events, graderGroupIds) {
                     events.filter { e ->
                         e is EvoKammerEvent.GraderRoundStarted ||
-                            e is EvoKammerEvent.GraderRoundCompleted
+                            e is EvoKammerEvent.GraderRoundCompleted ||
+                            (e is EngineProgress && e.phase.startsWith("grader_"))
                     }
                 }
                 graderGroupIds.forEach { graderId ->
-                    // Find the latest completed round for this grader group
-                    val lastCompleted = graderEvents
-                        .filterIsInstance<EvoKammerEvent.GraderRoundCompleted>()
-                        .firstOrNull { it.graderGroupId == graderId }
-                    val lastStarted = graderEvents
-                        .filterIsInstance<EvoKammerEvent.GraderRoundStarted>()
-                        .firstOrNull { it.graderGroupId == graderId }
-                    val statusText = when {
-                        lastCompleted != null ->
-                            "R${lastCompleted.roundIndex} done — ${lastCompleted.totalScoresCollected} scores"
-                        lastStarted != null ->
-                            "R${lastStarted.roundIndex} evaluating…"
-                        else -> "pending"
+                    val graderStatus = remember(graderEvents, graderId) {
+                        buildGraderCardStatus(graderId = graderId, events = graderEvents)
                     }
                     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
                         Row(
@@ -203,10 +195,17 @@ fun EvoKammerDashboardScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    statusText,
+                                    graderStatus.statusText,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                graderStatus.lastPhase?.let { phase ->
+                                    Text(
+                                        "Last phase: ${graderPhaseLabel(phase.phase)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                             Text(
                                 "GRADER",
@@ -233,6 +232,44 @@ fun EvoKammerDashboardScreen(
                     }
                 }
             }
+
+            val completedRuns = remember(availableRuns) { availableRuns.filter { it.isCompleted } }
+            if (completedRuns.isNotEmpty()) {
+                HorizontalDivider()
+                Text("Completed Runs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(completedRuns) { run ->
+                        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    run.runId,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    "${run.groupIds.size} groups • completed run",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(onClick = { navigate(EvoKammerRoute.PostRunAnalysis(run.runId)) }) {
+                                        Text("Analysis")
+                                    }
+                                    TextButton(onClick = { navigate(EvoKammerRoute.SubstrateBrowser(runId = run.runId)) }) {
+                                        Text("Substrate")
+                                    }
+                                    TextButton(onClick = { navigate(EvoKammerRoute.LogViewer(run.runId)) }) {
+                                        Text("Logs")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         VerticalDivider()
@@ -253,7 +290,7 @@ fun EvoKammerDashboardScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { navigate(EvoKammerRoute.LogViewer) }) {
+                TextButton(onClick = { navigate(EvoKammerRoute.LogViewer()) }) {
                     Text("Full Log →")
                 }
                 state.activeRunId?.let {
@@ -283,6 +320,51 @@ fun EvoKammerDashboardScreen(
             }
         }
     }
+}
+
+internal data class GraderCardStatus(
+    val statusText: String,
+    val lastPhase: EngineProgress? = null
+)
+
+internal fun buildGraderCardStatus(graderId: String, events: List<EvoKammerEvent>): GraderCardStatus {
+    val lastCompleted = events
+        .filterIsInstance<EvoKammerEvent.GraderRoundCompleted>()
+        .firstOrNull { it.graderGroupId == graderId }
+    val lastStarted = events
+        .filterIsInstance<EvoKammerEvent.GraderRoundStarted>()
+        .firstOrNull { it.graderGroupId == graderId }
+    val lastPhase = events
+        .filterIsInstance<EngineProgress>()
+        .filter { it.message.contains("[$graderId]") }
+        .lastOrNull()
+
+    val statusText = when {
+        lastCompleted != null ->
+            "R${lastCompleted.roundIndex} done — ${lastCompleted.totalScoresCollected} scores"
+        lastPhase != null ->
+            "${graderPhaseLabel(lastPhase.phase)} — ${lastPhase.message.removePrefix("[$graderId] ").take(70)}"
+        lastStarted != null ->
+            "R${lastStarted.roundIndex} evaluating…"
+        else -> "pending"
+    }
+
+    return GraderCardStatus(statusText = statusText, lastPhase = lastPhase)
+}
+
+internal fun graderPhaseLabel(phase: String): String = when (phase) {
+    "grader_criteria_start" -> "criteria start"
+    "grader_criteria" -> "criteria"
+    "grader_criteria_review" -> "criteria review"
+    "grader_criteria_done" -> "criteria done"
+    "grader_judge_start" -> "judge start"
+    "grader_judge" -> "judge"
+    "grader_judge_result" -> "judge result"
+    "grader_judge_error" -> "judge error"
+    "grader_error" -> "grader error"
+    "grader_start" -> "grader start"
+    "round_summary_result" -> "submission summary"
+    else -> phase.removePrefix("grader_").replace('_', ' ')
 }
 
 @Composable
@@ -385,6 +467,7 @@ internal fun EventLogRow(event: EvoKammerEvent) {
                 "spawn_error" -> "❗"
                 "shuru_unavailable" -> "🚫"
                 "critic" -> "🔬"
+                "final_answer" -> "🏁"
                 else -> "📡"
             }
             icon to "[ENGINE] ${event.message.take(120)}"

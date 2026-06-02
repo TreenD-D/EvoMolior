@@ -30,6 +30,9 @@ class LeakOracle(
     // Round-scoped quota tracking: sourceGroupId -> leakCount
     private val roundQuotas = mutableMapOf<String, Int>()
 
+    // Round-scoped pair tracking: (sourceGroupId, targetGroupId) -> leakCount
+    private val pairQuotas = mutableMapOf<Pair<String, String>, Int>()
+
     /**
      * B-6: Per-group dynamic ceilings overriding `config.maxLeaksPerGroupPerRound`.
      *
@@ -65,7 +68,21 @@ class LeakOracle(
             return null
         }
 
+        val pairKey = sourceGroupId to targetGroupId
+        val pairUsed = pairQuotas.getOrDefault(pairKey, 0)
+        if (pairUsed >= config.maxMigrationPerPairPerRound) {
+            Napier.w(
+                "LeakOracle: migration ceiling exceeded for $sourceGroupId -> $targetGroupId " +
+                    "(pair max=${config.maxMigrationPerPairPerRound} used=$pairUsed)"
+            )
+            _leakEvents.emit(
+                LeakEvent.Blocked(sourceGroupId, targetGroupId, packet.leakId, "migration_ceiling_exceeded")
+            )
+            return null
+        }
+
         roundQuotas[sourceGroupId] = usedQuota + 1
+        pairQuotas[pairKey] = pairUsed + 1
 
         // Apply corruption
         return if (Math.random() < config.corruptionProbability) {
@@ -82,6 +99,7 @@ class LeakOracle(
     /** Resets quotas at the start of each round. */
     fun onRoundStart() {
         roundQuotas.clear()
+        pairQuotas.clear()
         // B-6: Ceilings are NOT cleared on round start; they persist until updated by
         // GroupCoordinator.updateMigrationCeiling() at the next round's spawn phase.
         Napier.d("LeakOracle: quotas reset for new round")
@@ -102,6 +120,9 @@ class LeakOracle(
         Napier.d("LeakOracle: migration ceiling for $groupId set to $effectiveCeiling")
     }
 
+    /** Returns the active ceiling for [groupId], or the static default if none has been patched. */
+    fun ceilingFor(groupId: String): Int = groupCeilings.getOrDefault(groupId, config.maxLeaksPerGroupPerRound)
+
     private fun corruptContent(original: String): String {
         if (original.length < 20) return original.reversed()
         val cutPoint = (original.length * 0.3).toInt()
@@ -116,7 +137,9 @@ data class LeakOracleConfig(
     /** Probability (0.0–1.0) that a leak packet's content is corrupted before delivery. */
     val corruptionProbability: Double = 0.15,
     /** Knowledge domains eligible for leaking (e.g. "general", "tools", "planning"). */
-    val allowedDomains: Set<String> = setOf("general", "tools", "planning", "research")
+    val allowedDomains: Set<String> = setOf("general", "tools", "planning", "research"),
+    /** Maximum number of leaks allowed from one source-target pair per round. */
+    val maxMigrationPerPairPerRound: Int = 3
 )
 
 /** Events emitted by the [LeakOracle]. */

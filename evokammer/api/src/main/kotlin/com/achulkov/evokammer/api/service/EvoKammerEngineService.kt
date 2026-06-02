@@ -2,8 +2,8 @@ package com.achulkov.evokammer.api.service
 
 import com.achulkov.evokammer.api.events.EvoKammerEvent
 import com.achulkov.evokammer.api.model.RunConfig
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.serialization.Serializable
+import kotlinx.coroutines.flow.SharedFlow
 
 /**
  * The main service interface exposed by the EvoKammer engine to the Desktop UI.
@@ -65,6 +65,24 @@ interface EvoKammerEngineService {
      * @param runId The ID of the completed run.
      */
     suspend fun getMetaArchiveSummary(runId: String): MetaArchiveSummary?
+
+    /**
+     * Returns archived meta-archive entries for a completed [runId].
+     *
+     * If [entryType] is non-null, only entries of that type are returned.
+     *
+     * @param runId The completed run ID.
+     * @param entryType Optional entry type filter.
+     */
+    suspend fun getMetaArchiveEntries(runId: String, entryType: String? = null): List<MetaArchiveEntryRecord>
+
+    /**
+     * Returns the downloadable results ZIP for a completed or partial run.
+     *
+     * @param runId The run identifier.
+     * @return ZIP bytes, or null if the bundle is not yet available.
+     */
+    suspend fun getResultsBundle(runId: String): ByteArray?
 }
 
 /**
@@ -77,6 +95,40 @@ interface EvoKammerEngineService {
 data class MetaArchiveSummary(
     val total: Int,
     val byType: Map<String, Int>
+)
+
+/**
+ * A single meta-archive entry exposed to the UI and IPC layer.
+ *
+ * @param id Entry ID.
+ * @param runId Run identifier.
+ * @param entryType Canonical archive type.
+ * @param groupId Owning group, if any.
+ * @param label Human-readable label.
+ * @param contentJson JSON payload stored in the archive.
+ * @param runObjective Objective text of the run.
+ * @param finalScore Final score, if this entry is group-scored.
+ * @param isFromWinner Whether the entry came from the winner.
+ * @param generation Generation captured in the archive.
+ * @param chunkIndex Chunk index for large entries.
+ * @param totalChunks Total chunk count for large entries.
+ * @param archivedAtMs Archive timestamp.
+ */
+@Serializable
+data class MetaArchiveEntryRecord(
+    val id: String,
+    val runId: String,
+    val entryType: String,
+    val groupId: String?,
+    val label: String,
+    val contentJson: String,
+    val runObjective: String,
+    val finalScore: Double?,
+    val isFromWinner: Boolean,
+    val generation: Int,
+    val chunkIndex: Int,
+    val totalChunks: Int,
+    val archivedAtMs: Long
 )
 
 /**
