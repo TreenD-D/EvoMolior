@@ -58,12 +58,14 @@ object OpenRouterModelResolver {
         "google/gemini-2.5-flash-lite" -> OpenRouterModels.Gemini2_5FlashLite
         "google/gemini-2.5-flash" -> OpenRouterModels.Gemini2_5Flash
         "google/gemini-2.5-pro" -> OpenRouterModels.Gemini2_5Pro
+        "qwen/qwen3.5-flash-02-23" -> qwen3_5Flash0223()
         "qwen/qwen3-next-80b-a3b-instruct" -> qwen3Next80bA3bInstruct()
 
         "deepseek/deepseek-chat-v3-0324" -> OpenRouterModels.DeepSeekV30324
         "deepseek/deepseek-v4-flash" -> deepSeekV4Flash()
         "deepseek/deepseek-v3.2" -> deepSeekV32()
         "deepseek/deepseek-v4-pro" -> deepSeekV4Pro()
+        "z-ai/glm-4.7-flash" -> zAiGlm47Flash()
         "nvidia/nemotron-3-nano-30b-a3b" -> nemotron3Nano30bA3b()
         "mistralai/mistral-small-creative" -> mistralSmallCreative()
         "minimax/minimax-m2.5" -> miniMaxM25()
@@ -130,6 +132,30 @@ object OpenRouterModelResolver {
             LLMCapability.Thinking
         ),
         contextLength = 262_144
+    )
+
+    private fun qwen3_5Flash0223(): LLModel = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "qwen/qwen3.5-flash-02-23",
+        capabilities = standardCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice,
+            LLMCapability.Thinking
+        ),
+        contextLength = 262_144,
+        maxOutputTokens = 32_768
+    )
+
+    private fun zAiGlm47Flash(): LLModel = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "z-ai/glm-4.7-flash",
+        capabilities = standardCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice,
+            LLMCapability.Thinking
+        ),
+        contextLength = 262_144,
+        maxOutputTokens = 32_768
     )
 
     private fun nemotron3Nano30bA3b(): LLModel = LLModel(

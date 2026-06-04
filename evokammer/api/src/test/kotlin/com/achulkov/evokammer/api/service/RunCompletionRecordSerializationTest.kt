@@ -13,8 +13,10 @@ class RunCompletionRecordSerializationTest {
             runId = "run-1",
             winnerId = "group-0",
             finalAnswerSummary = "winner=group-0",
+            finalDeliverableHtml = "<!doctype html><html><body><article>done</article></body></html>",
             judgeOutputsByGrader = mapOf("grader-0" to "judge output"),
-            submissionSummariesByGroup = mapOf("group-0" to "submission summary")
+            submissionSummariesByGroup = mapOf("group-0" to "submission summary"),
+            completedAtMs = 42L
         )
 
         val encoded = json.encodeToString(RunCompletionRecord.serializer(), payload)

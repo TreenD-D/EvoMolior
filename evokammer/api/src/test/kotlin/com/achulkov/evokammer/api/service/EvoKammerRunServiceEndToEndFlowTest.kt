@@ -5,13 +5,16 @@ import com.achulkov.evokammer.api.model.RunConfig
 import com.achulkov.evokammer.api.model.RunInputArtifactUpload
 import com.achulkov.evokammer.competition.coordinator.GroupCoordinator
 import com.achulkov.evokammer.competition.grader.GraderGroupManager
+import com.achulkov.evokammer.core.contract.AgentBootContext
 import com.achulkov.evokammer.core.contract.StartingField
 import com.achulkov.evokammer.core.model.GroupProfileType
+import com.achulkov.evokammer.core.model.Role
 import com.achulkov.evokammer.core.model.ScoringDimension
 import com.achulkov.evokammer.orchestration.metaplanner.MetaPlannerRunner
 import com.achulkov.evokammer.orchestration.lifecycle.LifecycleManager
 import com.achulkov.evokammer.sandbox.shuru.ShuruVmManager
 import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
+import com.achulkov.evokammer.substrate.db.entity.StagingSubmissionEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -20,9 +23,12 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayInputStream
 import java.util.Base64
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipInputStream
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -348,6 +354,159 @@ class EvoKammerRunServiceEndToEndFlowTest {
         assertTrue(bundleEntries.keys.contains("inputs/docs/continuation.txt"))
         assertTrue(bundleEntries["inputs/docs/source.txt"]!!.contains("Source run context for continuation."))
         assertTrue(bundleEntries["inputs/docs/continuation.txt"]!!.contains("Fresh continuation context."))
+    }
+
+    @Test
+    fun `browser deliverable archive prefers dedicated final writer html over summary fallback html`() = runBlocking {
+        val tmpDir = createTempDirectory("svc-final-deliverable-flow-test-").toFile()
+        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+        val runId = "run-final-deliverable"
+        val finalWriterAttempts = AtomicInteger(0)
+        val finalWriterModels = ConcurrentLinkedQueue<String>()
+        val sawRetryPrompt = AtomicInteger(0)
+
+        val service = EvoKammerRunService(
+            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
+                LifecycleManager(
+                    runId = runIdValue,
+                    groupId = groupIdValue,
+                    shuruVmManager = ShuruVmManager(),
+                    substrateDatabaseFactory = substrateFactory,
+                    agentJarPath = "/fake/agent.jar",
+                    openRouterApiKey = "sk-test",
+                    groupProfile = groupProfile,
+                    localAgentRunner = { bootContext: AgentBootContext, _ ->
+                        val db = substrateFactory.get(bootContext.runId, bootContext.groupId)
+                        val now = System.currentTimeMillis()
+                        when {
+                            bootContext.role == Role.Archivist &&
+                                bootContext.rolePrompt.contains("Round Submission Summariser") -> {
+                                db.stagingDao().insert(
+                                    StagingSubmissionEntity(
+                                        id = "summary-${bootContext.groupId}-$now",
+                                        agentId = bootContext.agentId,
+                                        role = bootContext.role.name,
+                                        type = "PLAN_UPDATE",
+                                        content = """
+                                            ROUND SUBMISSION SUMMARY
+                                            - Summary fallback drafted.
+                                            - Grader should inspect the publication HTML fallback.
+
+                                            FINAL DELIVERABLE HTML
+                                            <!doctype html>
+                                            <html lang="en">
+                                            <head><meta charset="utf-8"><title>Summary Fallback Article</title></head>
+                                            <body><article><h1>Summary Fallback Article</h1><p>summary path</p></article></body>
+                                            </html>
+                                        """.trimIndent(),
+                                        budgetSignature = "test-summary",
+                                        status = "pending",
+                                        generation = bootContext.generation,
+                                        groupId = bootContext.groupId,
+                                        runId = bootContext.runId,
+                                        submittedAtMs = now,
+                                        reviewedAtMs = null
+                                    )
+                                )
+                            }
+                            bootContext.role == Role.Builder &&
+                                bootContext.rolePrompt.contains("Final Deliverable Writer") -> {
+                                finalWriterModels += bootContext.modelAssignment
+                                val attempt = finalWriterAttempts.incrementAndGet()
+                                if (bootContext.rolePrompt.contains("RETRY CONTEXT")) {
+                                    sawRetryPrompt.incrementAndGet()
+                                }
+                                if (attempt >= 2) {
+                                    db.stagingDao().insert(
+                                        StagingSubmissionEntity(
+                                            id = "final-${bootContext.groupId}-$now",
+                                            agentId = bootContext.agentId,
+                                            role = bootContext.role.name,
+                                            type = "DOC",
+                                            content = """
+                                                <!doctype html>
+                                                <html lang="en">
+                                                <head>
+                                                  <meta charset="utf-8">
+                                                  <meta name="viewport" content="width=device-width, initial-scale=1">
+                                                  <title>Dedicated Final Writer Article</title>
+                                                  <style>body{font-family:system-ui,sans-serif;}section{margin:1rem 0;}</style>
+                                                </head>
+                                                <body>
+                                                  <article>
+                                                    <header><h1>Dedicated Final Writer Article</h1></header>
+                                                    <section><p>publication path</p></section>
+                                                  </article>
+                                                </body>
+                                                </html>
+                                            """.trimIndent(),
+                                            budgetSignature = "test-final",
+                                            status = "pending",
+                                            generation = bootContext.generation,
+                                            groupId = bootContext.groupId,
+                                            runId = bootContext.runId,
+                                            submittedAtMs = now,
+                                            reviewedAtMs = null
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                )
+            },
+            groupCoordinatorProvider = { groupIds, dimensions ->
+                GroupCoordinator(groupIds, dimensions)
+            },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = substrateFactory,
+            metaPlannerRunner = MetaPlannerRunner(),
+            roundHeartbeatIntervalMs = 1L,
+            inspectorCheckIntervalMs = 1L
+        )
+
+        service.startRun(
+            RunConfig(
+                runId = runId,
+                objective = "Create a long-form HTML5 article for mindvortex.app with embedded styles",
+                groupCount = 2,
+                groupProfiles = listOf(
+                    GroupProfileType.Library,
+                    GroupProfileType.Factory
+                ),
+                rounds = 1,
+                roundDurationMinutes = 0,
+                maxAgentsPerGroup = 1,
+                scoringDimensions = listOf(
+                    ScoringDimension(
+                        id = "content_depth",
+                        name = "Content Depth",
+                        description = "Reward substantial content quality.",
+                        weight = 1.0
+                    )
+                ),
+                openRouterApiKey = "sk-test",
+                modelOverrides = mapOf(
+                    Role.Builder.name to "test-builder-model",
+                    Role.Archivist.name to "test-archivist-model"
+                ),
+                isTestRun = true
+            )
+        )
+
+        withTimeout(10_000) {
+            service.events.first { event ->
+                event is EvoKammerEvent.RunCompleted && event.runId == runId
+            }
+        }
+
+        val bundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
+        val finalArticle = assertNotNull(bundleEntries["outputs/final-article.html"])
+        assertTrue(finalArticle.contains("Dedicated Final Writer Article"))
+        assertFalse(finalArticle.contains("Summary Fallback Article"))
+        assertEquals(2, finalWriterAttempts.get())
+        assertTrue(finalWriterModels.all { it == "test-archivist-model" })
+        assertTrue(sawRetryPrompt.get() >= 1)
     }
 
     private fun unzipEntries(bytes: ByteArray): Map<String, String> {

@@ -1,0 +1,26 @@
+Create a publication-ready standalone HTML5 article for mindvortex.app that can be opened directly in a browser and used as a high-quality marketing/editorial asset.
+
+Target audience:
+- adults and young professionals with ADHD or attention-management challenges
+- readers looking for clarity, emotional resonance, practical usefulness, and product credibility
+
+Deliverable requirements:
+- output must be a complete single-file HTML5 document
+- include embedded CSS inside a <style> block; do not rely on external assets or frameworks
+- write a substantial long-form article, not a stub or teaser
+- include a compelling title, meta description, semantic structure, and polished visual hierarchy
+- include at least these sections:
+  - hero/introduction
+  - ADHD challenge framing
+  - how MindVortex helps
+  - product features or workflow
+  - practical tips or use cases
+  - FAQ
+  - clear call to action
+- make the article accessible, readable, and scannable with meaningful headings, lists, and callouts
+- avoid generic fluff and unsupported claims
+
+Quality bar:
+- the final article should feel like it has been iterated on and improved over multiple rounds
+- prefer depth, specificity, and persuasive clarity over shortness
+- the result should look strong enough to hand to a designer/marketer as a serious starting asset

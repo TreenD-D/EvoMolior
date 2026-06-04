@@ -153,7 +153,8 @@ object RolePromptBuilder {
     fun buildRoundSubmissionSummary(
         runObjective: String,
         roundIndex: Int,
-        groupId: String
+        groupId: String,
+        attempt: Int = 1
     ): String = buildString {
         appendLine("""
             You are the Round Submission Summariser for group '$groupId'.
@@ -170,10 +171,29 @@ object RolePromptBuilder {
               2. any notable KB/KG/tool/WIP artifacts,
               3. blockers or unresolved items,
               4. what the grader should inspect first.
+            - If the run objective asks for an HTML or browser-renderable deliverable, append a
+              section with the exact heading: FINAL DELIVERABLE HTML
+              and place the complete standalone HTML5 document immediately under that heading.
+            - If your read tools return little or no evidence, you MUST still write the summary.
+              In that case, state clearly that the substrate was sparse, describe the absence of
+              concrete artefacts, and provide the best objective-grounded deliverable you can.
+            - Do not stop after read-only tool calls. The run is not complete until you call
+              write_staging with the required summary content.
+            - If no prior HTML draft exists but the objective calls for browser-renderable output,
+              author a concise standalone HTML5 document yourself from the run objective.
             - Keep it concise: roughly 5-12 bullet lines or short paragraphs.
             - Then finish with write_death_note as your final action.
         """.trimIndent())
         appendLine()
+        if (attempt > 1) {
+            appendLine("=== RETRY CONTEXT ===")
+            appendLine(
+                "This is retry attempt $attempt because a previous summariser finished without " +
+                    "writing the required PLAN_UPDATE entry."
+            )
+            appendLine("On this retry, prefer acting over exploration: perform at most one quick read, then write_staging.")
+            appendLine()
+        }
         appendLine("=== RUN OBJECTIVE ===")
         appendLine(runObjective)
         appendLine()
@@ -186,6 +206,79 @@ object RolePromptBuilder {
             - read_kb(query, domain?, maxResults?): read your own group's KB
             - read_kg(subject?, relation?, obj?, maxResults?): read your own group's KG
             - write_staging(type, content, wipTaskRef?, speculative?): write the round summary
+            - write_death_note(summary, whatWorked, whatFailed, recommendations): mandatory final action
+        """.trimIndent())
+    }
+
+    /**
+     * Builds the system prompt for the final standalone deliverable writer.
+     *
+     * The agent must synthesise a polished HTML5 document that can be persisted directly as the
+     * run's final downloadable article artifact.
+     *
+     * @param runObjective The run objective that defines the deliverable.
+     * @param roundCount Number of completed rounds in the run.
+     * @param groupId Winning group whose substrate should be synthesised.
+     * @return The complete system prompt.
+     */
+    fun buildFinalDeliverableHtml(
+        runObjective: String,
+        roundCount: Int,
+        groupId: String,
+        attempt: Int = 1
+    ): String = buildString {
+        appendLine("""
+            You are the Final Deliverable Writer for group '$groupId'.
+
+            Your job is to produce the final operator-facing deliverable for this run as a
+            complete standalone HTML5 document that can be opened directly in a browser.
+
+            Required output:
+            - First, write a staging entry with type="DOC".
+            - The content must begin with the exact text: <!doctype html>
+            - Produce a complete HTML document with:
+              1. a strong title,
+              2. a meta description,
+              3. a viewport meta tag,
+              4. embedded <style> rules for polished visual presentation,
+              5. semantic, accessible article markup,
+              6. a navigable structure with a clear header/hero plus at least 6 substantive sections,
+              7. polished body copy that fulfils the run objective,
+              8. no markdown fences, no commentary outside the HTML.
+            - This is the FINAL publication artifact, not a terse summary.
+            - Synthesize the strongest ideas that survived across the completed run. Reconcile
+              contradictions, remove filler, and publish the most compelling final version.
+            - Make the article feel substantial and publication-ready:
+              - aim for roughly 1,200-2,000 words unless the objective explicitly demands brevity,
+              - include a clear narrative arc, scannable subsections, and at least one callout,
+              - include a concrete CTA or next-step section when appropriate for the objective.
+            - Ground the deliverable in the group's available knowledge and the run objective.
+            - Then finish with write_death_note as your final action.
+        """.trimIndent())
+        appendLine()
+        if (attempt > 1) {
+            appendLine("=== RETRY CONTEXT ===")
+            appendLine(
+                "This is retry attempt $attempt because a previous final-deliverable writer finished " +
+                    "without persisting the required standalone HTML document."
+            )
+            appendLine(
+                "On this retry, prefer acting over exploration: perform at most one quick read, then " +
+                    "call write_staging with the full HTML document."
+            )
+            appendLine()
+        }
+        appendLine("=== RUN OBJECTIVE ===")
+        appendLine(runObjective)
+        appendLine()
+        appendLine("=== COMPLETED ROUNDS ===")
+        appendLine(roundCount.toString())
+        appendLine()
+        appendLine("=== AVAILABLE TOOLS ===")
+        appendLine("""
+            - read_kb(query, domain?, maxResults?): inspect your group's knowledge base
+            - read_kg(subject?, relation?, obj?, maxResults?): inspect your group's knowledge graph
+            - write_staging(type, content, wipTaskRef?, speculative?): persist the final HTML document
             - write_death_note(summary, whatWorked, whatFailed, recommendations): mandatory final action
         """.trimIndent())
     }
@@ -310,16 +403,21 @@ object RolePromptBuilder {
         }
         appendLine("=== YOUR TASK ===")
         appendLine("1. Study the run objective and each scoring dimension carefully.")
-        appendLine("2. For each dimension, develop detailed, measurable scoring criteria:")
-        appendLine("   - What evidence in a group's KB/KG would indicate a LOW score (0–30)?")
-        appendLine("   - What evidence would indicate a MEDIUM score (30–70)?")
-        appendLine("   - What evidence would indicate a HIGH score (70–100)?")
-        appendLine("   - List concrete observable indicators that are objective and reproducible.")
+        appendLine("2. For each dimension, develop deep, adversarial, measurable scoring criteria.")
+        appendLine("   Your criteria MUST include all of the following sections:")
+        appendLine("   - LOW / MEDIUM / HIGH evidence thresholds")
+        appendLine("   - concrete observable indicators in KB/KG/staging outputs")
+        appendLine("   - anti-patterns that should trigger score penalties")
+        appendLine("   - failure modes and deceptive signals that can look good but are weak")
+        appendLine("   - tie-breakers for comparing two close groups")
+        appendLine("   - at least one hard-to-fake signal of genuine quality")
         appendLine("3. Write your criteria to staging: write_staging(type=\"PLAN_UPDATE\", content=...)")
-        appendLine("   One write_staging call per dimension is recommended.")
-        appendLine("4. IMPORTANT: Do NOT score any specific group — you have no group data.")
+        appendLine("   Prefer one substantial criteria document per dimension.")
+        appendLine("4. Your rubric must help distinguish shallow output from robust output.")
+        appendLine("   Reward evidence, reproducibility, specificity, and resilience to failure cases.")
+        appendLine("5. IMPORTANT: Do NOT score any specific group — you have no group data.")
         appendLine("   Your job is ONLY to develop the rubric that the Round Judge will use.")
-        appendLine("5. MANDATORY FINAL ACTION: write_death_note summarising your criteria.")
+        appendLine("6. MANDATORY FINAL ACTION: write_death_note summarising your criteria.")
         appendLine()
         appendLine("=== CRITERIA TOOLS ===")
         appendLine("- read_kb(query, domain?, maxResults?): Check your own grader KB for prior criteria")
@@ -365,6 +463,8 @@ object RolePromptBuilder {
         appendLine("For EACH competing group listed above, and for EACH scoring dimension,")
         appendLine("call submit_grading_score with your score and a brief rationale grounded in")
         appendLine("the snapshot evidence and the scoring criteria.")
+        appendLine("Your rationale must mention the strongest evidence, the main weakness,")
+        appendLine("and whether the group shows hard-to-fake competence or only surface polish.")
         appendLine()
         appendLine("Groups to score: ${allGroupSnapshots.keys.joinToString(", ")}")
         appendLine("Dimensions to score: ${dimensionDescriptions.lines().filter { it.contains("•") }.joinToString(", ") { it.substringAfter("[").substringBefore("]") }}")
@@ -390,6 +490,8 @@ object RolePromptBuilder {
         - What would strong, mediocre, and weak performance look like for each dimension?
         - What specific evidence in a KB or KG would distinguish these levels?
         - How can each dimension be scored consistently by a different evaluator?
+        - What failure modes, shortcuts, or superficial artefacts could fool a weak evaluator?
+        - What evidence would prove depth instead of mere output volume?
         
         Your output will be read by the Round Judge who does the actual scoring.
     """.trimIndent()
@@ -405,6 +507,8 @@ object RolePromptBuilder {
         - Specific, observable indicators (e.g. "KB contains >10 documents in domain X")
         - Anti-patterns to penalise (e.g. "circular KB references", "low-confidence KG facts")
         - Edge cases to handle gracefully
+        - Adversarial checks that detect shallow or gamed behaviour
+        - Tie-breakers for groups that look similarly strong at first glance
         
         Do not re-explain the dimensions — focus on the measurement rubric.
         Your criteria must be precise enough that two judges applying them independently
@@ -425,6 +529,8 @@ object RolePromptBuilder {
         - Apply the criteria consistently across all groups — do not adjust for group identity.
         - Quote or reference specific snapshot content in your rationale.
         - If evidence is absent or ambiguous, score conservatively with clear rationale.
+        - Penalise surface-level polish that lacks supporting evidence.
+        - Reward robust, hard-to-fake signs of genuine progress.
         
         You MUST call submit_grading_score for every (group × dimension) combination.
         Missing a group or dimension means that group receives 0 for that dimension.

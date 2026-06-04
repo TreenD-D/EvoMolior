@@ -87,7 +87,11 @@ class AgentRunner(
             finalResult = runWithOpenRouterProviderRetry("AgentRunner[${bootContext.agentId}]") {
                 agentContext.agent.run(bootContext.rolePrompt)
             }
-            requireProductiveAgentOutcome("AgentRunner[${bootContext.agentId}]", finalResult!!, agentContext.budgetLedger)
+            finalResult = requireProductiveAgentOutcome(
+                "AgentRunner[${bootContext.agentId}]",
+                finalResult!!,
+                agentContext.budgetLedger
+            )
             val actionCount = agentContext.budgetLedger.snapshot().actionLog.size
             if (actionCount == 0) {
                 factory.writeEmergencyDeathNote(

@@ -6,14 +6,22 @@ import com.achulkov.evokammer.competition.grader.MetaJudge
 import com.achulkov.evokammer.competition.grader.GraderGroupManager
 import com.achulkov.evokammer.competition.scoring.BlindSubmissionGate
 import com.achulkov.evokammer.competition.scoring.ScoringEngine
+import com.achulkov.evokammer.core.contract.AgentBootContext
+import com.achulkov.evokammer.core.model.GroupProfile
+import com.achulkov.evokammer.core.model.GroupProfileType
 import com.achulkov.evokammer.core.model.ScoringDimension
 import com.achulkov.evokammer.core.model.SubmissionType
+import com.achulkov.evokammer.orchestration.lifecycle.LifecycleManager
 import com.achulkov.evokammer.orchestration.metaplanner.MetaPlannerRunner
+import com.achulkov.evokammer.sandbox.shuru.ShuruVmManager
 import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
 import com.achulkov.evokammer.substrate.db.entity.StagingSubmissionEntity
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runTest
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -425,5 +433,120 @@ class EvoKammerRunServiceGraderCriteriaReviewTest {
         assertNotNull(reviewed)
         assertEquals("critic-group-0-round-0", reviewed.criticAgentId)
         assertEquals("rejected", reviewed.status)
+    }
+
+    @Test
+    fun `round submission summaries retry once and capture staged marker before agent exit`() = runBlocking {
+        val dataRoot = createTempDirectory("round-summary-retry-test").toFile()
+        val factory = SubstrateDatabaseFactory(dataRoot)
+        val runId = "run-round-summary-retry"
+        val groupId = "group-0"
+        val attemptCounter = AtomicInteger(0)
+
+        val lifecycleManager = LifecycleManager(
+            runId = runId,
+            groupId = groupId,
+            shuruVmManager = ShuruVmManager(),
+            substrateDatabaseFactory = factory,
+            agentJarPath = "/fake/agent.jar",
+            openRouterApiKey = "sk-test",
+            groupProfile = GroupProfile.default(GroupProfileType.Library),
+            localAgentRunner = { bootContext: AgentBootContext, _ ->
+                when (attemptCounter.incrementAndGet()) {
+                    1 -> delay(50)
+                    2 -> {
+                        factory.get(runId, groupId).stagingDao().insert(
+                            StagingSubmissionEntity(
+                                id = "round-summary-2",
+                                agentId = bootContext.agentId,
+                                role = bootContext.role.name,
+                                type = SubmissionType.PLAN_UPDATE.name,
+                                content = """
+                                    ROUND SUBMISSION SUMMARY
+                                    - Retry succeeded.
+
+                                    FINAL DELIVERABLE HTML
+                                    <!doctype html>
+                                    <html lang="en"><head><meta charset="utf-8"><title>Retry Summary</title></head><body><article><h1>Retry Summary</h1></article></body></html>
+                                """.trimIndent(),
+                                budgetSignature = "system:test",
+                                status = "pending",
+                                generation = 1,
+                                groupId = groupId,
+                                runId = runId,
+                                submittedAtMs = System.currentTimeMillis(),
+                                reviewedAtMs = null
+                            )
+                        )
+                        delay(5_000)
+                    }
+                }
+            }
+        )
+
+        val service = EvoKammerRunService(
+            lifecycleManagerProvider = { _, _, _, _, _ ->
+                throw IllegalStateException("LifecycleManager provider should not be used in this focused round-summary test")
+            },
+            groupCoordinatorProvider = { groupIds, dimensions ->
+                GroupCoordinator(groupIds, dimensions)
+            },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = factory,
+            metaPlannerRunner = MetaPlannerRunner()
+        )
+
+        val liveManagersField = service::class.java.getDeclaredField("liveLifecycleManagers").apply {
+            isAccessible = true
+        }
+        @Suppress("UNCHECKED_CAST")
+        val liveManagers = liveManagersField.get(service) as MutableMap<String, LifecycleManager>
+        liveManagers[groupId] = lifecycleManager
+
+        val activeProfilesField = service::class.java.getDeclaredField("activeGroupProfiles").apply {
+            isAccessible = true
+        }
+        activeProfilesField.set(service, listOf(GroupProfileType.Library))
+
+        val spawnRoundSubmissionSummaries = service::class.declaredFunctions.first {
+            it.name == "spawnRoundSubmissionSummaries"
+        }.apply {
+            isAccessible = true
+        }
+
+        val config = com.achulkov.evokammer.api.model.RunConfig(
+            runId = runId,
+            objective = "Create an HTML5 article for mindvortex.app",
+            groupCount = 1,
+            groupProfiles = listOf(GroupProfileType.Library),
+            rounds = 1,
+            roundDurationMinutes = 1,
+            maxAgentsPerGroup = 1,
+            scoringDimensions = listOf(
+                ScoringDimension(
+                    id = "accuracy",
+                    name = "Accuracy",
+                    description = "Reward evidence-based evaluation.",
+                    weight = 1.0
+                )
+            ),
+            openRouterApiKey = "sk-test",
+            isTestRun = true
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val summaries = withTimeout(4_000) {
+            spawnRoundSubmissionSummaries.callSuspend(
+                service,
+                config,
+                listOf(groupId),
+                0
+            ) as Map<String, String?>
+        }
+
+        assertEquals(2, attemptCounter.get())
+        assertTrue(summaries[groupId].orEmpty().contains("ROUND SUBMISSION SUMMARY"))
+        assertTrue(summaries[groupId].orEmpty().contains("FINAL DELIVERABLE HTML"))
+        assertTrue(summaries[groupId].orEmpty().contains("Retry Summary"))
     }
 }

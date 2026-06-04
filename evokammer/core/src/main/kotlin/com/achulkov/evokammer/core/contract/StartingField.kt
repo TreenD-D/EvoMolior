@@ -119,7 +119,7 @@ data class StartingField(
                 checkinMilestones = listOf(10, 25, 50, 75, 100),
                 leakIntervalGenerations = 20,
                 dispatchLagGenerations = 5,
-                graderGroupCount = if (resolvedGroupCount == 1) 0 else 1,
+                graderGroupCount = if (resolvedGroupCount == 1) 0 else 3,
                 rolePrompts = emptyMap(),
                 modelAssignment = emptyMap(),
                 modelPools = emptyMap(),

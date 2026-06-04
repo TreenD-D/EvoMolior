@@ -6,6 +6,7 @@ import com.achulkov.evokammer.competition.grader.GraderGroup
 import com.achulkov.evokammer.competition.leaks.DifferentialPrivacyTransform
 import com.achulkov.evokammer.competition.leaks.LeakOracle
 import com.achulkov.evokammer.competition.leaks.LeakOracleConfig
+import com.achulkov.evokammer.core.config.ModelSelectionConfig
 import com.achulkov.evokammer.competition.resourcemap.NodeYieldApplier
 import com.achulkov.evokammer.competition.resourcemap.ResourceMap
 import com.achulkov.evokammer.competition.resourcemap.ResourceNode
@@ -42,13 +43,14 @@ class GroupCoordinator(
     dimensions: List<ScoringDimension>,
     leakConfig: LeakOracleConfig = LeakOracleConfig(),
     resourceNodes: List<ResourceNode> = emptyList(),
-    openRouterApiKey: String? = null
+    openRouterApiKey: String? = null,
+    privacyTransformModelId: String? = null
 ) {
 
     val leakOracle = LeakOracle(leakConfig)
     /** Phase 5: differential privacy transform for leak content. Null if no API key is provided. */
     val privacyTransform: DifferentialPrivacyTransform? =
-        openRouterApiKey?.let { DifferentialPrivacyTransform(it) }
+        openRouterApiKey?.let { DifferentialPrivacyTransform(it, modelId = privacyTransformModelId ?: ModelSelectionConfig.DEFAULT_LEAK_TRANSFORM_MODEL) }
 
     val dispatchRelay = DispatchRelay(
         groupIds = groupIds,

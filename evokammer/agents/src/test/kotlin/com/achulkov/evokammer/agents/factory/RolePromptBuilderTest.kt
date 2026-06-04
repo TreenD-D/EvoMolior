@@ -5,6 +5,7 @@ import com.achulkov.evokammer.core.model.Role
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Verifies that ordinary agent prompts only include the constraint-framed task context.
@@ -89,5 +90,36 @@ class RolePromptBuilderTest {
         assertFalse(prompt.contains(hiddenGoal, ignoreCase = true))
         assertFalse(prompt.contains("GOAL:", ignoreCase = true))
         assertContains(prompt, "Constraint: only use disclosed stage constraints.")
+    }
+
+    @Test
+    fun `round submission summary prompt requires fallback write even when substrate is sparse`() {
+        val prompt = RolePromptBuilder.buildRoundSubmissionSummary(
+            runObjective = "Create a standalone HTML article for mindvortex.app",
+            roundIndex = 0,
+            groupId = "group-0",
+            attempt = 2
+        )
+
+        assertContains(prompt, "If your read tools return little or no evidence, you MUST still write the summary.")
+        assertContains(prompt, "Do not stop after read-only tool calls.")
+        assertContains(prompt, "If no prior HTML draft exists")
+        assertContains(prompt, "=== RETRY CONTEXT ===")
+        assertTrue(prompt.contains("attempt 2", ignoreCase = true))
+    }
+
+    @Test
+    fun `final deliverable prompt requires publication grade html article`() {
+        val prompt = RolePromptBuilder.buildFinalDeliverableHtml(
+            runObjective = "Create a standalone HTML article for mindvortex.app",
+            roundCount = 10,
+            groupId = "group-0"
+        )
+
+        assertContains(prompt, "embedded <style> rules")
+        assertContains(prompt, "at least 6 substantive sections")
+        assertContains(prompt, "FINAL publication artifact")
+        assertContains(prompt, "roughly 1,200-2,000 words")
+        assertContains(prompt, "CTA or next-step section")
     }
 }

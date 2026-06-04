@@ -28,6 +28,8 @@ private const val JUDGE_MAX_KG_FACTS = 40
 private const val JUDGE_MAX_STAGING_ENTRIES = 8
 private const val JUDGE_MAX_CONTENT_CHARS = 600
 private const val JUDGE_MAX_CRITERIA_ENTRY_CHARS = 900
+private const val CRITERIA_SEED_MAX_KB_DOCS = 4
+private const val CRITERIA_SEED_MAX_KB_CHARS = 700
 
 /**
  * Orchestrates a full Grader Group evaluation round.
@@ -55,7 +57,8 @@ class GraderRunner(
     private val openRouterApiKey: String,
     private val substrateFactory: SubstrateDatabaseFactory,
     private val localAgentRunner: suspend (context: GraderAgentContext) -> String,
-    private val graderAgentTimeoutMs: Long = 4 * 60_000L
+    private val graderAgentTimeoutMs: Long = 4 * 60_000L,
+    private val graderModelOverride: String? = null
 ) {
     /**
      * Runs a full grader evaluation round.
@@ -202,6 +205,13 @@ class GraderRunner(
                         )
 
                         val failureTelemetryContext = readFailureTelemetryContext(graderDb, runId, graderGroupId)
+                        val seedContext = readGraderSeedContext(graderDb, runId, graderGroupId)
+                        val seedPrefix = seedContext?.let {
+                            buildString {
+                                appendLine("=== GRADER FOUNDING BRIEF ===")
+                                appendLine(it)
+                            }
+                        }
                         val telemetryPrefix = failureTelemetryContext?.let {
                             buildString {
                                 appendLine("=== RECENT FAILURE TELEMETRY ===")
@@ -209,16 +219,28 @@ class GraderRunner(
                             }
                         }
 
-                        var previousCriteria: String? = telemetryPrefix
+                        var previousCriteria: String? = buildString {
+                            seedPrefix?.let { appendLine(it) }
+                            telemetryPrefix?.let { appendLine(it) }
+                        }.ifBlank { null }
                         for (role in listOf(Role.GraderResearcher, Role.GraderBuilder)) {
                             onProgress?.invoke("[$graderGroupId] criteria phase: spawning $role for round $roundIndex")
                             Napier.d("GraderRunner: criteria phase spawning $role for $graderGroupId round=$roundIndex")
+                            val existingCriteriaIds = graderDb.stagingDao().getAll(runId, graderGroupId)
+                                .filter {
+                                    it.type == "PLAN_UPDATE" &&
+                                        it.role == role.name &&
+                                        it.generation == roundIndex + 1
+                                }
+                                .map { it.id }
+                                .toSet()
                             val context = factory.createCriteria(
                                 role = role,
                                 runId = runId,
                                 roundIndex = roundIndex,
                                 runObjective = runObjective,
                                 scoringDimensions = scoringDimensions,
+                                modelOverride = graderModelOverride,
                                 previousCriteria = previousCriteria
                             )
                             val output = try {
@@ -232,7 +254,21 @@ class GraderRunner(
                                 Napier.w("GraderRunner: criteria $role failed for $graderGroupId: ${e.message}")
                                 "[$role criteria phase terminated: ${e.message?.take(200)}]"
                             }
+                            ensureCriteriaPersisted(
+                                graderDb = graderDb,
+                                runId = runId,
+                                graderGroupId = graderGroupId,
+                                roundIndex = roundIndex,
+                                role = role,
+                                runObjective = runObjective,
+                                scoringDimensions = scoringDimensions,
+                                failureTelemetryContext = failureTelemetryContext,
+                                seedContext = seedContext,
+                                agentOutput = output,
+                                existingCriteriaIds = existingCriteriaIds
+                            )
                             previousCriteria = buildString {
+                                seedPrefix?.let { appendLine(it) }
                                 telemetryPrefix?.let { appendLine(it) }
                                 appendLine("=== ${role.name} CRITERIA ===")
                                 appendLine(output.take(3_000))
@@ -346,31 +382,40 @@ class GraderRunner(
                             }
                         }
                         val allGroupSnapshots = snapshotExports.mapValues { it.value.await() }
+                        val judgeOutputs = mutableListOf<String>()
+                        for (targetGroupId in competingGroupIds) {
+                            onProgress?.invoke("[$graderGroupId] RoundJudge spawning for round $roundIndex — scoring $targetGroupId")
+                            Napier.i("GraderRunner: spawning RoundJudge for $graderGroupId round=$roundIndex target=$targetGroupId")
 
-                        onProgress?.invoke("[$graderGroupId] RoundJudge spawning for round $roundIndex — ${competingGroupIds.size} groups to score")
-                        Napier.i("GraderRunner: spawning RoundJudge for $graderGroupId round=$roundIndex")
+                            val judgeContext = factory.createRoundJudge(
+                                runId = runId,
+                                roundIndex = roundIndex,
+                                runObjective = runObjective,
+                                scoringDimensions = scoringDimensions,
+                                criteriaContext = criteriaContext,
+                                allGroupSnapshots = mapOf(targetGroupId to allGroupSnapshots.getValue(targetGroupId)),
+                                modelOverride = graderModelOverride
+                            )
 
-                        val judgeContext = factory.createRoundJudge(
-                            runId = runId,
-                            roundIndex = roundIndex,
-                            runObjective = runObjective,
-                            scoringDimensions = scoringDimensions,
-                            criteriaContext = criteriaContext,
-                            allGroupSnapshots = allGroupSnapshots
-                        )
-
-                        var judgeOutput = ""
-                        try {
-                            judgeOutput = withProgressHeartbeat(
-                                onProgress = onProgress,
-                                heartbeatMessage = "[$graderGroupId] RoundJudge still scoring round $roundIndex — ${competingGroupIds.size} groups"
-                            ) {
-                                withTimeout(graderAgentTimeoutMs * 2) {  // RoundJudge needs more time — scores N×M combinations
-                                    localAgentRunner(judgeContext)
+                            val judgeOutput = try {
+                                withProgressHeartbeat(
+                                    onProgress = onProgress,
+                                    heartbeatMessage = "[$graderGroupId] RoundJudge still scoring round $roundIndex — $targetGroupId"
+                                ) {
+                                    withTimeout(graderAgentTimeoutMs) {
+                                        localAgentRunner(judgeContext)
+                                    }
                                 }
+                            } catch (e: Exception) {
+                                Napier.w(
+                                    "GraderRunner: RoundJudge failed for $graderGroupId round=$roundIndex target=$targetGroupId: ${e.message}"
+                                )
+                                ""
                             }
-                        } catch (e: Exception) {
-                            Napier.w("GraderRunner: RoundJudge failed for $graderGroupId round=$roundIndex: ${e.message}")
+                            judgeOutputs += buildString {
+                                append("[$targetGroupId] ")
+                                append(judgeOutput.ifBlank { "no judge narrative returned" })
+                            }
                         }
 
                         // Submit whatever scores were collected (even if judge partially failed)
@@ -392,7 +437,7 @@ class GraderRunner(
                             }
                         }
                         onProgress?.invoke("[$graderGroupId] judging phase complete for round $roundIndex — $totalScores scores submitted")
-                        graderGroupId to judgeOutput
+                        graderGroupId to judgeOutputs.joinToString(" | ")
                     } catch (e: Exception) {
                         Napier.w("GraderRunner: judging phase failed for $graderGroupId round=$roundIndex: ${e.message}")
                         graderGroupId to ""
@@ -445,6 +490,30 @@ class GraderRunner(
         }
     }
 
+    internal suspend fun readGraderSeedContext(
+        graderDb: com.achulkov.evokammer.substrate.db.EvoKammerDatabase,
+        runId: String,
+        graderGroupId: String
+    ): String? {
+        val entries = try {
+            graderDb.knowledgeBaseDao().search(
+                runId = runId,
+                groupId = graderGroupId,
+                query = "grader",
+                limit = CRITERIA_SEED_MAX_KB_DOCS
+            ).filter { it.domain == "grader_seed" || it.domain == "evaluation" }
+        } catch (e: Exception) {
+            Napier.w("GraderRunner: failed to read grader seed context for $graderGroupId: ${e.message}")
+            emptyList()
+        }
+
+        if (entries.isEmpty()) return null
+
+        return entries.joinToString("\n\n") { entry ->
+            "[Seed: ${entry.domain}]\n${entry.content.compactText(CRITERIA_SEED_MAX_KB_CHARS)}"
+        }
+    }
+
     private fun buildJudgeCriteriaContext(
         graderGroupId: String,
         roundIndex: Int,
@@ -490,6 +559,108 @@ class GraderRunner(
         appendLine("[Criteria by ${entry.role}]")
         appendLine("Type: ${entry.type} | Status: ${entry.status} | Generation: ${entry.generation}")
         appendLine(entry.content.compactText(JUDGE_MAX_CRITERIA_ENTRY_CHARS))
+    }
+
+    private suspend fun ensureCriteriaPersisted(
+        graderDb: com.achulkov.evokammer.substrate.db.EvoKammerDatabase,
+        runId: String,
+        graderGroupId: String,
+        roundIndex: Int,
+        role: Role,
+        runObjective: String,
+        scoringDimensions: List<ScoringDimension>,
+        failureTelemetryContext: String?,
+        seedContext: String?,
+        agentOutput: String,
+        existingCriteriaIds: Set<String>
+    ) {
+        val currentCriteriaEntries = graderDb.stagingDao().getAll(runId, graderGroupId)
+            .filter {
+                it.type == "PLAN_UPDATE" &&
+                    it.role == role.name &&
+                    it.generation == roundIndex + 1
+            }
+
+        if (currentCriteriaEntries.any { it.id !in existingCriteriaIds }) {
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        val syntheticCriteria = StagingSubmissionEntity(
+            id = "synthetic-${role.name.lowercase()}-$graderGroupId-r${roundIndex + 1}",
+            agentId = "system-${role.name.lowercase()}",
+            role = role.name,
+            type = "PLAN_UPDATE",
+            content = synthesizeCriteriaDocument(
+                role = role,
+                runObjective = runObjective,
+                scoringDimensions = scoringDimensions,
+                failureTelemetryContext = failureTelemetryContext,
+                seedContext = seedContext,
+                agentOutput = agentOutput
+            ),
+            budgetSignature = "system:grader-criteria-fallback",
+            status = "promoted",
+            generation = roundIndex + 1,
+            groupId = graderGroupId,
+            runId = runId,
+            submittedAtMs = now,
+            reviewedAtMs = now,
+            initialTrustScore = 0.85
+        )
+        graderDb.stagingDao().insert(syntheticCriteria)
+        Napier.w(
+            "GraderRunner: persisted synthetic criteria for $graderGroupId round=$roundIndex role=${role.name} because no PLAN_UPDATE was staged"
+        )
+    }
+
+    private fun synthesizeCriteriaDocument(
+        role: Role,
+        runObjective: String,
+        scoringDimensions: List<ScoringDimension>,
+        failureTelemetryContext: String?,
+        seedContext: String?,
+        agentOutput: String
+    ): String = buildString {
+        appendLine("SYNTHETIC GRADER CRITERIA FALLBACK")
+        appendLine("Role: ${role.name}")
+        appendLine("Objective: $runObjective")
+        seedContext?.takeIf { it.isNotBlank() }?.let {
+            appendLine()
+            appendLine("Founding brief:")
+            appendLine(it.take(1_000))
+        }
+        failureTelemetryContext?.takeIf { it.isNotBlank() }?.let {
+            appendLine()
+            appendLine("Recent failure telemetry:")
+            appendLine(it.take(1_000))
+        }
+        appendLine()
+        scoringDimensions.forEach { dimension ->
+            appendLine("Dimension: ${dimension.id} — ${dimension.name}")
+            appendLine("Weight: ${String.format(java.util.Locale.ROOT, "%.2f", dimension.weight)}")
+            appendLine("Description: ${dimension.description}")
+            appendLine("LOW (0-30): sparse, generic, unsupported, or contradictory evidence.")
+            appendLine("MEDIUM (30-70): some relevant evidence exists, but coverage or rigor is partial.")
+            appendLine("HIGH (70-100): strong, specific, cross-supported evidence and resilient execution.")
+            appendLine("Observable indicators:")
+            appendLine("- cites concrete artefacts, KB entries, or KG facts rather than vague claims")
+            appendLine("- demonstrates reasoning linked to the run objective and this dimension")
+            appendLine("- shows consistency between proposed approach and produced evidence")
+            appendLine("Anti-patterns:")
+            appendLine("- polished wording without evidentiary support")
+            appendLine("- repetitive or inflated content volume masquerading as depth")
+            appendLine("- contradictions, missing edge cases, or weak traceability")
+            appendLine("Hard-to-fake signal:")
+            appendLine("- artifacts, facts, and rationale mutually reinforce each other under scrutiny")
+            appendLine("Tie-breaker:")
+            appendLine("- prefer the group with more falsifiable, reproducible, and directly evidenced work")
+            appendLine()
+        }
+        if (agentOutput.isNotBlank()) {
+            appendLine("Recovered agent output:")
+            appendLine(agentOutput.take(1_500))
+        }
     }
 
     private fun String.compactText(maxChars: Int): String = if (length <= maxChars) this
@@ -563,6 +734,7 @@ class GraderRunner(
                 runObjective = runObjective,
                 scoringDimensions = scoringDimensions,
                 canonSnapshot = snapshot,
+                modelOverride = graderModelOverride,
                 previousFindings = previousFindings
             )
 

@@ -477,12 +477,13 @@ class GraderAgentFactory(
         )
 
         val groupList = allGroupSnapshots.keys.joinToString(", ")
+        val targetGroupRef = allGroupSnapshots.keys.singleOrNull() ?: "all-groups"
         return GraderAgentContext(
             agentId = agentId,
             role = Role.GraderCritic,  // RoundJudge uses the GraderCritic slot
             agent = agent,
             budgetLedger = budgetLedger,
-            targetGroupId = "all-groups",
+            targetGroupId = targetGroupRef,
             roundIndex = roundIndex,
             systemPrompt = systemPrompt,
             taskPrompt = "Score all competing groups using the criteria and canon snapshots in your system prompt. " +

@@ -96,36 +96,24 @@ class GraderRunnerJudgingPhaseTest {
 
         var capturedPromptText = ""
         var capturedRole: Role? = null
-        var capturedTargetGroupId: String? = null
+        val capturedTargetGroupIds = mutableListOf<String>()
         var capturedTaskPrompt: String? = null
         val runner = GraderRunner(
             openRouterApiKey = "sk-test",
             substrateFactory = factory,
             localAgentRunner = { context ->
                 capturedRole = context.role
-                capturedTargetGroupId = context.targetGroupId
+                capturedTargetGroupIds += context.targetGroupId
                 capturedTaskPrompt = context.taskPrompt
                 graderGroupManager.submitScores(
                     graderGroupId = graderGroupId,
-                    targetGroupId = competingGroupIds[0],
+                    targetGroupId = context.targetGroupId,
                     roundIndex = 0,
                     scores = listOf(
                         DimensionScore(
                             dimensionId = "accuracy",
-                            rawScore = 88.0,
-                            justification = "Prompt contained the grader criteria and group-0 snapshot."
-                        )
-                    )
-                )
-                graderGroupManager.submitScores(
-                    graderGroupId = graderGroupId,
-                    targetGroupId = competingGroupIds[1],
-                    roundIndex = 0,
-                    scores = listOf(
-                        DimensionScore(
-                            dimensionId = "accuracy",
-                            rawScore = 72.0,
-                            justification = "Prompt contained the grader criteria and group-1 snapshot."
+                            rawScore = if (context.targetGroupId == competingGroupIds[0]) 88.0 else 72.0,
+                            justification = "Prompt contained the grader criteria and ${context.targetGroupId} snapshot."
                         )
                     )
                 )
@@ -145,7 +133,7 @@ class GraderRunnerJudgingPhaseTest {
         )
 
         assertEquals(Role.GraderCritic, capturedRole)
-        assertEquals("all-groups", capturedTargetGroupId)
+        assertEquals(competingGroupIds, capturedTargetGroupIds)
         assertNotNull(capturedTaskPrompt)
         assertContains(capturedTaskPrompt!!, "submit_grading_score")
 

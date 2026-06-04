@@ -172,6 +172,26 @@ Manages the evolutionary run lifecycle:
 This launches both the main EvoMolior app and the EvoKammer control panel window.
 On macOS, the desktop launcher currently runs with `-Xint` because Corretto 17.0.7 has been aborting in HotSpot compiler threads for this app. Upgrade the runtime before removing that workaround.
 
+### Run the Console CLI
+
+Build and install the terminal entry point:
+
+```bash
+./gradlew :evokammer:cli:installDist
+```
+
+Then run the generated command:
+
+```bash
+./evokammer/cli/build/install/evokammer/bin/evokammer \
+  -prompt "Solve the user task" \
+  -input /path/to/context-folder \
+  -output /path/to/output-folder \
+  -openrouter-api-key sk-or-v1-...
+```
+
+Use `-promptfile /path/to/prompt.txt` instead of `-prompt` when you want to load the objective from disk. The CLI recursively ingests every file under `-input`, writes run outputs under a per-run folder inside `-output`, and accepts optional `-debug` plus repeated `-model ROLE=MODEL` overrides.
+
 ### Build a distributable
 
 ```bash

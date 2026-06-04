@@ -5,8 +5,10 @@ import io.github.aakira.napier.Napier
 import kotlinx.coroutines.delay
 
 private const val OPENROUTER_PROVIDER_502_NEEDLE = "Provider returned error (code: 502)"
+private const val OPENROUTER_GENERIC_502_NEEDLE = "(code: 502)"
 private const val OPENROUTER_PROVIDER_PARSE_NEEDLE = "JsonLiteral is not a JsonObject"
 private const val OPENROUTER_PROVIDER_TOOL_PARSE_NEEDLE = "toolCallPartsOrNull"
+private const val OPENROUTER_ALIBABA_INVALID_PARAMETER_NEEDLE = "InternalError.Algo.InvalidParameter"
 private const val DEFAULT_PROVIDER_RETRY_BUDGET = 2
 private const val DEFAULT_PROVIDER_RETRY_DELAY_MS = 500L
 
@@ -60,6 +62,8 @@ internal fun isOpenRouterProviderFailure(throwable: Throwable): Boolean {
         .any { candidate ->
             candidate.message?.contains(OPENROUTER_PROVIDER_502_NEEDLE) == true ||
                 candidate.message?.contains("OpenRouter API error: Provider returned error (code: 502)") == true ||
+                candidate.message?.contains(OPENROUTER_GENERIC_502_NEEDLE) == true ||
+                candidate.message?.contains(OPENROUTER_ALIBABA_INVALID_PARAMETER_NEEDLE) == true ||
                 candidate.message?.contains(OPENROUTER_PROVIDER_PARSE_NEEDLE) == true ||
                 candidate.message?.contains(OPENROUTER_PROVIDER_TOOL_PARSE_NEEDLE) == true
         }

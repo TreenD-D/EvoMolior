@@ -1,5 +1,7 @@
 package com.achulkov.evomolior.util
 
+import com.achulkov.evokammer.api.util.bundleBasePath
+import com.achulkov.evokammer.api.util.toRunInputArtifactUpload
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals

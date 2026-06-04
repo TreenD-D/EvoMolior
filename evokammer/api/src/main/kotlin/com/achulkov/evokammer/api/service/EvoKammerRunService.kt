@@ -22,6 +22,7 @@ import com.achulkov.evokammer.competition.scoring.FailureTelemetry
 import com.achulkov.evokammer.competition.scoring.GroupRoundResult
 import com.achulkov.evokammer.competition.scoring.ScoringEngine
 import com.achulkov.evokammer.core.config.ModelSelectionConfig
+import com.achulkov.evokammer.core.config.RunObjectiveHeuristics
 import com.achulkov.evokammer.core.contract.GroupCheckinResult
 import com.achulkov.evokammer.core.contract.StartingField
 import com.achulkov.evokammer.core.contract.RunInputArtifact
@@ -83,6 +84,9 @@ import java.nio.file.StandardCopyOption
 
 private const val META_ARCHIVE_GROUP_ID = "__meta_archive__"
 private const val MAX_RUN_ARTIFACT_PREVIEW_CHARS = 512
+private const val ROUND_SUMMARY_MAX_ATTEMPTS = 2
+private const val FINAL_DELIVERABLE_MAX_ATTEMPTS = 2
+private const val DEFAULT_MULTI_GRADER_GROUP_COUNT = 3
 
 private data class MaterializedRunInputArtifacts(
     val artifacts: List<RunInputArtifact>,
@@ -106,10 +110,11 @@ private data class RoundSummaryRecord(
  * judge outputs, and submission summaries after a run finishes.
  */
 @Serializable
-internal data class RunCompletionRecord(
+data class RunCompletionRecord(
     val runId: String,
     val winnerId: String?,
     val finalAnswerSummary: String = "",
+    val finalDeliverableHtml: String? = null,
     val judgeOutputsByGrader: Map<String, String> = emptyMap(),
     val submissionSummariesByGroup: Map<String, String?> = emptyMap(),
     val completedAtMs: Long = System.currentTimeMillis()
@@ -216,6 +221,13 @@ class EvoKammerRunService(
         groupIds: List<String>,
         dimensions: List<ScoringDimension>
     ) -> GroupCoordinator,
+    private val groupCoordinatorProviderWithKey: (
+        groupIds: List<String>,
+        dimensions: List<ScoringDimension>,
+        openRouterApiKey: String
+    ) -> GroupCoordinator = { groupIds, dimensions, _ ->
+        groupCoordinatorProvider(groupIds, dimensions)
+    },
     private val graderGroupManagerProvider: (
         dimensions: List<ScoringDimension>
     ) -> GraderGroupManager,
@@ -376,6 +388,8 @@ class EvoKammerRunService(
     @Volatile private var activeSealedTestSuiteJson: String = ""
     /** Canonical sealed test suite hash emitted by the Genesis Council. */
     @Volatile private var activeSealedTestSuiteHash: String = ""
+    /** Dedicated grader-civilisation seed resolved for the active run. */
+    @Volatile private var activeGraderStartingField: StartingField? = null
     /** Council-defined score normalization policy keyed by scoring dimension ID. */
     @Volatile private var activeScoreNormalization: Map<String, Double> = emptyMap()
     /**
@@ -504,7 +518,7 @@ class EvoKammerRunService(
                 StartingField.default(config.objective, config.runId)
             }
         }
-        startingField = canonicalizeStartingField(startingField)
+        startingField = applyModelOverrides(canonicalizeStartingField(startingField), config.modelOverrides)
         if (continuationSourceRunId != null) {
             copyContinuationArtifacts(
                 sourceRunId = continuationSourceRunId,
@@ -520,6 +534,12 @@ class EvoKammerRunService(
         if (mergedInputArtifacts.isNotEmpty()) {
             startingField = startingField.copy(inputArtifacts = mergedInputArtifacts)
         }
+        val graderStartingField = resolveGraderStartingField(
+            config = config,
+            workerStartingField = startingField
+        )
+        activeGraderStartingField = graderStartingField
+        startingField = startingField.copy(graderGroupCount = graderStartingField?.groupCount ?: 0)
         activeSealedTestSuiteJson = startingField.sealedTestSuiteJson
         activeSealedTestSuiteHash = startingField.sealedTestSuiteHash
         val councilModelSummary = when {
@@ -582,8 +602,8 @@ class EvoKammerRunService(
         } else {
             config.groupProfiles
         }
-        // Grader group IDs — one grader group per run (expandable via StartingField.graderGroupCount)
-        val graderGroupIds = (0 until startingField.graderGroupCount).map { "grader-$it" }
+        // Grader groups come from the dedicated grader-civilisation seed.
+        val graderGroupIds = (0 until (graderStartingField?.groupCount ?: startingField.graderGroupCount)).map { "grader-$it" }
 
         if (startingField.sealedTestSuiteJson.isNotBlank()) {
             persistSealedTestSuite(config.runId, groupIds.firstOrNull(), startingField)
@@ -598,7 +618,13 @@ class EvoKammerRunService(
         // KB documents, KG facts, and WIP tasks from the Genesis Council are inserted
         // before the first round so agents have starting context and tasks to claim.
         // Grader groups receive the same seed so their KB is not empty at first eval.
-        seedPrimordialData(config.runId, groupIds, graderGroupIds, startingField)
+        seedPrimordialData(
+            runId = config.runId,
+            groupIds = groupIds,
+            workerStartingField = startingField,
+            graderGroupIds = graderGroupIds,
+            graderStartingField = graderStartingField
+        )
         lastRunId = config.runId
         lastRunGroupIds = groupIds
         groupSummaries = groupIds.mapIndexed { idx, gid ->
@@ -616,7 +642,7 @@ class EvoKammerRunService(
         Napier.i("EvoKammerRunService: emitted RunStarted for run ${config.runId}")
 
         // Create coordinator and lifecycle managers
-        val coordinator = groupCoordinatorProvider(groupIds, config.scoringDimensions)
+        val coordinator = groupCoordinatorProviderWithKey(groupIds, config.scoringDimensions, config.openRouterApiKey)
         activeCoordinator = coordinator
         val graderGroupManager = graderGroupManagerProvider(config.scoringDimensions)
         activeGraderGroupManager = graderGroupManager
@@ -1170,12 +1196,6 @@ class EvoKammerRunService(
 
             // All rounds complete
             val winnerId = groupSummaries.maxByOrNull { it.currentRoundScore ?: 0.0 }?.groupId
-            emit(EvoKammerEvent.RunCompleted(config.runId, winnerId))
-            currentStatus = EngineStatus.COMPLETED
-            Napier.i("EvoKammerRunService: run ${config.runId} completed, winner=$winnerId")
-
-            // 5. Archive run artefacts for cross-run Council learning
-            archiveCompletedRun(config, groupIds, winnerId)
             val finalAnswerSummary = if (finalRoundIndex >= 0) {
                 buildString {
                     append("Round ${finalRoundIndex + 1} final answer: winner=")
@@ -1200,13 +1220,42 @@ class EvoKammerRunService(
             } else {
                 ""
             }
-            persistRunCompletionMarker(
+            val finalDeliverableHtml = winnerId
+                ?.takeIf { RunObjectiveHeuristics.requestsBrowserDeliverable(config.objective) }
+                ?.let { winningGroupId ->
+                    spawnFinalDeliverableHtml(
+                        config = config,
+                        groupId = winningGroupId,
+                        finalRoundIndex = finalRoundIndex.takeIf { it >= 0 } ?: (effectiveRounds - 1)
+                    )
+                }
+
+            if (!finalDeliverableHtml.isNullOrBlank()) {
+                emit(
+                    EvoKammerEvent.EngineProgress(
+                        config.runId,
+                        "final_deliverable_result",
+                        "Final deliverable writer published standalone HTML for winner=$winnerId"
+                    )
+                )
+            }
+
+            val completionRecord = RunCompletionRecord(
                 runId = config.runId,
                 winnerId = winnerId,
                 finalAnswerSummary = finalAnswerSummary,
+                finalDeliverableHtml = finalDeliverableHtml,
                 judgeOutputsByGrader = finalRoundJudgeOutputs,
                 submissionSummariesByGroup = finalRoundSubmissionSummaries
             )
+            persistRunCompletionMarker(completionRecord)
+
+            // 5. Archive run artefacts for cross-run Council learning
+            archiveCompletedRun(config, groupIds, winnerId, completionRecord)
+
+            emit(EvoKammerEvent.RunCompleted(config.runId, winnerId))
+            currentStatus = EngineStatus.COMPLETED
+            Napier.i("EvoKammerRunService: run ${config.runId} completed, winner=$winnerId")
 
         } catch (e: Exception) {
             Napier.e("EvoKammerRunService: run loop error", e)
@@ -1830,40 +1879,64 @@ class EvoKammerRunService(
                     ?: GroupProfileType.Library
                 val profile = GroupProfile.default(profileType)
                 val budgetPerAgent = maxOf(5.0, profile.spawnBudget * 0.15)
-                val prompt = RolePromptBuilder.buildRoundSubmissionSummary(
-                    runObjective = config.objective,
-                    roundIndex = round,
-                    groupId = groupId
-                )
 
                 waitForLiveAgentsToDrain(groupId, lm, "post-round termination")
-                val summaryStartedAtMs = System.currentTimeMillis()
-
-                emit(EvoKammerEvent.EngineProgress(
-                    config.runId,
-                    "round_summary_spawn",
-                    "[$groupId] Spawning round submission summariser for round ${round + 1}"
-                ))
-
-                try {
-                    lm.spawnSpecialAgent(
-                        role = Role.Archivist,
-                        generation = round + 1,
-                        budgetPerAgent = budgetPerAgent,
-                        stageDisclosure = "Round ${round + 1} submission summary generation for group $groupId.",
-                        modelAssignment = ModelSelectionConfig.DEFAULT_RUNTIME_RESEARCHER_MODEL,
-                        modelAssignments = activeModelAssignments,
-                        modelPools = activeModelPools,
-                        rolePrompt = prompt,
-                        scope = scope
+                var summary: String? = null
+                for (attempt in 1..ROUND_SUMMARY_MAX_ATTEMPTS) {
+                    val prompt = RolePromptBuilder.buildRoundSubmissionSummary(
+                        runObjective = config.objective,
+                        roundIndex = round,
+                        groupId = groupId,
+                        attempt = attempt
                     )
-                } catch (e: Exception) {
-                    Napier.w("EvoKammerRunService: round submission summariser spawn failed for group=$groupId: ${e.message}")
-                    return@async groupId to null
+                    val summaryStartedAtMs = System.currentTimeMillis()
+
+                    emit(EvoKammerEvent.EngineProgress(
+                        config.runId,
+                        "round_summary_spawn",
+                        "[$groupId] Spawning round submission summariser for round ${round + 1} (attempt $attempt/$ROUND_SUMMARY_MAX_ATTEMPTS)"
+                    ))
+
+                    try {
+                        lm.spawnSpecialAgent(
+                            role = Role.Archivist,
+                            generation = round + 1,
+                            budgetPerAgent = budgetPerAgent,
+                            stageDisclosure = buildString {
+                                append("Round ${round + 1} submission summary generation for group $groupId.")
+                                if (attempt > 1) {
+                                    append(" Retry attempt $attempt after no summary was recorded from the previous attempt.")
+                                }
+                            },
+                            modelAssignment = null,
+                            modelAssignments = activeModelAssignments,
+                            modelPools = activeModelPools,
+                            rolePrompt = prompt,
+                            scope = scope
+                        )
+                    } catch (e: Exception) {
+                        Napier.w("EvoKammerRunService: round submission summariser spawn failed for group=$groupId attempt=$attempt: ${e.message}")
+                        break
+                    }
+
+                    summary = awaitRoundSubmissionSummary(
+                        runId = config.runId,
+                        groupId = groupId,
+                        lifecycleManager = lm,
+                        startedAtMs = summaryStartedAtMs
+                    )
+                    if (!summary.isNullOrBlank()) {
+                        break
+                    }
+
+                    if (attempt < ROUND_SUMMARY_MAX_ATTEMPTS) {
+                        Napier.w(
+                            "EvoKammerRunService: no round submission summary recorded for group=$groupId round=$round on attempt=$attempt; retrying"
+                        )
+                    }
                 }
 
-                waitForLiveAgentsToDrain(groupId, lm, "round summary")
-                groupId to readRoundSubmissionSummary(config.runId, groupId, summaryStartedAtMs)
+                groupId to summary
             }
         }.awaitAll().toMap()
     }
@@ -1906,6 +1979,136 @@ class EvoKammerRunService(
                 .sortedByDescending { it.submittedAtMs }
                 .firstOrNull { it.content.trimStart().startsWith(marker) }
                 ?.content
+        }.getOrNull()
+    }
+
+    /**
+     * Waits for the required round-summary staging marker instead of the agent's full teardown.
+     *
+     * Once the PLAN_UPDATE exists, post-round evaluation can proceed deterministically even if the
+     * summariser is still wrapping up its death note.
+     */
+    private suspend fun awaitRoundSubmissionSummary(
+        runId: String,
+        groupId: String,
+        lifecycleManager: LifecycleManager,
+        startedAtMs: Long,
+        timeoutMs: Long = 120_000L
+    ): String? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val summary = readRoundSubmissionSummary(runId, groupId, startedAtMs)
+            if (!summary.isNullOrBlank()) {
+                return summary
+            }
+            if (lifecycleManager.getLiveAgentCount() == 0) {
+                return null
+            }
+            delay(250L)
+        }
+
+        return readRoundSubmissionSummary(runId, groupId, startedAtMs).also { summary ->
+            if (summary.isNullOrBlank()) {
+                Napier.w(
+                    "EvoKammerRunService: timed out waiting for round submission summary marker for group=$groupId; continuing without it"
+                )
+            }
+        }
+    }
+
+    /**
+     * Spawns a winner-side Builder agent that writes the final standalone HTML deliverable.
+     *
+     * The authored HTML is stored in staging and then persisted into the completion marker so
+     * the archive layer can publish the exact document instead of reconstructing it from summary
+     * metadata.
+     */
+    private suspend fun spawnFinalDeliverableHtml(
+        config: RunConfig,
+        groupId: String,
+        finalRoundIndex: Int
+    ): String? {
+        val lm = liveLifecycleManagers[groupId] ?: return null
+        val groupIndex = groupSummaries.indexOfFirst { it.groupId == groupId }
+        val profileType = activeGroupProfiles.getOrNull(groupIndex) ?: GroupProfileType.Library
+        val profile = GroupProfile.default(profileType)
+        return try {
+            var finalHtml: String? = null
+            for (attempt in 1..FINAL_DELIVERABLE_MAX_ATTEMPTS) {
+                val startedAtMs = System.currentTimeMillis()
+                emit(
+                    EvoKammerEvent.EngineProgress(
+                        config.runId,
+                        "final_deliverable_spawn",
+                        "[$groupId] Spawning final deliverable writer (attempt $attempt/$FINAL_DELIVERABLE_MAX_ATTEMPTS)"
+                    )
+                )
+
+                lm.spawnSpecialAgent(
+                    role = Role.Builder,
+                    generation = maxOf(finalRoundIndex + 1, 0),
+                    budgetPerAgent = maxOf(8.0, profile.spawnBudget * 0.25),
+                    stageDisclosure = buildString {
+                        append("Generate the final standalone deliverable for the completed run.")
+                        if (attempt > 1) {
+                            append(" Retry attempt $attempt after no persisted HTML document was recorded from the previous attempt.")
+                        }
+                    },
+                    modelAssignment = activeModelAssignments[Role.Archivist.name]
+                        ?: activeModelAssignments[Role.Builder.name],
+                    modelAssignments = activeModelAssignments,
+                    modelPools = activeModelPools,
+                    rolePrompt = RolePromptBuilder.buildFinalDeliverableHtml(
+                        runObjective = config.objective,
+                        roundCount = finalRoundIndex + 1,
+                        groupId = groupId,
+                        attempt = attempt
+                    ),
+                    scope = scope
+                )
+
+                waitForLiveAgentsToDrain(groupId, lm, "final deliverable")
+                finalHtml = readFinalDeliverableHtml(config.runId, groupId, startedAtMs)
+                if (!finalHtml.isNullOrBlank()) {
+                    break
+                }
+                if (attempt < FINAL_DELIVERABLE_MAX_ATTEMPTS) {
+                    Napier.w(
+                        "EvoKammerRunService: no final deliverable HTML recorded for group=$groupId " +
+                            "round=$finalRoundIndex on attempt=$attempt; retrying"
+                    )
+                }
+            }
+            finalHtml
+        } catch (e: Exception) {
+            Napier.w("EvoKammerRunService: final deliverable writer failed for group=$groupId: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Reads the newest authored standalone HTML document written after the final deliverable
+     * writer was spawned.
+     */
+    private suspend fun readFinalDeliverableHtml(
+        runId: String,
+        groupId: String,
+        startedAtMs: Long
+    ): String? {
+        val db = runCatching { substrateFactory.get(runId, groupId) }
+            .getOrElse { return null }
+
+        return runCatching {
+            db.stagingDao().getAll(runId, groupId, limit = 150)
+                .asSequence()
+                .filter { it.submittedAtMs >= startedAtMs }
+                .filter { it.type == com.achulkov.evokammer.core.model.SubmissionType.DOC.name }
+                .sortedByDescending { it.submittedAtMs }
+                .map { it.content.trim() }
+                .firstOrNull { candidate ->
+                    candidate.startsWith("<!doctype html>", ignoreCase = true) ||
+                        candidate.startsWith("<html", ignoreCase = true)
+                }
         }.getOrNull()
     }
 
@@ -2028,7 +2231,12 @@ class EvoKammerRunService(
     }
 
     /** Calls [RunArchiveService.archiveRun] after a successful run completion. */
-    private suspend fun archiveCompletedRun(config: RunConfig, groupIds: List<String>, winnerId: String?) {
+    private suspend fun archiveCompletedRun(
+        config: RunConfig,
+        groupIds: List<String>,
+        winnerId: String?,
+        completionRecord: RunCompletionRecord? = null
+    ) {
         val service = archiveService ?: return
         try {
             // Serialise the full RunConfig as the StartingField snapshot, masking the API key
@@ -2043,7 +2251,8 @@ class EvoKammerRunService(
                 winnerId = winnerId,
                 objective = config.objective,
                 startingFieldJson = startingFieldJson,
-                finalGeneration = config.rounds
+                finalGeneration = config.rounds,
+                completionRecord = completionRecord
             )
             Napier.i("EvoKammerRunService: run ${config.runId} archived successfully")
         } catch (e: Exception) {
@@ -2060,41 +2269,29 @@ class EvoKammerRunService(
      * @param runId The completed run identifier.
      * @param winnerId The winning group ID, if any.
      */
-    private suspend fun persistRunCompletionMarker(
-        runId: String,
-        winnerId: String?,
-        finalAnswerSummary: String = "",
-        judgeOutputsByGrader: Map<String, String> = emptyMap(),
-        submissionSummariesByGroup: Map<String, String?> = emptyMap()
-    ) {
-        val archiveDb = substrateFactory.get(runId, META_ARCHIVE_GROUP_ID)
+    private suspend fun persistRunCompletionMarker(completionRecord: RunCompletionRecord) {
+        val archiveDb = substrateFactory.get(completionRecord.runId, META_ARCHIVE_GROUP_ID)
         val markerExists = runCatching {
             archiveDb.metaArchiveDao().getByType(RunArchiveService.ENTRY_RUN_COMPLETED)
-        }.getOrElse { emptyList() }.any { it.runId == runId }
+        }.getOrElse { emptyList() }.any { it.runId == completionRecord.runId }
         if (markerExists) return
 
         runCatching {
             archiveDb.metaArchiveDao().insert(
                 MetaArchiveEntryEntity(
-                    id = "run-completed-$runId",
-                    runId = runId,
+                    id = "run-completed-${completionRecord.runId}",
+                    runId = completionRecord.runId,
                     entryType = RunArchiveService.ENTRY_RUN_COMPLETED,
                     groupId = null,
-                    label = "Run Completed — $runId",
+                    label = "Run Completed — ${completionRecord.runId}",
                     contentJson = runConfigJson.encodeToString(
                         RunCompletionRecord.serializer(),
-                        RunCompletionRecord(
-                            runId = runId,
-                            winnerId = winnerId,
-                            finalAnswerSummary = finalAnswerSummary,
-                            judgeOutputsByGrader = judgeOutputsByGrader,
-                            submissionSummariesByGroup = submissionSummariesByGroup
-                        )
+                        completionRecord
                     ),
                     runObjective = runCatching {
                         archiveDb.metaArchiveDao().getByType(RunArchiveService.ENTRY_STARTING_FIELD)
                     }.getOrElse { emptyList() }
-                        .firstOrNull { it.runId == runId }
+                        .firstOrNull { it.runId == completionRecord.runId }
                         ?.runObjective.orEmpty(),
                     finalScore = null,
                     isFromWinner = false,
@@ -2103,7 +2300,7 @@ class EvoKammerRunService(
                 )
             )
         }.onFailure { e ->
-            Napier.w("EvoKammerRunService: failed to persist completion marker for run=$runId: ${e.message}")
+            Napier.w("EvoKammerRunService: failed to persist completion marker for run=${completionRecord.runId}: ${e.message}")
         }
     }
 
@@ -2246,10 +2443,196 @@ class EvoKammerRunService(
      * @return The same field with a canonical suite hash if a suite was provided.
      */
     private fun canonicalizeStartingField(startingField: StartingField): StartingField {
-        if (startingField.sealedTestSuiteJson.isBlank()) return startingField
-        val suiteHash = canonicalTestSuiteHash(startingField.sealedTestSuiteJson)
-        return if (startingField.sealedTestSuiteHash == suiteHash) startingField
-        else startingField.copy(sealedTestSuiteHash = suiteHash)
+        val canonicalSuiteField = if (startingField.sealedTestSuiteJson.isBlank()) {
+            startingField
+        } else {
+            val suiteHash = canonicalTestSuiteHash(startingField.sealedTestSuiteJson)
+            if (startingField.sealedTestSuiteHash == suiteHash) startingField
+            else startingField.copy(sealedTestSuiteHash = suiteHash)
+        }
+        return canonicalSuiteField.copy(
+            graderGroupCount = normalizeGraderGroupCount(
+                workerGroupCount = canonicalSuiteField.groupCount,
+                requestedGraderGroupCount = canonicalSuiteField.graderGroupCount
+            )
+        )
+    }
+
+    private fun normalizeGraderGroupCount(
+        workerGroupCount: Int,
+        requestedGraderGroupCount: Int
+    ): Int {
+        if (workerGroupCount <= 1) return 0
+        return requestedGraderGroupCount.coerceAtLeast(DEFAULT_MULTI_GRADER_GROUP_COUNT)
+    }
+
+    private suspend fun resolveGraderStartingField(
+        config: RunConfig,
+        workerStartingField: StartingField
+    ): StartingField? {
+        if (workerStartingField.groupCount <= 1) {
+            return null
+        }
+
+        val desiredCount = normalizeGraderGroupCount(
+            workerGroupCount = workerStartingField.groupCount,
+            requestedGraderGroupCount = workerStartingField.graderGroupCount
+        )
+        val fallbackField = buildFallbackGraderStartingField(
+            runId = config.runId,
+            workerStartingField = workerStartingField,
+            graderGroupCount = desiredCount
+        )
+
+        if (config.isTestRun || genesisCouncilRunner == null) {
+            return fallbackField
+        }
+
+        emit(
+            EvoKammerEvent.EngineProgress(
+                config.runId,
+                "grader_genesis_start",
+                "Grader Genesis Council starting — designing evaluator civilisations…"
+            )
+        )
+
+        val graderObjective = buildGraderCouncilObjective(workerStartingField)
+        val resolved = try {
+            withTimeoutOrNull(5 * 60_000L) {
+                genesisCouncilRunner.invoke(
+                    "${config.runId}-grader-council",
+                    graderObjective,
+                    config.openRouterApiKey
+                ) { progressMsg ->
+                    scope.launch {
+                        emit(
+                            EvoKammerEvent.EngineProgress(
+                                config.runId,
+                                "grader_genesis_agent",
+                                progressMsg
+                            )
+                        )
+                    }
+                }
+            } ?: fallbackField
+        } catch (e: Exception) {
+            Napier.w("EvoKammerRunService: grader genesis council failed: ${e.message}")
+            fallbackField
+        }
+
+        val normalized = normalizeGraderStartingField(
+            runId = config.runId,
+            candidate = resolved,
+            desiredCount = desiredCount,
+            workerStartingField = workerStartingField
+        )
+        emit(
+            EvoKammerEvent.EngineProgress(
+                config.runId,
+                "grader_genesis_complete",
+                "Grader Genesis Council complete — ${normalized.groupCount} grader groups"
+            )
+        )
+        return normalized
+    }
+
+    private fun buildGraderCouncilObjective(workerStartingField: StartingField): String = buildString {
+        append("Design a grader civilisation for the worker objective: ")
+        append(workerStartingField.objective)
+        append(". Produce several competing grader groups with distinct evaluation philosophies. ")
+        append("Their task is to create deep, diverse, adversarial criteria for judging worker-group results. ")
+        append("They must expose shallow or gamed outputs, reward reproducibility and evidence, ")
+        append("and prefer hard-to-fake competence over surface polish.")
+    }
+
+    private fun normalizeGraderStartingField(
+        runId: String,
+        candidate: StartingField,
+        desiredCount: Int,
+        workerStartingField: StartingField
+    ): StartingField {
+        val canonical = canonicalizeStartingField(candidate)
+        val resolvedProfiles = (0 until desiredCount).associate { index ->
+            "grader-$index" to (
+                canonical.groupProfiles.values.elementAtOrNull(index)
+                    ?: GroupProfileType.entries[index % GroupProfileType.entries.size]
+                )
+        }
+        val fallbackField = buildFallbackGraderStartingField(
+            runId = runId,
+            workerStartingField = workerStartingField,
+            graderGroupCount = desiredCount
+        )
+        return canonical.copy(
+            runId = runId,
+            objective = canonical.objective.ifBlank { fallbackField.objective },
+            groupCount = desiredCount,
+            groupProfiles = resolvedProfiles,
+            ringTopology = resolvedProfiles.keys.toList(),
+            graderGroupCount = 0,
+            primordialKb = canonical.primordialKb.ifEmpty { fallbackField.primordialKb },
+            norms = canonical.norms.ifBlank { fallbackField.norms }
+        )
+    }
+
+    private fun buildFallbackGraderStartingField(
+        runId: String,
+        workerStartingField: StartingField,
+        graderGroupCount: Int
+    ): StartingField {
+        val profiles = (0 until graderGroupCount).associate { index ->
+            "grader-$index" to GroupProfileType.entries[index % GroupProfileType.entries.size]
+        }
+        return StartingField.default(
+            objective = buildGraderCouncilObjective(workerStartingField),
+            runId = runId,
+            groupCount = graderGroupCount,
+            groupProfilesMap = profiles,
+            budgetCeiling = workerStartingField.globalBudgetCeiling,
+            generationCeiling = workerStartingField.generationCeiling
+        ).copy(
+            primordialKb = listOf(
+                com.achulkov.evokammer.core.contract.SeedKBDocument(
+                    id = "grader-seed-mission",
+                    domain = "grader_seed",
+                    content = """
+                        Mission: evaluate worker civilisations with deep, adversarial rigor.
+                        Reward evidence, reproducibility, comparative strength, and resilient execution.
+                        Penalise unsupported claims, superficial polish, and brittle output.
+                    """.trimIndent()
+                ),
+                com.achulkov.evokammer.core.contract.SeedKBDocument(
+                    id = "grader-seed-objective",
+                    domain = "grader_seed",
+                    content = "Worker objective under evaluation: ${workerStartingField.objective}"
+                )
+            ),
+            norms = "Be evidence-based. Prefer hard-to-fake signals. Design tie-breakers and failure-mode checks."
+        )
+    }
+
+    /**
+     * Applies explicit run-level model overrides so they win over council-generated pools.
+     *
+     * Pools are rewritten to singleton lists for overridden roles because the lifecycle
+     * model resolver prefers pools before assignments.
+     */
+    private fun applyModelOverrides(
+        startingField: StartingField,
+        modelOverrides: Map<String, String>
+    ): StartingField {
+        if (modelOverrides.isEmpty()) return startingField
+
+        val mergedAssignments = startingField.modelAssignment + modelOverrides
+        val mergedPools = startingField.modelPools.toMutableMap()
+        modelOverrides.forEach { (role, modelId) ->
+            mergedPools[role] = listOf(modelId)
+        }
+
+        return startingField.copy(
+            modelAssignment = mergedAssignments,
+            modelPools = mergedPools
+        )
     }
 
     /**
@@ -2661,10 +3044,49 @@ class EvoKammerRunService(
     private suspend fun seedPrimordialData(
         runId: String,
         groupIds: List<String>,
+        workerStartingField: StartingField,
         graderGroupIds: List<String>,
-        startingField: StartingField
+        graderStartingField: StartingField?
     ) {
-        val allGroupIds = groupIds + graderGroupIds
+        val workerCounts = seedPrimordialDataForGroups(
+            runId = runId,
+            groupIds = groupIds,
+            startingField = workerStartingField,
+            seedOverlayBuilder = { _, _ -> emptyList() }
+        )
+        val graderCounts = graderStartingField?.let { seed ->
+            seedPrimordialDataForGroups(
+                runId = runId,
+                groupIds = graderGroupIds,
+                startingField = seed,
+                seedOverlayBuilder = { groupId, index ->
+                    buildGraderOverlaySeedDocuments(
+                        runId = runId,
+                        groupId = groupId,
+                        workerStartingField = workerStartingField,
+                        graderStartingField = seed,
+                        profileType = seed.groupProfiles[groupId]
+                            ?: GroupProfileType.entries[index % GroupProfileType.entries.size]
+                    )
+                }
+            )
+        } ?: SeedInsertCounts()
+
+        Napier.i(
+            "EvoKammerRunService: primordial seeding complete — " +
+                "KB=${workerCounts.kb + graderCounts.kb} KG=${workerCounts.kg + graderCounts.kg} " +
+                "WIP=${workerCounts.wip + graderCounts.wip} tools=${workerCounts.tools + graderCounts.tools} " +
+                "(across ${groupIds.size} competing + ${graderGroupIds.size} grader groups)"
+        )
+    }
+
+    private suspend fun seedPrimordialDataForGroups(
+        runId: String,
+        groupIds: List<String>,
+        startingField: StartingField,
+        seedOverlayBuilder: (groupId: String, index: Int) -> List<KnowledgeBaseEntryEntity>
+    ): SeedInsertCounts {
+        if (groupIds.isEmpty()) return SeedInsertCounts()
         if (startingField.primordialKb.isEmpty() &&
             startingField.primordialKgFacts.isEmpty() &&
             startingField.primordialTools.isEmpty() &&
@@ -2672,13 +3094,12 @@ class EvoKammerRunService(
             startingField.sealedTestSuiteJson.isBlank() &&
             startingField.inputArtifacts.isEmpty()
         ) {
-            Napier.i("EvoKammerRunService: no primordial data to seed (default StartingField)")
-            return
+            return SeedInsertCounts()
         }
 
-        // Parse nodeGraph → WIP task nodes
         @kotlinx.serialization.Serializable
         data class NodeEntry(val nodeId: String, val description: String)
+
         val nodeEntries: List<NodeEntry> = try {
             val nodeJson = Json { ignoreUnknownKeys = true }
             if (startingField.nodeGraph.trimStart().startsWith("[")) {
@@ -2690,15 +3111,18 @@ class EvoKammerRunService(
         }
 
         val now = System.currentTimeMillis()
+        var kbCount = 0
+        var kgCount = 0
+        var wipCount = 0
+        var toolCount = 0
 
-        for (groupId in allGroupIds) {
+        for ((index, groupId) in groupIds.withIndex()) {
             try {
                 val db = substrateFactory.get(runId, groupId)
 
-                // Seed KB documents
                 if (startingField.primordialKb.isNotEmpty()) {
                     val kbEntities = startingField.primordialKb.map { seed ->
-                        com.achulkov.evokammer.substrate.db.entity.KnowledgeBaseEntryEntity(
+                        KnowledgeBaseEntryEntity(
                             id = "${seed.id}-$groupId",
                             content = seed.content,
                             domain = seed.domain,
@@ -2712,14 +3136,19 @@ class EvoKammerRunService(
                         )
                     }
                     db.knowledgeBaseDao().insertAll(kbEntities)
-                    Napier.i("EvoKammerRunService: seeded ${kbEntities.size} primordial KB docs for group=$groupId")
+                    kbCount += kbEntities.size
                 }
 
-                // Seed uploaded context documents into the KB for immediate group access.
+                val overlayEntities = seedOverlayBuilder(groupId, index)
+                if (overlayEntities.isNotEmpty()) {
+                    db.knowledgeBaseDao().insertAll(overlayEntities)
+                    kbCount += overlayEntities.size
+                }
+
                 val uploadedDocs = startingField.inputArtifacts.filter { it.kind == RunInputArtifactKind.TEXT }
                 if (uploadedDocs.isNotEmpty()) {
                     val uploadedKbEntities = uploadedDocs.map { artifact ->
-                        com.achulkov.evokammer.substrate.db.entity.KnowledgeBaseEntryEntity(
+                        KnowledgeBaseEntryEntity(
                             id = "uploaded-${artifact.sha256.take(12)}-$groupId",
                             content = buildString {
                                 appendLine("Uploaded context artifact: ${artifact.sourceName}")
@@ -2740,10 +3169,9 @@ class EvoKammerRunService(
                         )
                     }
                     db.knowledgeBaseDao().insertAll(uploadedKbEntities)
-                    Napier.i("EvoKammerRunService: seeded ${uploadedKbEntities.size} uploaded context KB docs for group=$groupId")
+                    kbCount += uploadedKbEntities.size
                 }
 
-                // Seed KG facts
                 if (startingField.primordialKgFacts.isNotEmpty()) {
                     val kgEntities = startingField.primordialKgFacts.map { seed ->
                         com.achulkov.evokammer.substrate.db.entity.KnowledgeGraphFactEntity(
@@ -2762,10 +3190,9 @@ class EvoKammerRunService(
                         )
                     }
                     db.knowledgeGraphFactDao().insertAll(kgEntities)
-                    Napier.i("EvoKammerRunService: seeded ${kgEntities.size} primordial KG facts for group=$groupId")
+                    kgCount += kgEntities.size
                 }
 
-                // Seed WIP tasks from nodeGraph
                 if (nodeEntries.isNotEmpty()) {
                     val wipEntities = nodeEntries.map { node ->
                         com.achulkov.evokammer.substrate.db.entity.WipTaskEntity(
@@ -2778,10 +3205,9 @@ class EvoKammerRunService(
                         )
                     }
                     db.wipTaskDao().insertAll(wipEntities)
-                    Napier.i("EvoKammerRunService: seeded ${wipEntities.size} WIP tasks for group=$groupId")
+                    wipCount += wipEntities.size
                 }
 
-                // Seed tools from primordialTools
                 if (startingField.primordialTools.isNotEmpty()) {
                     val toolMaterializer = ToolMaterializer(
                         substrateFactory.dbFilePath(runId, groupId).parentFile
@@ -2810,19 +3236,70 @@ class EvoKammerRunService(
                         toolMaterializer.materialize(seed)
                         db.toolRegistryDao().insert(seed)
                     }
-                    Napier.i("EvoKammerRunService: seeded ${toolEntities.size} primordial tools for group=$groupId")
+                    toolCount += toolEntities.size
                 }
             } catch (e: Exception) {
                 Napier.w("EvoKammerRunService: primordial seed failed for group=$groupId: ${e.message}")
             }
         }
 
-        val totalKb = startingField.primordialKb.size * allGroupIds.size
-        val totalKg = startingField.primordialKgFacts.size * allGroupIds.size
-        val totalWip = nodeEntries.size * allGroupIds.size
-        val totalTools = startingField.primordialTools.size * allGroupIds.size
-        Napier.i("EvoKammerRunService: primordial seeding complete — KB=$totalKb KG=$totalKg WIP=$totalWip tools=$totalTools (across ${allGroupIds.size} groups: ${groupIds.size} competing + ${graderGroupIds.size} grader)")
+        return SeedInsertCounts(kb = kbCount, kg = kgCount, wip = wipCount, tools = toolCount)
     }
+
+    private fun buildGraderOverlaySeedDocuments(
+        runId: String,
+        groupId: String,
+        workerStartingField: StartingField,
+        graderStartingField: StartingField,
+        profileType: GroupProfileType
+    ): List<KnowledgeBaseEntryEntity> {
+        val now = System.currentTimeMillis()
+        val profileLens = when (profileType) {
+            GroupProfileType.Library -> "Emphasise evidence density, source traceability, and coverage breadth."
+            GroupProfileType.Factory -> "Emphasise reproducibility, operational robustness, and concrete deliverables."
+            GroupProfileType.Commune -> "Emphasise clarity, accessibility, and coherence across artefacts."
+            GroupProfileType.Monastery -> "Emphasise rigor, internal consistency, and disciplined scoring."
+            GroupProfileType.Mercenary -> "Emphasise competitive differentiation, decisive tradeoffs, and exposed weaknesses."
+        }
+        return listOf(
+            KnowledgeBaseEntryEntity(
+                id = "grader-overlay-mission-$groupId",
+                content = """
+                    You are $groupId, a grader civilisation created by a separate Genesis Council run.
+                    Worker objective: ${workerStartingField.objective}
+                    Your task: generate deep, diverse, adversarial criteria that expose shallow work.
+                    ${graderStartingField.norms}
+                """.trimIndent(),
+                domain = "grader_seed",
+                sourceAgentId = "grader-genesis-council",
+                generation = 0,
+                trustScore = 1.0,
+                status = "active",
+                groupId = groupId,
+                runId = runId,
+                createdAtMs = now
+            ),
+            KnowledgeBaseEntryEntity(
+                id = "grader-overlay-lens-$groupId",
+                content = "Evaluation lens for $groupId (${profileType.name}): $profileLens",
+                domain = "grader_seed",
+                sourceAgentId = "grader-genesis-council",
+                generation = 0,
+                trustScore = 1.0,
+                status = "active",
+                groupId = groupId,
+                runId = runId,
+                createdAtMs = now
+            )
+        )
+    }
+
+    private data class SeedInsertCounts(
+        val kb: Int = 0,
+        val kg: Int = 0,
+        val wip: Int = 0,
+        val tools: Int = 0
+    )
 
     /**
      * Runs post-mortem fitness scoring and Legacy Protocol extraction for all groups
@@ -2976,6 +3453,7 @@ class EvoKammerRunService(
         activeScoreNormalization = emptyMap()
         activeSealedTestSuiteJson = ""
         activeSealedTestSuiteHash = ""
+        activeGraderStartingField = null
         checkInGateOpenRound = null
         latestGroupDimensionScores.clear()
         latestGroupRoundAssessments.clear()

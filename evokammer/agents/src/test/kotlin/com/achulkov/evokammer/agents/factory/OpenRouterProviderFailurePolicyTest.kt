@@ -46,4 +46,28 @@ class OpenRouterProviderFailurePolicyTest {
         assertEquals(2, attempts)
         assertEquals(true, ex.message?.contains("TestAgent aborted") == true)
     }
+
+    @Test
+    fun `alibaba shaped 502 is treated as retryable provider failure`() = runTest {
+        var attempts = 0
+
+        val result = runWithOpenRouterProviderRetry(
+            agentLabel = "TestAgent",
+            maxRetries = 2,
+            retryDelayMs = 1L
+        ) {
+            attempts++
+            if (attempts < 2) {
+                error(
+                    "OpenRouter API error: Upstream error from Alibaba: <400> " +
+                        "InternalError.Algo.InvalidParameter: The \"function.arguments\" parameter " +
+                        "of the code model must be in JSON format. (code: 502)"
+                )
+            }
+            "ok"
+        }
+
+        assertEquals("ok", result)
+        assertEquals(2, attempts)
+    }
 }

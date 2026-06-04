@@ -241,6 +241,7 @@ object CouncilRolePrompts {
         - Seed documents reference appropriate domains
         - Model assignments cover all active roles
         - The sealed test suite is complete, locked, and hashed before any competing group spawns
+        - If the worker run has multiple groups, graderGroupCount should usually be 2-4 rather than 1
         
         If inconsistencies exist, resolve them with the most sensible interpretation.
         
@@ -256,7 +257,7 @@ object CouncilRolePrompts {
           "checkinMilestones": [5, 10],
           "leakIntervalGenerations": 20,
           "dispatchLagGenerations": 5,
-          "graderGroupCount": 1,
+          "graderGroupCount": 3,
           "rolePrompts": { "Researcher": "prompt text" },
           "modelPools": { "Researcher": ["model-a", "model-b"], "Planner": ["model-c", "model-d"] },
           "modelAssignment": { "Researcher": "model-id" },
