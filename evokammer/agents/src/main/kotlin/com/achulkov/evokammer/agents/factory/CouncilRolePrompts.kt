@@ -245,6 +245,77 @@ object CouncilRolePrompts {
         
         If inconsistencies exist, resolve them with the most sensible interpretation.
         
+        IMPORTANT — Deliverable Skeleton Tree (deliverableSkeletonTreeJson):
+        You MUST also generate a deliverable skeleton tree that describes the expected structure
+        of the final deliverable. This tree drives agent work assignment, grading attribution,
+        and final output synthesis. Design it as a rooted tree whose nodes represent semantic
+        parts of the deliverable output.
+        
+        The tree JSON schema:
+        {
+          "runId": "run-value",
+          "groupId": "group-0",
+          "rootNodeId": "dst:root",
+          "nodes": [
+            {
+              "nodeId": "dst:root",
+              "parentId": null,
+              "children": ["dst:section:introduction", "dst:section:analysis"],
+              "nodeType": "ROOT",
+              "title": "Deliverable Root",
+              "status": "STUB",
+              "currentArtifactRef": null,
+              "artifactVersion": 0,
+              "artifactType": "OTHER",
+              "owningGeneration": 0,
+              "owningAgentId": null,
+              "trustScore": 0.0,
+              "graderComplexityLevel": 1,
+              "gradingHistory": [],
+              "openGaps": [],
+              "deadEndRefs": [],
+              "citationAgentChain": [],
+              "createdAtGeneration": 0,
+              "updatedAtGeneration": 0
+            },
+            {
+              "nodeId": "dst:section:introduction",
+              "parentId": "dst:root",
+              "children": [],
+              "nodeType": "DOCUMENT_SECTION",
+              "title": "Introduction",
+              "pathHint": "doc/introduction.md",
+              "status": "STUB",
+              "currentArtifactRef": null,
+              "artifactVersion": 0,
+              "artifactType": "OTHER",
+              "owningGeneration": 0,
+              "owningAgentId": null,
+              "trustScore": 0.0,
+              "graderComplexityLevel": 1,
+              "gradingHistory": [],
+              "openGaps": [],
+              "deadEndRefs": [],
+              "citationAgentChain": [],
+              "createdAtGeneration": 0,
+              "updatedAtGeneration": 0
+            }
+          ]
+        }
+        
+        Node types: ROOT, DOCUMENT_SECTION, SOURCE_FILE, TOOL, TEST_SUITE, API_SPEC, ARTIFACT_BUNDLE, DATASET, OTHER.
+        Node statuses: STUB, IN_PROGRESS, COMPLETE, CONTESTED, DEAD_END.
+        
+        Guidelines:
+        - Create 5-15 nodes covering the expected deliverable structure
+        - The root must have nodeId "dst:root" and nodeType "ROOT"
+        - All non-root nodes must have parentId "dst:root" with empty children arrays
+        - All nodes start in STUB status with trustScore 0.0 and empty gradingHistory/openGaps
+        - For a document deliverable, use DOCUMENT_SECTION nodes (e.g., introduction, methods, results, discussion)
+        - For a code deliverable, use SOURCE_FILE, TOOL, and TEST_SUITE nodes
+        - graderComplexityLevel should start at 1 for foundational nodes, 2-3 for more advanced ones
+        - pathHint should suggest where the content would live (e.g., "doc/analysis.md", "src/main.py")
+        
         Output a COMPLETE StartingField JSON matching this exact schema:
         {
           "runId": "string",
@@ -264,6 +335,7 @@ object CouncilRolePrompts {
           "kgSchema": "{...}",
           "actionCosts": { "WRITE_STAGING": 1.0 },
           "nodeGraph": "[{ \"nodeId\": \"n1\", \"description\": \"...\" }]",
+          "deliverableSkeletonTreeJson": "the deliverable skeleton tree JSON object as a string — use the schema above",
           "primordialKb": [{ "id": "seed_1", "content": "...", "domain": "general" }],
           "primordialKgFacts": [{ "id": "fact_1", "subject": "A", "relation": "DEPENDS_ON", "object": "B", "confidence": 0.9, "domain": "general" }],
           "primordialTools": [{ "id": "tool_1", "name": "parse_json", "description": "...", "inputSchemaJson": "{...}", "outputSchemaJson": "{...}", "code": "...", "domain": "general" }],

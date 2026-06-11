@@ -53,7 +53,8 @@ internal class SealedTestSuiteEvaluator(
                     name = dimension.name,
                     weight = dimension.weight,
                     scoringGuidance = "Deterministic scoring derived from the sealed test suite and canonical substrate snapshot.",
-                    maxScore = dimension.maxScore
+                    maxScore = dimension.maxScore,
+                    dstNodeRef = dimension.dstNodeRef
                 )
             },
             automatedTests = parsed.tests.map { test ->

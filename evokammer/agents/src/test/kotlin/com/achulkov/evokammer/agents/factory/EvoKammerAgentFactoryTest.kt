@@ -3,13 +3,18 @@ package com.achulkov.evokammer.agents.factory
 import com.achulkov.evokammer.core.budget.BudgetConfig
 import com.achulkov.evokammer.core.budget.BudgetLedger
 import com.achulkov.evokammer.core.contract.AgentBootContext
+import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
+import com.achulkov.evokammer.sandbox.toolsandbox.ToolSubSandbox
 import com.achulkov.evokammer.core.model.GroupProfile
 import com.achulkov.evokammer.core.model.GroupProfileType
 import com.achulkov.evokammer.core.model.Role
+import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 /**
  * Unit tests for [EvoKammerAgentFactory] budget initialisation logic.
@@ -42,6 +47,41 @@ class EvoKammerAgentFactoryTest {
         gracePeriodSeconds = 30,
         allocatedBudget = allocatedBudget
     )
+
+    private fun bootContext(
+        role: Role,
+        isSubAgent: Boolean
+    ) = AgentBootContext(
+        agentId = "agent-001",
+        runId = "run-001",
+        groupId = "g0",
+        role = role,
+        rolePrompt = "test",
+        budgetToken = "token:001:0",
+        substrateDbPath = "/tmp/test.db",
+        stagingMountPath = "/staging",
+        wipTaskClaim = null,
+        legacyProtocol = null,
+        stageDisclosure = "",
+        modelAssignment = "openai/gpt-4o-mini",
+        ipcBaseUrl = "http://10.0.0.1:10000",
+        generation = 1,
+        gracePeriodSeconds = 30,
+        allocatedBudget = 50.0,
+        isSubAgent = isSubAgent,
+        parentAgentId = if (isSubAgent) "parent-001" else null
+    )
+
+    private fun factory(): EvoKammerAgentFactory {
+        val rootDir = createTempDirectory("agent-factory-test-").toFile()
+        val db = SubstrateDatabaseFactory(rootDir).get("run-001", "g0")
+        return EvoKammerAgentFactory(
+            openRouterApiKey = "sk-test",
+            db = db,
+            toolSubSandbox = ToolSubSandbox(),
+            budgetConfig = defaultConfig
+        )
+    }
 
     /**
      * Exercises only the budget-initialisation path of [EvoKammerAgentFactory.create]
@@ -96,5 +136,28 @@ class EvoKammerAgentFactoryTest {
         assertEquals(allocatedBudget * 0.05, floor, 0.001,
             "Floor should be 5% of the allocated budget, not the profile default")
         assertNotNull(floor)
+    }
+
+    @Test
+    fun `delegation tool is enabled for eligible top-level roles`() {
+        val factory = factory()
+        assertTrue(factory.shouldInstallDelegationTool(bootContext(role = Role.Builder, isSubAgent = false)))
+        assertTrue(factory.shouldInstallDelegationTool(bootContext(role = Role.Planner, isSubAgent = false)))
+        assertTrue(factory.shouldInstallDelegationTool(bootContext(role = Role.Researcher, isSubAgent = false)))
+    }
+
+    @Test
+    fun `delegation tool is disabled for ineligible top-level roles`() {
+        val factory = factory()
+        assertFalse(factory.shouldInstallDelegationTool(bootContext(role = Role.Critic, isSubAgent = false)))
+        assertFalse(factory.shouldInstallDelegationTool(bootContext(role = Role.Outlier, isSubAgent = false)))
+        assertFalse(factory.shouldInstallDelegationTool(bootContext(role = Role.Inspector, isSubAgent = false)))
+    }
+
+    @Test
+    fun `delegation tool is disabled for sub-agents even if the role can delegate`() {
+        val factory = factory()
+        assertFalse(factory.shouldInstallDelegationTool(bootContext(role = Role.Builder, isSubAgent = true)))
+        assertFalse(factory.shouldInstallDelegationTool(bootContext(role = Role.MetaPlanner, isSubAgent = true)))
     }
 }

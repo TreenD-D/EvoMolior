@@ -29,6 +29,13 @@ interface StagingDao {
     suspend fun getPending(runId: String, groupId: String): List<StagingSubmissionEntity>
 
     @Query("""
+        SELECT * FROM staging_submissions
+        WHERE runId = :runId AND groupId = :groupId AND generation = :generation AND status = 'pending'
+        ORDER BY submittedAtMs ASC
+    """)
+    suspend fun getPendingByGeneration(runId: String, groupId: String, generation: Int): List<StagingSubmissionEntity>
+
+    @Query("""
         SELECT * FROM staging_submissions 
         WHERE runId = :runId AND groupId = :groupId AND status = 'pending'
         ORDER BY submittedAtMs ASC
@@ -105,6 +112,12 @@ interface StagingDao {
         LIMIT :limit
     """)
     suspend fun getAll(runId: String, groupId: String, limit: Int = 300): List<StagingSubmissionEntity>
+
+    @Query("""
+        SELECT MAX(generation) FROM staging_submissions
+        WHERE runId = :runId AND groupId = :groupId
+    """)
+    suspend fun getMaxGeneration(runId: String, groupId: String): Int?
 
     /** All distinct agent IDs with at least one submission in a generation. */
     @Query("""

@@ -34,6 +34,7 @@ data class CheckinResult(
  * @param failedTestCount Number of failed deterministic tests.
  * @param gradingSheetApplied ID of the GradingSheet used.
  * @param stageAdvanced Whether the group's disclosure stage was advanced.
+ * @param deliverableNodeUpdates Node-level deliverable updates synthesized from the check-in.
  */
 @Serializable
 data class GroupCheckinResult(
@@ -44,5 +45,6 @@ data class GroupCheckinResult(
     val testPassRate: Double,
     val failedTestCount: Int,
     val gradingSheetApplied: String,
-    val stageAdvanced: Boolean
+    val stageAdvanced: Boolean,
+    val deliverableNodeUpdates: List<DeliverableSkeletonNodeUpdate> = emptyList()
 )

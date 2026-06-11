@@ -27,9 +27,13 @@ class BlindSubmissionGate(
 ) {
 
     private val _revealedScores = MutableSharedFlow<RevealedScores>(extraBufferCapacity = 32)
+    private val _sealAuditEvents = MutableSharedFlow<ScoreSealAudit>(extraBufferCapacity = 32)
 
     /** Emitted when the gate closes and scores are revealed to all groups. */
     val revealedScores: SharedFlow<RevealedScores> = _revealedScores.asSharedFlow()
+
+    /** Emitted when the gate closes and the sealed-score audit record is materialised. */
+    val sealAuditEvents: SharedFlow<ScoreSealAudit> = _sealAuditEvents.asSharedFlow()
 
     // State per round
     private var currentRoundIndex: Int = -1
@@ -120,6 +124,19 @@ class BlindSubmissionGate(
             missingGroupIds = groupIds.filter { it !in pendingScores }
         )
 
+        _sealAuditEvents.emit(
+            ScoreSealAudit(
+                roundIndex = currentRoundIndex,
+                expectedGroupCount = groupIds.size,
+                sealedGroupCount = pendingScores.size,
+                missingGroupIds = revealed.missingGroupIds,
+                forcedReveal = forceReveal,
+                gateOpenedAt = gateOpenedAt,
+                sealedAt = revealed.revealedAt,
+                sealLatencyMs = revealed.revealedAt - gateOpenedAt
+            )
+        )
+
         _revealedScores.emit(revealed)
         Napier.i("BlindSubmissionGate: gate CLOSED for round $currentRoundIndex — scores revealed (forced=$forceReveal)")
         pendingScores.clear()
@@ -168,4 +185,28 @@ data class RevealedScores(
     val revealedAt: Long,
     val wasForced: Boolean,
     val missingGroupIds: List<String>
+)
+
+/**
+ * Audit record emitted when the blind gate seals a round.
+ *
+ * @param roundIndex Round that was sealed.
+ * @param expectedGroupCount Number of groups expected to submit.
+ * @param sealedGroupCount Number of groups that submitted before reveal.
+ * @param missingGroupIds Groups that did not submit before the gate closed.
+ * @param forcedReveal True if the reveal happened due to timeout or explicit force.
+ * @param gateOpenedAt Epoch ms when the gate opened.
+ * @param sealedAt Epoch ms when the gate closed and scores were revealed.
+ * @param sealLatencyMs Duration between open and seal in milliseconds.
+ */
+@Serializable
+data class ScoreSealAudit(
+    val roundIndex: Int,
+    val expectedGroupCount: Int,
+    val sealedGroupCount: Int,
+    val missingGroupIds: List<String>,
+    val forcedReveal: Boolean,
+    val gateOpenedAt: Long,
+    val sealedAt: Long,
+    val sealLatencyMs: Long
 )

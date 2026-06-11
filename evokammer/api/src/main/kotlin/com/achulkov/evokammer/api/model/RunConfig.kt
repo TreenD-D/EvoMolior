@@ -23,6 +23,7 @@ import kotlinx.serialization.Serializable
  * @param contextArtifacts Uploaded run-start context artifacts.
  * @param continuationFromRunId Optional completed run to continue from by reusing its sealed
  *   `StartingField` snapshot as the baseline for this fresh run.
+ * @param finalOutputSpec Optional spec for the run's operator-facing generated output file.
  * @param isTestRun When true, enables a minimal single-group diagnostic run:
  *   - groupCount = 1 is allowed
  *   - Genesis Council is bypassed (defaults used)
@@ -44,6 +45,7 @@ data class RunConfig(
     val modelOverrides: Map<String, String> = emptyMap(),
     val contextArtifacts: List<RunInputArtifactUpload> = emptyList(),
     val continuationFromRunId: String? = null,
+    val finalOutputSpec: FinalOutputSpec? = null,
     /** True for a minimal diagnostic run: 1 group, no Genesis Council, fixed budget. */
     val isTestRun: Boolean = false,
     /**
@@ -64,6 +66,23 @@ data class RunConfig(
         require(scoringDimensions.isNotEmpty()) { "At least one scoring dimension is required" }
     }
 }
+
+/**
+ * Canonical generated output file expected from a run.
+ *
+ * Used by the final deliverable writer and archive layer so the operator can retrieve a
+ * deterministic named artifact from a run without scraping summaries.
+ *
+ * @param relativePath Relative path under the run's `outputs/` directory.
+ * @param mediaType MIME type of the generated file.
+ * @param description Human-readable purpose of the generated file.
+ */
+@Serializable
+data class FinalOutputSpec(
+    val relativePath: String,
+    val mediaType: String,
+    val description: String = ""
+)
 
 /**
  * Uploaded run-start artifact bytes encoded for transport over JSON or multipart bridging.

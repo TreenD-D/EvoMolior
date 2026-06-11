@@ -27,5 +27,8 @@ data class NestedGroupResult(
     val promotedToolIds: List<String>,
     val budgetConsumed: Double,
     val completedNormally: Boolean,
-    val summaryJson: String = "{}"
+    val summaryJson: String = "{}",
+    val importedKbDocumentIds: List<String> = emptyList(),
+    val importedKgFactIds: List<String> = emptyList(),
+    val importedToolIds: List<String> = emptyList()
 )

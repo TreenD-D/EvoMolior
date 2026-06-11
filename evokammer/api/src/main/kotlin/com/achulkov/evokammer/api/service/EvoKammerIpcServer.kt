@@ -1,8 +1,15 @@
 package com.achulkov.evokammer.api.service
 
 import com.achulkov.evokammer.api.events.EvoKammerEvent
+import com.achulkov.evokammer.api.model.OverseerExperimentLaunchRequest
 import com.achulkov.evokammer.api.model.RunConfig
 import com.achulkov.evokammer.api.model.RunInputArtifactUpload
+import com.achulkov.evokammer.core.contract.OverseerDeadEnd
+import com.achulkov.evokammer.core.contract.OverseerExperimentPlan
+import com.achulkov.evokammer.core.contract.OverseerExperimentPlanEligibility
+import com.achulkov.evokammer.core.contract.OverseerExperimentResult
+import com.achulkov.evokammer.core.contract.OverseerHypothesis
+import com.achulkov.evokammer.core.contract.OverseerKernelEligibility
 import io.github.aakira.napier.Napier
 import io.ktor.http.ContentType
 import io.ktor.http.content.PartData
@@ -98,7 +105,7 @@ class EvoKammerIpcServer(
                                             ?: part.originalFileName
                                             ?: error("Uploaded artifact is missing a relative path")
                                         val mimeType = part.contentType?.toString() ?: "application/octet-stream"
-                                        val bytes = part.provider().readRemaining().readBytes()
+                                        val bytes = part.readBytesForUpload()
                                         require(bytes.size.toLong() <= MAX_RUN_ARTIFACT_UPLOAD_BYTES) {
                                             "Uploaded artifact '$relativePath' exceeds the ${MAX_RUN_ARTIFACT_UPLOAD_BYTES / (1024 * 1024)} MiB limit"
                                         }
@@ -182,6 +189,71 @@ class EvoKammerIpcServer(
                         call.respondText("""{"error":"bundle_unavailable"}""", status = io.ktor.http.HttpStatusCode.NotFound)
                     }
                 }
+
+                get("/overseer/state") {
+                    call.respondText(json.encodeToString(svc.getOverseerKernelState()))
+                }
+
+                post("/overseer/hypotheses/preflight") {
+                    val hypothesis = json.decodeFromString<OverseerHypothesis>(call.receiveText())
+                    call.respondText(json.encodeToString(svc.preflightOverseerHypothesis(hypothesis)))
+                }
+
+                post("/overseer/hypotheses") {
+                    val hypothesis = json.decodeFromString<OverseerHypothesis>(call.receiveText())
+                    call.respondText(json.encodeToString(svc.formalizeOverseerHypothesis(hypothesis)))
+                }
+
+                post("/overseer/experiment-plans/preflight") {
+                    val experimentPlan = json.decodeFromString<OverseerExperimentPlan>(call.receiveText())
+                    call.respondText(json.encodeToString(svc.preflightOverseerExperimentPlan(experimentPlan)))
+                }
+
+                post("/overseer/experiment-plans") {
+                    val plan = json.decodeFromString<OverseerExperimentPlan>(call.receiveText())
+                    call.respondText(json.encodeToString(svc.registerOverseerExperimentPlan(plan)))
+                }
+
+                post("/overseer/experiment-plans/schedule") {
+                    call.respondText(json.encodeToString(svc.scheduleOverseerExperimentPlans()))
+                }
+
+                post("/overseer/experiment-plans/{experimentPlanId}/launch") {
+                    val experimentPlanId = call.parameters["experimentPlanId"]
+                        ?: error("experimentPlanId path parameter is required")
+                    val launchRequest = json.decodeFromString<OverseerExperimentLaunchRequest>(call.receiveText())
+                    call.respondText(json.encodeToString(svc.launchOverseerExperimentRun(experimentPlanId, launchRequest)))
+                }
+
+                post("/overseer/experiment-results") {
+                    val experimentResult = json.decodeFromString<OverseerExperimentResult>(call.receiveText())
+                    call.respondText(json.encodeToString(svc.recordOverseerExperimentResult(experimentResult)))
+                }
+
+                post("/overseer/dead-ends") {
+                    val deadEnd = json.decodeFromString<OverseerDeadEnd>(call.receiveText())
+                    call.respondText(json.encodeToString(svc.recordOverseerDeadEnd(deadEnd)))
+                }
+
+                get("/overseer/audit") {
+                    call.respondText(json.encodeToString(svc.getOverseerAuditEntries()))
+                }
+
+                get("/overseer/experiment-plans/{experimentPlanId}/history") {
+                    val experimentPlanId = call.parameters["experimentPlanId"]
+                        ?: error("experimentPlanId path parameter is required")
+                    call.respondText(json.encodeToString(svc.getOverseerExperimentPlanHistory(experimentPlanId)))
+                }
+
+                get("/overseer/dead-ends/{hypothesisId}/history") {
+                    val hypothesisId = call.parameters["hypothesisId"]
+                        ?: error("hypothesisId path parameter is required")
+                    call.respondText(json.encodeToString(svc.getOverseerDeadEndHistory(hypothesisId)))
+                }
+
+                get("/overseer/audit/archive") {
+                    call.respondText(json.encodeToString(svc.getOverseerAuditArchiveEntries()))
+                }
             }
         }.start(wait = false)
         Napier.i("EvoKammerIpcServer started on ws://localhost:$port")
@@ -201,3 +273,8 @@ private fun inferArtifactKind(mimeType: String, relativePath: String): com.achul
     mimeType.startsWith("image/") -> com.achulkov.evokammer.core.contract.RunInputArtifactKind.IMAGE
     else -> com.achulkov.evokammer.core.contract.RunInputArtifactKind.BINARY
 }
+
+// Keep the deprecation scoped to upload parsing until the build adopts the newer Ktor stream helper.
+@Suppress("DEPRECATION")
+private suspend fun PartData.FileItem.readBytesForUpload(): ByteArray =
+    provider().readRemaining().readBytes()

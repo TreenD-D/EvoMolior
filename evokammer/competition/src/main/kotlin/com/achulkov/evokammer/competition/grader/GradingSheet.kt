@@ -1,5 +1,6 @@
 package com.achulkov.evokammer.competition.grader
 
+import com.achulkov.evokammer.core.contract.DstRefinementProposal
 import kotlinx.serialization.Serializable
 
 /**
@@ -20,6 +21,7 @@ import kotlinx.serialization.Serializable
  * @param automatedTests Programmatic tests to run against each group's KB export.
  * @param failureModes Known patterns that constitute a failure.
  * @param comparativePairs Pairs of groups to compare head-to-head.
+ * @param proposedRefinements DST structural refinement proposals from this grader group.
  * @param sealedAt Epoch ms when the sheet was sealed (no further modifications allowed).
  * @param qualityScore Self-assessed quality score from Meta-Judge (0.0–1.0); null until adjudicated.
  */
@@ -33,6 +35,7 @@ data class GradingSheet(
     val automatedTests: List<AutomatedTest>,
     val failureModes: List<FailureMode>,
     val comparativePairs: List<ComparativePair>,
+    val proposedRefinements: List<DstRefinementProposal> = emptyList(),
     val sealedAt: Long? = null,
     val qualityScore: Double? = null
 ) {
@@ -54,6 +57,7 @@ data class GradingSheet(
  * @param weight Weight [0.0–1.0]; all weights in a sheet must sum to 1.0.
  * @param scoringGuidance Natural-language guidance for scoring agents.
  * @param maxScore Maximum score achievable on this dimension.
+ * @param dstNodeRef Optional deliverable-skeleton node reference that this dimension updates.
  */
 @Serializable
 data class RubricDimension(
@@ -61,7 +65,8 @@ data class RubricDimension(
     val name: String,
     val weight: Double,
     val scoringGuidance: String,
-    val maxScore: Double = 10.0
+    val maxScore: Double = 10.0,
+    val dstNodeRef: String? = null
 )
 
 /**

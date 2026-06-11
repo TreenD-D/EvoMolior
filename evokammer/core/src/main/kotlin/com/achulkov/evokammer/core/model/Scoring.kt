@@ -1,5 +1,7 @@
 package com.achulkov.evokammer.core.model
 
+import com.achulkov.evokammer.core.contract.DstRefinementProposal
+import com.achulkov.evokammer.core.contract.DstRubricPolicy
 import kotlinx.serialization.Serializable
 
 /**
@@ -12,6 +14,8 @@ import kotlinx.serialization.Serializable
  * @param description Full description shown to Graders.
  * @param weight Relative weight in the final score (0.0–1.0, all weights should sum to 1.0).
  * @param maxScore Maximum raw score for this dimension (default 100.0).
+ * @param dstNodeRef Optional deliverable-skeleton node reference that this dimension should
+ *   update. Null means the dimension is global rather than node-specific.
  */
 @Serializable
 data class ScoringDimension(
@@ -19,7 +23,8 @@ data class ScoringDimension(
     val name: String,
     val description: String,
     val weight: Double,
-    val maxScore: Double = 100.0
+    val maxScore: Double = 100.0,
+    val dstNodeRef: String? = null
 ) {
     init {
         require(weight > 0.0) { "Dimension weight must be positive, got $weight for '$id'" }
@@ -61,10 +66,14 @@ data class RoundScore(
  * @param roundIndex 0-based round index.
  * @param scores All group scores for this round (ranked).
  * @param winnerId The group with rank = 1 for this round.
+ * @param acceptedRefinements DST structural refinement proposals accepted by the Meta-Judge (Phase 7.5).
+ * @param newRubricPolicies Rubric policies enacted this round (Phase 7.5).
  */
 @Serializable
 data class GradingResult(
     val roundIndex: Int,
     val scores: List<RoundScore>,
-    val winnerId: String
+    val winnerId: String,
+    val acceptedRefinements: List<DstRefinementProposal> = emptyList(),
+    val newRubricPolicies: List<DstRubricPolicy> = emptyList()
 )

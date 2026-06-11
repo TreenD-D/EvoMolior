@@ -115,11 +115,29 @@ Each submodule has its own `agents.md` with detailed context:
 | 0 | Foundation — substrate, models, sandbox, budget | Implemented |
 | 1 | Single group, single generation | Implemented (iterating) |
 | 2 | Multi-generation, civilisational compounding | Implemented (iterating) |
-| 3 | Knowledge Graph integration | Implemented (iterating) |
+| 3 | Knowledge Graph integration | Partial |
 | 4 | Multi-group competition | Implemented (iterating) |
 | 5 | Differential privacy leaks | Implemented (iterating) |
-| 6 | Grader groups and blind scoring | Implemented (iterating) |
+| 6 | Grader groups and blind scoring | Partial |
 | 7 | Progressive disclosure and check-in curriculum | Implemented (iterating) |
 | 8 | Genesis Council automation | Implemented (iterating) |
-| 9 | Hierarchical civilisations and sub-agent delegation | Implemented (iterating) |
+| 9 | Hierarchical civilisations and sub-agent delegation | Partial |
 | 10 | Full integration and production hardening | In progress |
+
+Status rationale:
+
+- This table is intentionally aligned to `documentation/EvoKammer_Implementation_Plan_v1.0.md`
+  without modifying that document.
+- Phase 3 is marked `Partial` because KG storage/validation exists, but the plan’s own current
+  estimate still treats the dedicated KG-Critic loop as open.
+- Phase 6 is marked `Partial` because grader criteria/judging, blind sealing, and meta-judge
+  verdicts are wired, but the plan’s current estimate still treats grader civilisation behavior as
+  incomplete.
+- Phase 9 is marked `Partial` because sub-agent delegation tooling is live, nested inner-instance
+  rollup is now implemented, and a narrow production trigger exists via the MetaPlanner stasis
+  path, but hierarchical execution is still not validated through a real full task even though
+  `NestedGroupRunner` now waits on lifecycle quiescence rather than a time-based generation
+  barrier.
+- Phase 10 remains `In progress` because integration/hardening work is active and the plan’s
+  exit conditions still require full realistic-task validation, chaos testing, leak/score-seal
+  audits, and baseline comparison.

@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
 /**
@@ -44,7 +45,8 @@ class NestedGroupRunner(
         groupId: String,
         openRouterApiKey: String,
         agentJarPath: String
-    ) -> LifecycleManager
+    ) -> LifecycleManager,
+    private val generationBarrierTimeoutMs: Long = 300_000L
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -104,9 +106,11 @@ class NestedGroupRunner(
                     scope = scope
                 )
 
-                // Wait for a generation round (simple time-based for now)
-                val roundDurationMs = estimateRoundDurationMs(budgetCeiling)
-                delay(roundDurationMs)
+                // Wait for the inner lifecycle to quiesce instead of relying on a fixed timer.
+                waitForGenerationBarrier(
+                    lifecycleManager = lifecycleManager,
+                    generation = generation
+                )
 
                 generationsCompleted++
 
@@ -141,9 +145,8 @@ class NestedGroupRunner(
             .search(nestedRunId, config.nestedGroupId, "", 500)
             .filter { it.status == "active" && !it.isDeadEnd }
             .map { it.id }
-        val kgFactIds = db.knowledgeBaseDao()
-            .search(nestedRunId, config.nestedGroupId, "", 500)
-            .filter { it.status == "active" }
+        val kgFactIds = db.knowledgeGraphFactDao()
+            .queryByTriplePattern(nestedRunId, config.nestedGroupId, "%", "%", "%", 500)
             .map { it.id }
         val promotedToolIds = db.toolRegistryDao()
             .getActive(nestedRunId, config.nestedGroupId, null)
@@ -158,16 +161,60 @@ class NestedGroupRunner(
             promotedToolIds = promotedToolIds,
             budgetConsumed = budgetConsumed,
             completedNormally = completedNormally,
-            summaryJson = buildSummaryJson(generationsCompleted, kbDocumentIds, kgFactIds)
+            summaryJson = buildSummaryJson(generationsCompleted, kbDocumentIds, kgFactIds, promotedToolIds)
         )
     }
 
-    private fun estimateRoundDurationMs(budgetCeiling: Double): Long {
-        // In production, this would be dynamic based on agent activity.
-        // For now, use a simple proportional estimate (1 min per 10 budget units, min 30s).
-        return ((budgetCeiling / 10.0) * 60_000L).toLong().coerceAtLeast(30_000L).coerceAtMost(300_000L)
+    private suspend fun waitForGenerationBarrier(
+        lifecycleManager: LifecycleManager,
+        generation: Int
+    ) {
+        var observedLifecycleActivity = false
+        val reachedQuiescence = withTimeoutOrNull<Boolean>(generationBarrierTimeoutMs) {
+            while (true) {
+                val liveAgents = lifecycleManager.getLiveAgentCount()
+                val liveNestedGroups = lifecycleManager.getLiveNestedGroupCount()
+                if (liveAgents > 0 || liveNestedGroups > 0) {
+                    observedLifecycleActivity = true
+                } else if (observedLifecycleActivity) {
+                    Napier.i(
+                        "NestedGroupRunner: ${config.nestedGroupId} generation $generation barrier reached " +
+                            "(idle, nestedGroups=$liveNestedGroups)"
+                    )
+                    return@withTimeoutOrNull true
+                }
+                delay(250L)
+            }
+            false
+        } ?: false
+
+        if (reachedQuiescence) return
+
+        val liveAgents = lifecycleManager.getLiveAgentCount()
+        val liveNestedGroups = lifecycleManager.getLiveNestedGroupCount()
+        val message = buildString {
+            append("NestedGroupRunner: ")
+            append(config.nestedGroupId)
+            append(" generation ")
+            append(generation)
+            append(" barrier timed out while waiting for lifecycle quiescence")
+            append(" (liveAgents=")
+            append(liveAgents)
+            append(", liveNestedGroups=")
+            append(liveNestedGroups)
+            append(", timeoutMs=")
+            append(generationBarrierTimeoutMs)
+            append(")")
+        }
+        Napier.w(message)
+        throw IllegalStateException(message)
     }
 
-    private fun buildSummaryJson(gens: Int, kbIds: List<String>, kgIds: List<String>): String =
-        """{"generationsCompleted":$gens,"kbDocumentCount":${kbIds.size},"kgFactCount":${kgIds.size}}"""
+    private fun buildSummaryJson(
+        gens: Int,
+        kbIds: List<String>,
+        kgIds: List<String>,
+        toolIds: List<String>
+    ): String =
+        """{"generationsCompleted":$gens,"kbDocumentCount":${kbIds.size},"kgFactCount":${kgIds.size},"toolCount":${toolIds.size}}"""
 }

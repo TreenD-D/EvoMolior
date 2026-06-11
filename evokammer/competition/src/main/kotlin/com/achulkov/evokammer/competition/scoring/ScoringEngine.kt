@@ -3,6 +3,8 @@ package com.achulkov.evokammer.competition.scoring
 import com.achulkov.evokammer.competition.grader.GradingSheet
 import com.achulkov.evokammer.competition.grader.MetaJudge
 import com.achulkov.evokammer.competition.grader.MetaJudgeVerdict
+import com.achulkov.evokammer.core.contract.DeliverableArtifactType
+import com.achulkov.evokammer.core.contract.DeliverableSkeletonNodeUpdate
 import com.achulkov.evokammer.core.model.DimensionScore
 import com.achulkov.evokammer.core.model.GradingResult
 import com.achulkov.evokammer.core.model.RoundScore
@@ -47,6 +49,11 @@ class ScoringEngine(
      */
     val failureTelemetry: SharedFlow<FailureTelemetry> = _failureTelemetry.asSharedFlow()
 
+    private val _deliverableNodeUpdates = MutableSharedFlow<List<DeliverableSkeletonNodeUpdate>>(extraBufferCapacity = 64)
+
+    /** Emits deliverable-skeleton node updates synthesized from round scoring. */
+    val deliverableNodeUpdates: SharedFlow<List<DeliverableSkeletonNodeUpdate>> = _deliverableNodeUpdates.asSharedFlow()
+
     /**
      * Processes [RevealedScores] from the blind gate.
      *
@@ -67,12 +74,19 @@ class ScoringEngine(
         val result = GradingResult(
             roundIndex = revealed.roundIndex,
             scores = roundScores,
-            winnerId = winner
+            winnerId = winner,
+            acceptedRefinements = verdict.acceptedRefinements,
+            newRubricPolicies = verdict.newRubricPolicies
         )
 
         _gradingResults.emit(result)
         Napier.i("ScoringEngine: round ${revealed.roundIndex} scored — winner=$winner " +
                 "(forced=${revealed.wasForced}, missing=${revealed.missingGroupIds})")
+
+        val deliverableUpdates = synthesiseDeliverableNodeUpdates(revealed, verdict, roundScores)
+        if (deliverableUpdates.isNotEmpty()) {
+            _deliverableNodeUpdates.emit(deliverableUpdates)
+        }
 
         // Emit telemetry for each group
         for ((groupId, groupResult) in revealed.scores) {
@@ -139,6 +153,39 @@ class ScoringEngine(
                 weightedTotal = weightedScore,
                 rank = idx + 1
             )
+        }
+    }
+
+    private fun synthesiseDeliverableNodeUpdates(
+        revealed: RevealedScores,
+        verdict: MetaJudgeVerdict,
+        roundScores: List<RoundScore>
+    ): List<DeliverableSkeletonNodeUpdate> {
+        val scoreByGroup = roundScores.associateBy { it.groupId }
+        return revealed.scores.flatMap { (groupId, groupResult) ->
+            val refScores = mutableMapOf<String, MutableMap<String, Double>>()
+            verdict.dimensionNodeRefs.forEach { (dimId, nodeRef) ->
+                if (nodeRef.isNullOrBlank()) return@forEach
+                val score = groupResult.dimensionScores[dimId] ?: return@forEach
+                refScores.getOrPut(nodeRef) { mutableMapOf() }[dimId] = score
+            }
+
+            refScores.map { (nodeRef, dimScores) ->
+                DeliverableSkeletonNodeUpdate(
+                    dstNodeRef = nodeRef,
+                    groupId = groupId,
+                    checkinId = "round-${revealed.roundIndex}",
+                    dimensionScores = dimScores.toMap(),
+                    graderIds = verdict.graderSheetIds,
+                    rubricVersion = "meta-judge-round-${revealed.roundIndex}",
+                    graderNotes = listOf("Synthesised from round scoring for group $groupId"),
+                    passedThreshold = (scoreByGroup[groupId]?.weightedTotal ?: 0.0) > 0.6,
+                    artifactRef = "group:$groupId:round:${revealed.roundIndex}",
+                    artifactType = DeliverableArtifactType.REPO_SNAPSHOT,
+                    trustScore = (scoreByGroup[groupId]?.weightedTotal ?: 0.0) / 100.0,
+                    owningGeneration = revealed.roundIndex
+                )
+            }
         }
     }
 

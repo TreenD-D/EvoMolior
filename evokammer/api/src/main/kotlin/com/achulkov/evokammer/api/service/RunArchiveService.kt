@@ -1,5 +1,6 @@
 package com.achulkov.evokammer.api.service
 
+import com.achulkov.evokammer.api.model.FinalOutputSpec
 import com.achulkov.evokammer.core.contract.StartingField
 import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
 import com.achulkov.evokammer.substrate.db.entity.MetaArchiveEntryEntity
@@ -9,9 +10,14 @@ import kotlinx.coroutines.withContext
 import com.achulkov.evokammer.substrate.db.entity.KnowledgeBaseEntryEntity
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -51,6 +57,8 @@ class RunArchiveService(
      * @param objective          The run's objective text (for future Council search).
      * @param startingFieldJson  The StartingField JSON used to seed the run.
      * @param finalGeneration    The last generation number that was run.
+     * @param requestedOutputSpec Canonical output spec for the run's operator-facing generated file.
+     *   When present, this is preferred over the persisted-state file for archive recovery.
      */
     suspend fun archiveRun(
         runId: String,
@@ -59,6 +67,7 @@ class RunArchiveService(
         objective: String,
         startingFieldJson: String,
         finalGeneration: Int,
+        requestedOutputSpec: FinalOutputSpec? = null,
         completionRecord: RunCompletionRecord? = null
     ) = withContext(Dispatchers.IO) {
         Napier.i("RunArchiveService: archiving run=$runId winner=$winnerId groups=${groupIds.size}")
@@ -193,16 +202,28 @@ class RunArchiveService(
                         Napier.w("RunArchiveService: failed to archive winning KB for $groupId", err)
                     }
                 }
+
+                runCatching {
+                    archiveDeliverableSkeletonTree(runId, groupId, objective, finalGeneration, now, isWinner)
+                }.onFailure { err ->
+                    Napier.w("RunArchiveService: failed to archive deliverable tree for $groupId", err)
+                }
             }
 
             runCatching {
-                writeResultsBundle(runId, completionRecord)
+                writeResultsBundle(runId, completionRecord, requestedOutputSpec)
             }.onFailure { err ->
                 Napier.w("RunArchiveService: failed to write results bundle for $runId", err)
             }
 
             runCatching {
-                writeFinalArticleHtml(runId, completionRecord)
+                writeGeneratedOutputFiles(runId, completionRecord, requestedOutputSpec)
+            }.onFailure { err ->
+                Napier.w("RunArchiveService: failed to write generated output files for $runId", err)
+            }
+
+            runCatching {
+                writeFinalArticleHtml(runId, completionRecord, requestedOutputSpec)
             }.onFailure { err ->
                 Napier.w("RunArchiveService: failed to write final article HTML for $runId", err)
             }
@@ -220,9 +241,16 @@ class RunArchiveService(
      * meta-archive entries captured during the run.
      *
      * @param runId The completed or partial run identifier.
+     * @param completionRecord Optional pre-decoded completion record to avoid re-reading the archive.
+     * @param requestedOutputSpec Canonical output spec for the run's operator-facing generated file.
+     *   When present, this is preferred over the persisted-state file for archive recovery.
      * @return ZIP bytes, or null if the run has no sealed StartingField yet.
      */
-    suspend fun buildResultsBundle(runId: String, completionRecord: RunCompletionRecord? = null): ByteArray? = withContext(Dispatchers.IO) {
+    suspend fun buildResultsBundle(
+        runId: String,
+        completionRecord: RunCompletionRecord? = null,
+        requestedOutputSpec: FinalOutputSpec? = null
+    ): ByteArray? = withContext(Dispatchers.IO) {
         val archiveDb = dbFactory.get(runId, META_ARCHIVE_GROUP_ID)
         val entries = archiveDb.metaArchiveDao().getByRun(runId)
         val startingFieldEntry = entries.firstOrNull { it.entryType == ENTRY_STARTING_FIELD } ?: return@withContext null
@@ -239,6 +267,15 @@ class RunArchiveService(
                 json.decodeFromString(RunCompletionRecord.serializer(), it.contentJson)
             }.getOrNull()
         }
+        val resolvedRequestedOutputSpec = requestedOutputSpec
+            ?: resolvedCompletionRecord?.requestedOutputSpec
+            ?: resolveRequestedOutputSpec(runId)
+        val generatedOutputs = resolveGeneratedOutputFiles(
+            runId = runId,
+            entries = entries,
+            completionRecord = resolvedCompletionRecord,
+            requestedOutputSpec = resolvedRequestedOutputSpec
+        )
 
         val manifestJson = buildJsonObject {
             put("runId", runId)
@@ -275,8 +312,24 @@ class RunArchiveService(
             addEntry("manifest.json", manifestJson.toByteArray(Charsets.UTF_8))
             addEntry("input-artifacts.json", startingField.inputArtifacts.toZipManifestJson().toByteArray(Charsets.UTF_8))
             addEntry("starting-field.json", startingFieldEntry.contentJson.toByteArray(Charsets.UTF_8))
-            resolvedCompletionRecord?.let { record ->
-                addEntry("outputs/final-article.html", buildFinalArticleHtml(startingField, record).toByteArray(Charsets.UTF_8))
+            if (generatedOutputs.isNotEmpty()) {
+                generatedOutputs.forEach { outputFile ->
+                    addEntry("outputs/${outputFile.relativePath}", outputFile.content.toByteArray(Charsets.UTF_8))
+                }
+            } else {
+                resolvedCompletionRecord?.let { record ->
+                    buildFinalArticleHtml(startingField, record, resolvedRequestedOutputSpec)?.let { fallbackHtml ->
+                        addEntry("outputs/final-article.html", fallbackHtml.toByteArray(Charsets.UTF_8))
+                    }
+                }
+            }
+
+            val treeOutputs = File(resolveRunRoot(runId), "results")
+                .listFiles { file -> file.isFile && file.name.startsWith("deliverable-skeleton-tree-") && file.name.endsWith(".json") }
+                ?.sortedBy { it.name }
+                .orEmpty()
+            treeOutputs.forEach { treeFile ->
+                addEntry("outputs/${treeFile.name}", Files.readAllBytes(treeFile.toPath()))
             }
 
             if (artifactsRoot.exists()) {
@@ -312,10 +365,17 @@ class RunArchiveService(
      * Writes the downloadable results ZIP to the run's results directory.
      *
      * @param runId The run identifier.
+     * @param completionRecord Optional pre-decoded completion record to avoid re-reading the archive.
+     * @param requestedOutputSpec Canonical output spec for the run's operator-facing generated file.
+     *   When present, this is preferred over the persisted-state file for archive recovery.
      * @return Path to the written ZIP file, or null if the bundle could not be built.
      */
-    suspend fun writeResultsBundle(runId: String, completionRecord: RunCompletionRecord? = null): File? = withContext(Dispatchers.IO) {
-        val bytes = buildResultsBundle(runId, completionRecord) ?: return@withContext null
+    suspend fun writeResultsBundle(
+        runId: String,
+        completionRecord: RunCompletionRecord? = null,
+        requestedOutputSpec: FinalOutputSpec? = null
+    ): File? = withContext(Dispatchers.IO) {
+        val bytes = buildResultsBundle(runId, completionRecord, requestedOutputSpec) ?: return@withContext null
         val bundleFile = resultsBundleFile(runId)
         bundleFile.parentFile?.mkdirs()
         bundleFile.writeBytes(bytes)
@@ -330,6 +390,8 @@ class RunArchiveService(
         const val ENTRY_DEAD_ENDS        = "DEAD_ENDS_EXPORT"
         const val ENTRY_LEGACY_PROTOCOLS = "LEGACY_PROTOCOLS"
         const val ENTRY_WINNING_KB       = "WINNING_KB_SNAPSHOT"
+        const val ENTRY_DELIVERABLE_TREE  = "DELIVERABLE_SKELETON_TREE"
+        const val ENTRY_OVERSEER_AUDIT    = com.achulkov.evokammer.core.contract.OverseerKernelArchive.ENTRY_TYPE
         const val ENTRY_ROUND_SUMMARY    = "ROUND_SUMMARY"
         const val ENTRY_GRADING_SHEET    = "GRADING_SHEET"
         const val ENTRY_RUN_COMPLETED    = "RUN_COMPLETED"
@@ -343,7 +405,42 @@ class RunArchiveService(
 
     private fun finalArticleFile(runId: String): File = File(resolveRunRoot(runId), "results/final-article.html")
 
-    private suspend fun writeFinalArticleHtml(runId: String, completionRecord: RunCompletionRecord? = null): File? = withContext(Dispatchers.IO) {
+    private fun generatedOutputFile(runId: String, relativePath: String): File =
+        File(resolveRunRoot(runId), "results/$relativePath")
+
+    private suspend fun writeGeneratedOutputFiles(
+        runId: String,
+        completionRecord: RunCompletionRecord? = null,
+        requestedOutputSpec: FinalOutputSpec? = null
+    ): List<File> = withContext(Dispatchers.IO) {
+        val archiveDb = dbFactory.get(runId, META_ARCHIVE_GROUP_ID)
+        val entries = archiveDb.metaArchiveDao().getByRun(runId)
+        val resolvedCompletionRecord = completionRecord ?: entries.firstOrNull { it.entryType == ENTRY_RUN_COMPLETED }?.let {
+            runCatching {
+                json.decodeFromString(RunCompletionRecord.serializer(), it.contentJson)
+            }.getOrNull()
+        }
+        val generatedOutputs = resolveGeneratedOutputFiles(
+            runId = runId,
+            entries = entries,
+            completionRecord = resolvedCompletionRecord,
+            requestedOutputSpec = requestedOutputSpec
+                ?: resolvedCompletionRecord?.requestedOutputSpec
+                ?: resolveRequestedOutputSpec(runId)
+        )
+        generatedOutputs.map { output ->
+            generatedOutputFile(runId, output.relativePath).also { file ->
+                file.parentFile?.mkdirs()
+                file.writeText(output.content, Charsets.UTF_8)
+            }
+        }
+    }
+
+    private suspend fun writeFinalArticleHtml(
+        runId: String,
+        completionRecord: RunCompletionRecord? = null,
+        requestedOutputSpec: FinalOutputSpec? = null
+    ): File? = withContext(Dispatchers.IO) {
         val archiveDb = dbFactory.get(runId, META_ARCHIVE_GROUP_ID)
         val entries = archiveDb.metaArchiveDao().getByRun(runId)
         val startingFieldEntry = entries.firstOrNull { it.entryType == ENTRY_STARTING_FIELD } ?: return@withContext null
@@ -357,25 +454,106 @@ class RunArchiveService(
                 json.decodeFromString(RunCompletionRecord.serializer(), it.contentJson)
             }.getOrNull()
         } ?: return@withContext null
+        val resolvedRequestedOutputSpec = requestedOutputSpec
+            ?: resolvedCompletionRecord?.requestedOutputSpec
+            ?: resolveRequestedOutputSpec(runId)
+        if (resolvedRequestedOutputSpec != null &&
+            !resolvedRequestedOutputSpec.mediaType.startsWith("text/html", ignoreCase = true)
+        ) {
+            return@withContext null
+        }
         val file = finalArticleFile(runId)
         file.parentFile?.mkdirs()
-        file.writeText(buildFinalArticleHtml(startingField, resolvedCompletionRecord), Charsets.UTF_8)
+        val html = buildFinalArticleHtml(startingField, resolvedCompletionRecord, resolvedRequestedOutputSpec) ?: return@withContext null
+        file.writeText(html, Charsets.UTF_8)
         file
+    }
+
+    private suspend fun archiveDeliverableSkeletonTree(
+        runId: String,
+        groupId: String,
+        objective: String,
+        finalGeneration: Int,
+        archivedAtMs: Long,
+        isFromWinner: Boolean
+    ) = withContext(Dispatchers.IO) {
+        val treeFile = File(dbFactory.groupControlDir(runId, groupId), "deliverable-skeleton-tree.json")
+        if (!treeFile.exists()) return@withContext
+
+        val resultsTreeFile = File(resolveRunRoot(runId), "results/deliverable-skeleton-tree-$groupId.json")
+        resultsTreeFile.parentFile?.mkdirs()
+        resultsTreeFile.writeBytes(treeFile.readBytes())
+
+        val archiveDb = dbFactory.get(runId, META_ARCHIVE_GROUP_ID)
+        archiveDb.metaArchiveDao().insert(
+            MetaArchiveEntryEntity(
+                id = UUID.randomUUID().toString(),
+                runId = runId,
+                entryType = ENTRY_DELIVERABLE_TREE,
+                groupId = groupId,
+                label = "Deliverable Skeleton Tree — $groupId — run $runId",
+                contentJson = treeFile.readText(),
+                runObjective = objective,
+                finalScore = null,
+                isFromWinner = isFromWinner,
+                generation = finalGeneration,
+                archivedAtMs = archivedAtMs
+            )
+        )
     }
 
     private fun buildFinalArticleHtml(
         startingField: StartingField,
-        completionRecord: RunCompletionRecord
-    ): String {
+        completionRecord: RunCompletionRecord,
+        requestedOutputSpec: FinalOutputSpec? = null
+    ): String? {
+        val sourceCatalog = VerifiedSourceCatalog.resolve(resolveRunRoot(completionRecord.runId))
+        completionRecord.generatedOutputFiles
+            .firstOrNull { it.mediaType.startsWith("text/html", ignoreCase = true) }
+            ?.let { authoredHtml ->
+                return runCatching {
+                    validateGeneratedOutputFile(authoredHtml)
+                    VerifiedSourceCatalog.validate(authoredHtml, sourceCatalog)
+                    normalizeStandaloneHtml(authoredHtml.content)
+                }.getOrNull()
+            }
         completionRecord.finalDeliverableHtml
             ?.takeIf { it.isNotBlank() }
             ?.let { authoredHtml ->
-                return normalizeStandaloneHtml(authoredHtml)
+                val resolvedRequestedOutputSpec = requestedOutputSpec ?: resolveRequestedOutputSpec(completionRecord.runId)
+                return runCatching {
+                    val output = validateGeneratedOutputFile(
+                        GeneratedOutputFile(
+                            relativePath = resolvedRequestedOutputSpec?.relativePath ?: "final-article.html",
+                            mediaType = resolvedRequestedOutputSpec?.mediaType ?: "text/html",
+                            content = authoredHtml
+                        )
+                    )
+                    VerifiedSourceCatalog.validate(output, sourceCatalog)
+                    normalizeStandaloneHtml(authoredHtml)
+                }.getOrNull()
             }
         extractEmbeddedFinalDeliverableHtml(completionRecord)
             ?.let { authoredHtml ->
-                return normalizeStandaloneHtml(authoredHtml)
+                val resolvedRequestedOutputSpec = requestedOutputSpec ?: resolveRequestedOutputSpec(completionRecord.runId)
+                return runCatching {
+                    val output = validateGeneratedOutputFile(
+                        GeneratedOutputFile(
+                            relativePath = resolvedRequestedOutputSpec?.relativePath ?: "final-article.html",
+                            mediaType = resolvedRequestedOutputSpec?.mediaType ?: "text/html",
+                            content = authoredHtml
+                        )
+                    )
+                    VerifiedSourceCatalog.validate(output, sourceCatalog)
+                    normalizeStandaloneHtml(authoredHtml)
+                }.getOrNull()
             }
+        val resolvedRequestedOutputSpec = requestedOutputSpec ?: resolveRequestedOutputSpec(completionRecord.runId)
+        if (resolvedRequestedOutputSpec != null &&
+            !resolvedRequestedOutputSpec.mediaType.startsWith("text/html", ignoreCase = true)
+        ) {
+            return null
+        }
 
         val title = startingField.objective
             .lineSequence()
@@ -529,6 +707,190 @@ class RunArchiveService(
         }
     }
 
+    private fun resolveRequestedOutputSpec(runId: String): FinalOutputSpec? {
+        val stateFile = File(resolveRunRoot(runId), "control/${PersistedRunStateStore.STATE_FILE_NAME}")
+        return PersistedRunStateStore.read(stateFile)?.finalOutputSpec
+    }
+
+    private fun resolveGeneratedOutputFiles(
+        runId: String,
+        entries: List<MetaArchiveEntryEntity>,
+        completionRecord: RunCompletionRecord?,
+        requestedOutputSpec: FinalOutputSpec?
+    ): List<GeneratedOutputFile> {
+        val sourceCatalog = VerifiedSourceCatalog.resolve(resolveRunRoot(runId))
+        completionRecord?.generatedOutputFiles
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { outputs ->
+                var firstFailure: Throwable? = null
+                val validatedOutputs = outputs.mapNotNull { output ->
+                    runCatching {
+                        val validated = validateGeneratedOutputFile(output)
+                        VerifiedSourceCatalog.validate(validated, sourceCatalog)
+                        validated
+                    }.onFailure { err ->
+                        if (firstFailure == null) firstFailure = err
+                        Napier.w(
+                            "RunArchiveService: skipping invalid generated output ${output.relativePath} for $runId: ${err.message}"
+                        )
+                    }.getOrNull()
+                }
+                if (validatedOutputs.isEmpty() && firstFailure != null) {
+                    throw IllegalStateException(
+                        "All generated outputs for $runId were invalid: ${firstFailure?.message}"
+                    )
+                }
+                return validatedOutputs
+            }
+
+        val recoveredSummaryOutput = requestedOutputSpec?.let { outputSpec ->
+            extractGeneratedOutputFromRoundSummaries(runId, entries, outputSpec)
+        }
+        if (recoveredSummaryOutput != null) {
+            val validated = validateGeneratedOutputFile(recoveredSummaryOutput)
+            VerifiedSourceCatalog.validate(validated, sourceCatalog)
+            return listOf(validated)
+        }
+
+        val fallbackHtml = completionRecord?.let { record ->
+            record.finalDeliverableHtml
+                ?.takeIf { it.isNotBlank() }
+                ?: extractEmbeddedFinalDeliverableHtml(record)
+        }
+        if (fallbackHtml != null &&
+            (requestedOutputSpec == null || requestedOutputSpec.mediaType.startsWith("text/html", ignoreCase = true))
+        ) {
+            val validated = validateGeneratedOutputFile(
+                GeneratedOutputFile(
+                    relativePath = requestedOutputSpec?.relativePath ?: "final-article.html",
+                    mediaType = requestedOutputSpec?.mediaType ?: "text/html",
+                    content = normalizeStandaloneHtml(fallbackHtml)
+                )
+            )
+            VerifiedSourceCatalog.validate(validated, sourceCatalog)
+            return listOf(validated)
+        }
+
+        return emptyList()
+    }
+
+    private fun extractGeneratedOutputFromRoundSummaries(
+        runId: String,
+        entries: List<MetaArchiveEntryEntity>,
+        outputSpec: FinalOutputSpec
+    ): GeneratedOutputFile? {
+        val roundSummaryEntries = entries
+            .asSequence()
+            .filter { it.entryType == ENTRY_ROUND_SUMMARY && it.runId == runId }
+            .sortedWith(
+                compareByDescending<MetaArchiveEntryEntity> { it.generation }
+                    .thenByDescending { it.archivedAtMs }
+            )
+            .toList()
+
+        roundSummaryEntries.forEach { entry ->
+            extractSubmissionSummaries(entry).forEach { summary ->
+                extractGeneratedOutputFromSummary(summary, outputSpec)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun extractSubmissionSummaries(entry: MetaArchiveEntryEntity): List<String> {
+        val payload = runCatching { json.parseToJsonElement(entry.contentJson).jsonObject }.getOrNull() ?: return emptyList()
+        val winnerId = payload["roundWinnerId"]?.jsonPrimitive?.contentOrNull
+        val summaries = payload["groupSummaries"]?.jsonArray.orEmpty()
+            .mapNotNull { element ->
+                val obj = element as? JsonObject ?: return@mapNotNull null
+                val groupId = obj["groupId"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                val submissionSummary = obj["submissionSummary"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+                    ?: return@mapNotNull null
+                Triple(groupId == winnerId, groupId, submissionSummary)
+            }
+
+        return summaries
+            .sortedWith(compareByDescending<Triple<Boolean, String, String>> { it.first }.thenByDescending { it.second })
+            .map { it.third }
+    }
+
+    private fun extractGeneratedOutputFromSummary(
+        summary: String,
+        outputSpec: FinalOutputSpec
+    ): GeneratedOutputFile? {
+        directBodyGeneratedOutputFile(summary, outputSpec)?.let { return validateGeneratedOutputFile(it) }
+
+        if (outputSpec.mediaType.equals("application/json", ignoreCase = true) ||
+            outputSpec.mediaType.endsWith("+json", ignoreCase = true)
+        ) {
+            extractFencedCodeBlock(summary, preferredLanguage = "json")
+                ?.let { directBodyGeneratedOutputFile(it, outputSpec) }
+                ?.let { return validateGeneratedOutputFile(it) }
+        }
+
+        extractFencedCodeBlock(summary)
+            ?.let { directBodyGeneratedOutputFile(it, outputSpec) }
+            ?.let { return validateGeneratedOutputFile(it) }
+
+        return null
+    }
+
+    private fun directBodyGeneratedOutputFile(
+        candidate: String,
+        outputSpec: FinalOutputSpec
+    ): GeneratedOutputFile? {
+        val body = candidate.trim()
+        if (body.isBlank()) return null
+
+        val acceptsBody = when {
+            outputSpec.mediaType.startsWith("text/html", ignoreCase = true) -> false
+            outputSpec.mediaType.equals("application/json", ignoreCase = true) ||
+                outputSpec.mediaType.endsWith("+json", ignoreCase = true) ->
+                runCatching { json.parseToJsonElement(body) }.isSuccess
+            outputSpec.mediaType.startsWith("text/", ignoreCase = true) -> true
+            else -> false
+        }
+        if (!acceptsBody) return null
+
+        return GeneratedOutputFile(
+            relativePath = outputSpec.relativePath,
+            mediaType = outputSpec.mediaType,
+            content = body
+        )
+    }
+
+    private fun extractFencedCodeBlock(
+        text: String,
+        preferredLanguage: String? = null
+    ): String? {
+        data class FenceBlock(val language: String?, val body: String)
+
+        val lines = text.lines()
+        val blocks = mutableListOf<FenceBlock>()
+        var index = 0
+        while (index < lines.size) {
+            val trimmed = lines[index].trim()
+            if (!trimmed.startsWith("```")) {
+                index += 1
+                continue
+            }
+            val language = trimmed.removePrefix("```").trim().takeIf { it.isNotBlank() }
+            val bodyLines = mutableListOf<String>()
+            index += 1
+            while (index < lines.size && !lines[index].trim().startsWith("```")) {
+                bodyLines += lines[index]
+                index += 1
+            }
+            blocks += FenceBlock(language = language, body = bodyLines.joinToString("\n").trim())
+            index += 1
+        }
+
+        preferredLanguage?.let { language ->
+            blocks.firstOrNull { it.language.equals(language, ignoreCase = true) && it.body.isNotBlank() }
+                ?.let { return it.body }
+        }
+        return blocks.firstOrNull { it.body.isNotBlank() }?.body
+    }
+
     private fun extractEmbeddedFinalDeliverableHtml(
         completionRecord: RunCompletionRecord
     ): String? {
@@ -617,6 +979,111 @@ class RunArchiveService(
 
     private fun StringBuilder.appendTag(value: String) {
         append("          <span class=\"tag\">").append(escapeHtml(value)).append("</span>\n")
+    }
+}
+
+private val PLACEHOLDER_AUTHOR_PATTERN = Regex("""(?i)\b[A-Z][\p{L}'’\-]+(?:\s+[A-Z](?:\.)?)+,\s*et al\.""")
+
+internal fun validateGeneratedOutputFile(output: GeneratedOutputFile): GeneratedOutputFile {
+    when {
+        output.mediaType.startsWith("text/html", ignoreCase = true) -> {
+            validateHtmlCitationTraceability(output.content, output.relativePath)
+        }
+        output.mediaType.equals("application/json", ignoreCase = true) ||
+            output.mediaType.endsWith("+json", ignoreCase = true) -> {
+            validateJsonCitationTraceability(output.content, output.relativePath)
+        }
+    }
+    return output
+}
+
+private fun validateHtmlCitationTraceability(content: String, relativePath: String) {
+    val referenceItems = Regex("(?is)<li[^>]*>(.*?)</li>")
+        .findAll(content)
+        .mapNotNull { match ->
+            match.groupValues.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+        }
+        .toList()
+
+    if (referenceItems.isEmpty()) return
+
+    referenceItems.forEach { item ->
+        val flattened = item
+            .replace(Regex("(?is)<[^>]+>"), " ")
+            .replace("&nbsp;", " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        val hasTraceableIdentifier = flattened.contains("https://", ignoreCase = true) ||
+            flattened.contains("http://", ignoreCase = true) ||
+            flattened.contains("doi:", ignoreCase = true) ||
+            flattened.contains("PMID", ignoreCase = true)
+        val hasPlaceholderCitation = PLACEHOLDER_AUTHOR_PATTERN.containsMatchIn(flattened) ||
+            flattened.contains("et al.", ignoreCase = true)
+
+        if (hasPlaceholderCitation && !hasTraceableIdentifier) {
+            throw IllegalStateException(
+                "Published HTML output $relativePath contains an untraceable placeholder citation: $flattened"
+            )
+        }
+    }
+}
+
+private fun validateJsonCitationTraceability(content: String, relativePath: String) {
+    val element = runCatching { Json.parseToJsonElement(content.trim()) }
+        .getOrElse {
+            throw IllegalStateException("Published JSON output $relativePath is not valid JSON: ${it.message}")
+        }
+    val obj = element as? JsonObject
+        ?: throw IllegalStateException("Published JSON output $relativePath must be a JSON object")
+
+    obj["sources"]?.jsonArray?.forEachIndexed { index, source ->
+        val sourceObj = source as? JsonObject ?: return@forEachIndexed
+        val values = sourceObj.values.mapNotNull { jsonValue ->
+            when (jsonValue) {
+                is JsonPrimitive -> jsonValue.contentOrNull
+                else -> null
+            }
+        }
+        val flattened = values.joinToString(" ")
+        val hasTraceableIdentifier = values.any { value ->
+            value.contains("https://", ignoreCase = true) ||
+                value.contains("http://", ignoreCase = true) ||
+                value.contains("doi:", ignoreCase = true) ||
+                value.matches(Regex("""10\.\S+""")) ||
+                value.matches(Regex("""\d{7,}"""))
+        }
+        val hasPlaceholderCitation = values.any { value ->
+            PLACEHOLDER_AUTHOR_PATTERN.containsMatchIn(value) || value.contains("et al.", ignoreCase = true)
+        }
+
+        if (hasPlaceholderCitation && !hasTraceableIdentifier) {
+            throw IllegalStateException(
+                "Published JSON output $relativePath contains an untraceable placeholder source at index $index: $flattened"
+            )
+        }
+
+        sourceObj["doi"]?.jsonPrimitive?.contentOrNull?.let { doi ->
+            if (!doi.matches(Regex("""10\.\S+"""))) {
+                throw IllegalStateException(
+                    "Published JSON output $relativePath contains an invalid DOI value: $doi"
+                )
+            }
+        }
+        sourceObj["pmid"]?.jsonPrimitive?.contentOrNull?.let { pmid ->
+            if (!pmid.matches(Regex("""\d+"""))) {
+                throw IllegalStateException(
+                    "Published JSON output $relativePath contains an invalid PMID value: $pmid"
+                )
+            }
+        }
+        sourceObj["url"]?.jsonPrimitive?.contentOrNull?.let { url ->
+            if (!(url.startsWith("https://", ignoreCase = true) || url.startsWith("http://", ignoreCase = true))) {
+                throw IllegalStateException(
+                    "Published JSON output $relativePath contains an invalid URL value: $url"
+                )
+            }
+        }
     }
 }
 

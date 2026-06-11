@@ -10,6 +10,9 @@ import com.achulkov.evokammer.core.config.ModelSelectionConfig
 import com.achulkov.evokammer.core.model.AgentStatus
 import com.achulkov.evokammer.core.model.GroupProfile
 import com.achulkov.evokammer.core.model.Role
+import com.achulkov.evokammer.orchestration.nested.NestedGroupConfig
+import com.achulkov.evokammer.orchestration.nested.NestedGroupResult
+import com.achulkov.evokammer.orchestration.nested.NestedGroupRunner
 import com.achulkov.evokammer.sandbox.network.ContextUrlAllowlistExtractor
 import com.achulkov.evokammer.sandbox.shuru.NetworkAllowlistConfig
 import com.achulkov.evokammer.sandbox.shuru.ShuruVmManager
@@ -18,6 +21,9 @@ import com.achulkov.evokammer.sandbox.shuru.VmHandle
 import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
 import com.achulkov.evokammer.substrate.db.entity.EventLogEntryEntity
 import com.achulkov.evokammer.substrate.db.entity.EventTypes
+import com.achulkov.evokammer.substrate.db.entity.KnowledgeBaseEntryEntity
+import com.achulkov.evokammer.substrate.db.entity.KnowledgeGraphFactEntity
+import com.achulkov.evokammer.substrate.db.entity.ToolRegistryEntryEntity
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -33,6 +39,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -84,6 +93,7 @@ class LifecycleManager(
     private val groupProfile: GroupProfile = GroupProfile.Library,
     private val modelSelectionRandom: Random = Random.Default,
     private val localAgentRunner: (suspend (AgentBootContext, onBudgetLedger: ((BudgetLedger) -> Unit)?) -> Unit)? = null,
+    private val nestedGroupRunBlock: (suspend (NestedGroupConfig) -> NestedGroupResult)? = null,
     private val gracePeriodSeconds: Int = 30,
     private val budgetPollingIntervalMs: Long = 5_000L,
     private val ipcPortBase: Int = 10_000
@@ -106,6 +116,7 @@ class LifecycleManager(
 
     /** Live agent registry: agentId → (VmHandle/Job, status). */
     private val liveAgents = ConcurrentHashMap<String, LiveAgentEntry>()
+    private val activeNestedGroupJobs = ConcurrentHashMap<String, Job>()
     private val refundedBudgetByAgent = ConcurrentHashMap<String, Double>()
     private val ipcPortCounter = AtomicInteger(ipcPortBase)
 
@@ -229,8 +240,12 @@ class LifecycleManager(
      */
     suspend fun terminateAll() {
         budgetMonitorJob?.cancel()
+        activeNestedGroupJobs.values.toList().forEach { it.cancel() }
         liveAgents.keys.toList().forEach { agentId ->
             initiateKillSequence(agentId, "run_termination")
+        }
+        activeNestedGroupJobs.values.toList().forEach { nestedJob ->
+            runCatching { nestedJob.cancelAndJoin() }
         }
     }
 
@@ -284,7 +299,197 @@ class LifecycleManager(
     @Suppress("unused") // called by orchestration layer to gate round advancement
     fun getLiveAgentCount(): Int = liveAgents.size
 
+    /** Returns the number of currently active nested-group jobs. */
+    fun getLiveNestedGroupCount(): Int = activeNestedGroupJobs.size
+
+    /**
+     * Launches a nested inner-group civilisation under this outer group.
+     *
+     * The nested job is tracked by this manager so `terminateAll()` cancels it together with the
+     * parent group's ordinary agents.
+     */
+    fun spawnNestedGroup(
+        config: NestedGroupConfig,
+        scope: CoroutineScope,
+        onCompleted: suspend (NestedGroupResult) -> Unit = {}
+    ): Job {
+        require(config.outerGroupId == groupId) {
+            "Nested group outerGroupId=${config.outerGroupId} does not match manager groupId=$groupId"
+        }
+        require(config.outerRunId == runId) {
+            "Nested group outerRunId=${config.outerRunId} does not match manager runId=$runId"
+        }
+        check(activeNestedGroupJobs[config.nestedGroupId]?.isActive != true) {
+            "Nested group ${config.nestedGroupId} is already active for group=$groupId run=$runId"
+        }
+
+        val nestedJob = scope.launch {
+            try {
+                val nestedResult = nestedGroupRunBlock?.invoke(config) ?: buildNestedGroupRunner(config).run()
+                val rolledUpResult = rollUpNestedGroupResult(nestedResult)
+                onCompleted(rolledUpResult)
+            } finally {
+                activeNestedGroupJobs.remove(config.nestedGroupId)
+            }
+        }
+        activeNestedGroupJobs[config.nestedGroupId] = nestedJob
+        return nestedJob
+    }
+
     // ---- Private ----
+
+    private fun buildNestedGroupRunner(config: NestedGroupConfig): NestedGroupRunner =
+        NestedGroupRunner(
+            config = config,
+            shuruVmManager = shuruVmManager,
+            substrateDatabaseFactory = substrateDatabaseFactory,
+            lifecycleManagerFactory = { nestedRunId, nestedGroupId, nestedOpenRouterApiKey, nestedAgentJarPath ->
+                LifecycleManager(
+                    runId = nestedRunId,
+                    groupId = nestedGroupId,
+                    shuruVmManager = shuruVmManager,
+                    substrateDatabaseFactory = substrateDatabaseFactory,
+                    agentJarPath = nestedAgentJarPath,
+                    openRouterApiKey = nestedOpenRouterApiKey,
+                    groupProfile = GroupProfile.default(config.profileType),
+                    modelSelectionRandom = modelSelectionRandom,
+                    localAgentRunner = localAgentRunner,
+                    nestedGroupRunBlock = nestedGroupRunBlock,
+                    gracePeriodSeconds = gracePeriodSeconds,
+                    budgetPollingIntervalMs = budgetPollingIntervalMs,
+                    ipcPortBase = ipcPortCounter.getAndAdd(100)
+                )
+            }
+        )
+
+    private suspend fun rollUpNestedGroupResult(result: NestedGroupResult): NestedGroupResult {
+        val nestedRunId = nestedRunIdFor(result.nestedGroupId)
+        val nestedDb = substrateDatabaseFactory.get(nestedRunId, result.nestedGroupId)
+
+        val importedKbDocumentIds = result.kbDocumentIds.map { sourceId ->
+            val source = requireNotNull(nestedDb.knowledgeBaseDao().getById(sourceId)) {
+                "Nested KB entry $sourceId was reported by ${result.nestedGroupId} but not found in $nestedRunId"
+            }
+            val imported = source.asOuterImport()
+            db.knowledgeBaseDao().insert(imported)
+            imported.id
+        }
+
+        val importedKgFactIds = result.kgFactIds.map { sourceId ->
+            val source = requireNotNull(nestedDb.knowledgeGraphFactDao().getById(sourceId)) {
+                "Nested KG fact $sourceId was reported by ${result.nestedGroupId} but not found in $nestedRunId"
+            }
+            val imported = source.asOuterImport(
+                nestedSourceRef = nestedSourceRef(
+                    nestedRunId = nestedRunId,
+                    nestedGroupId = result.nestedGroupId,
+                    kind = "kg",
+                    sourceId = source.id
+                )
+            )
+            db.knowledgeGraphFactDao().insert(imported)
+            imported.id
+        }
+
+        val importedToolIds = result.promotedToolIds.map { sourceId ->
+            val source = requireNotNull(nestedDb.toolRegistryDao().getById(sourceId)) {
+                "Nested tool $sourceId was reported by ${result.nestedGroupId} but not found in $nestedRunId"
+            }
+            val latestOuterVersion = db.toolRegistryDao().getLatestVersionByName(runId, groupId, source.name)
+            val imported = source.asOuterImport(latestOuterVersion)
+            db.toolRegistryDao().insert(imported)
+            imported.id
+        }
+
+        emitEvent(
+            type = EventTypes.NESTED_GROUP_ROLLUP,
+            agentId = null,
+            generation = result.generationsCompleted.coerceAtLeast(0),
+            payload = buildNestedRollupPayload(
+                result = result,
+                importedKbDocumentIds = importedKbDocumentIds,
+                importedKgFactIds = importedKgFactIds,
+                importedToolIds = importedToolIds
+            )
+        )
+
+        return result.copy(
+            importedKbDocumentIds = importedKbDocumentIds,
+            importedKgFactIds = importedKgFactIds,
+            importedToolIds = importedToolIds
+        )
+    }
+
+    private fun nestedRunIdFor(nestedGroupId: String): String = "$runId-nested-$nestedGroupId"
+
+    private fun nestedSourceRef(
+        nestedRunId: String,
+        nestedGroupId: String,
+        kind: String,
+        sourceId: String
+    ): String = "nested://$nestedRunId/$nestedGroupId/$kind/$sourceId"
+
+    private fun KnowledgeBaseEntryEntity.asOuterImport(): KnowledgeBaseEntryEntity =
+        copy(
+            id = UUID.randomUUID().toString(),
+            groupId = this@LifecycleManager.groupId,
+            runId = this@LifecycleManager.runId,
+            previousVersionId = null
+        )
+
+    private fun KnowledgeGraphFactEntity.asOuterImport(nestedSourceRef: String): KnowledgeGraphFactEntity =
+        copy(
+            id = UUID.randomUUID().toString(),
+            groupId = this@LifecycleManager.groupId,
+            runId = this@LifecycleManager.runId,
+            provenanceJson = appendNestedProvenance(provenanceJson, nestedSourceRef)
+        )
+
+    private fun ToolRegistryEntryEntity.asOuterImport(
+        latestOuterVersion: ToolRegistryEntryEntity?
+    ): ToolRegistryEntryEntity {
+        val importedVersion = when {
+            latestOuterVersion == null -> version
+            latestOuterVersion.version >= version -> latestOuterVersion.version + 1
+            else -> version
+        }
+        return copy(
+            id = UUID.randomUUID().toString(),
+            version = importedVersion,
+            groupId = this@LifecycleManager.groupId,
+            runId = this@LifecycleManager.runId,
+            previousVersionId = latestOuterVersion
+                ?.takeIf { it.version >= version }
+                ?.id
+        )
+    }
+
+    private fun appendNestedProvenance(existingJson: String, nestedSourceRef: String): String {
+        val existingEntries = runCatching {
+            when (val parsed = Json.parseToJsonElement(existingJson)) {
+                is JsonArray -> parsed
+                else -> buildJsonArray { add(parsed) }
+            }
+        }.getOrElse {
+            buildJsonArray {
+                if (existingJson.isNotBlank() && existingJson != "[]") {
+                    add(JsonPrimitive(existingJson))
+                }
+            }
+        }
+        return buildJsonArray {
+            existingEntries.forEach { add(it) }
+            add(JsonPrimitive(nestedSourceRef))
+        }.toString()
+    }
+
+    private fun buildNestedRollupPayload(
+        result: NestedGroupResult,
+        importedKbDocumentIds: List<String>,
+        importedKgFactIds: List<String>,
+        importedToolIds: List<String>
+    ): String =
+        """{"nestedGroupId":"${result.nestedGroupId}","completedNormally":${result.completedNormally},"budgetConsumed":${result.budgetConsumed},"kbImported":${importedKbDocumentIds.size},"kgImported":${importedKgFactIds.size},"toolsImported":${importedToolIds.size}}"""
 
     private fun resolveModelForRole(
         role: Role,
@@ -373,6 +578,12 @@ class LifecycleManager(
         )
         val effectiveAllowedHosts = runContextAllowedHosts + promptContextAllowedHosts
 
+        val bootArtifactsMountPath = when {
+            artifactsMountHostPath == null -> null
+            localAgentRunner != null -> artifactsMountHostPath
+            else -> "/artifacts"
+        }
+
         val bootContext = AgentBootContext(
             agentId = agentId,
             runId = runId,
@@ -382,7 +593,9 @@ class LifecycleManager(
             budgetToken = "token:$agentId:${System.currentTimeMillis()}",
             substrateDbPath = substrateDatabaseFactory.dbFilePath(runId, groupId).absolutePath,
             stagingMountPath = "/staging",
-            artifactsMountPath = if (artifactsMountHostPath != null) "/artifacts" else null,
+            // In-process agents read artifacts directly from the host filesystem, while
+            // Shuru-backed agents receive the VM mount path.
+            artifactsMountPath = bootArtifactsMountPath,
             wipTaskClaim = wipClaim,
             legacyProtocol = legacyProtocol,
             stageDisclosure = stageDisclosure,

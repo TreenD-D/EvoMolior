@@ -72,4 +72,10 @@ interface EventLogDao {
         LIMIT :limit
     """)
     suspend fun getLatestByType(runId: String, groupId: String, eventType: String, limit: Int): List<EventLogEntryEntity>
+
+    @Query("""
+        SELECT MAX(generation) FROM event_log_entries
+        WHERE runId = :runId AND groupId = :groupId
+    """)
+    suspend fun getMaxGeneration(runId: String, groupId: String): Int?
 }

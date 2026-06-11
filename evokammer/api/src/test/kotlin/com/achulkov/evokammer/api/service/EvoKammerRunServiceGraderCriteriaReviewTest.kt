@@ -174,7 +174,7 @@ class EvoKammerRunServiceGraderCriteriaReviewTest {
             }
         )
 
-        val blindTournamentService = BlindTournamentService { }
+        val blindTournamentService = BlindTournamentService(onFailureTelemetry = {})
         blindTournamentService.start(listOf("group-0", "group-1"))
         val blindTournamentField = service::class.java.getDeclaredField("activeBlindTournamentService").apply {
             isAccessible = true

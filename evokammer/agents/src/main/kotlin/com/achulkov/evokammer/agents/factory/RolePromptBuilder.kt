@@ -40,6 +40,7 @@ object RolePromptBuilder {
             appendLine(
                 "When you use write_staging, emit_fact, or emit_constraint for this task, include wipTaskRef=${claim.nodeId}."
             )
+            appendLine("That task ID is also the deliverable skeleton node reference for this work.")
             appendLine()
         } else if (bootContext.role == Role.Outlier) {
             appendLine("=== YOUR ROLE: OUTLIER ===")
@@ -221,50 +222,96 @@ object RolePromptBuilder {
      * @param groupId Winning group whose substrate should be synthesised.
      * @return The complete system prompt.
      */
-    fun buildFinalDeliverableHtml(
+    fun buildFinalDeliverableFile(
         runObjective: String,
         roundCount: Int,
         groupId: String,
+        relativePath: String,
+        mediaType: String,
+        description: String,
         attempt: Int = 1
     ): String = buildString {
-        appendLine("""
-            You are the Final Deliverable Writer for group '$groupId'.
+        val normalizedMediaType = mediaType.lowercase()
+        if (normalizedMediaType.startsWith("text/html")) {
+            appendLine("""
+                You are the Final Deliverable Writer for group '$groupId'.
 
-            Your job is to produce the final operator-facing deliverable for this run as a
-            complete standalone HTML5 document that can be opened directly in a browser.
+                Your job is to produce the final operator-facing deliverable for this run as a
+                complete standalone HTML5 document that can be opened directly in a browser.
 
-            Required output:
-            - First, write a staging entry with type="DOC".
-            - The content must begin with the exact text: <!doctype html>
-            - Produce a complete HTML document with:
-              1. a strong title,
-              2. a meta description,
-              3. a viewport meta tag,
-              4. embedded <style> rules for polished visual presentation,
-              5. semantic, accessible article markup,
-              6. a navigable structure with a clear header/hero plus at least 6 substantive sections,
-              7. polished body copy that fulfils the run objective,
-              8. no markdown fences, no commentary outside the HTML.
-            - This is the FINAL publication artifact, not a terse summary.
-            - Synthesize the strongest ideas that survived across the completed run. Reconcile
-              contradictions, remove filler, and publish the most compelling final version.
-            - Make the article feel substantial and publication-ready:
-              - aim for roughly 1,200-2,000 words unless the objective explicitly demands brevity,
-              - include a clear narrative arc, scannable subsections, and at least one callout,
-              - include a concrete CTA or next-step section when appropriate for the objective.
-            - Ground the deliverable in the group's available knowledge and the run objective.
-            - Then finish with write_death_note as your final action.
-        """.trimIndent())
+                Output target:
+                - Relative path: $relativePath
+                - Media type: $mediaType
+                - Description: ${description.ifBlank { "Final browser-renderable deliverable" }}
+
+                Required output:
+                - This agent must not finish with a chat-only answer.
+                - Your job is only complete if you persist the final file with write_staging(type="DOC", ...).
+                - First, optionally inspect the run via exactly one quick read tool call if needed.
+                - Then write a staging entry with type="DOC".
+                - The content must begin with the exact text: <!doctype html>
+                - Produce a complete HTML document with:
+                  1. a strong title,
+                  2. a meta description,
+                  3. a viewport meta tag,
+                  4. embedded <style> rules for polished visual presentation,
+                  5. semantic, accessible article markup,
+                  6. a navigable structure with a clear header/hero plus at least 6 substantive sections,
+                  7. polished body copy that fulfils the run objective,
+                  8. no markdown fences, no commentary outside the HTML.
+                - This is the FINAL publication artifact, not a terse summary.
+                - Synthesize the strongest ideas that survived across the completed run. Reconcile
+                  contradictions, remove filler, and publish the most compelling final version.
+                - Make the article feel substantial and publication-ready:
+                  - aim for roughly 1,200-2,000 words unless the objective explicitly demands brevity,
+                  - include a clear narrative arc, scannable subsections, and at least one callout,
+                  - include a concrete CTA or next-step section when appropriate for the objective.
+                - Ground the deliverable in the group's available knowledge and the run objective.
+                - After write_staging succeeds, immediately call write_death_note.
+                - Do not end the run before write_staging succeeds.
+                - Then finish with write_death_note as your final action.
+            """.trimIndent())
+        } else {
+            appendLine("""
+                You are the Final Deliverable Writer for group '$groupId'.
+
+                Your job is to produce the final operator-facing deliverable for this run as a
+                single generated file.
+
+                Output target:
+                - Relative path: $relativePath
+                - Media type: $mediaType
+                - Description: ${description.ifBlank { "Final generated output file" }}
+
+                Required output:
+                - This agent must not finish with a chat-only answer.
+                - Your job is only complete if you persist the final file with write_staging(type="DOC", ...).
+                - First, optionally inspect the run via exactly one quick read tool call if needed.
+                - Then write a staging entry with type="DOC".
+                - The DOC content must be the FULL file body only.
+                - Do not prepend wrappers, labels, or metadata headers.
+                - The runtime already knows the target path and media type; do not restate them in the body.
+                - Do not wrap the file body in markdown fences.
+                - If the media type is JSON, the body must be valid JSON and should begin with `{` or `[`.
+                - If the media type is Markdown or plain text, write production-quality body copy.
+                - This is the FINAL publication artifact, not a terse summary.
+                - Ground the file in the group's available knowledge and the run objective.
+                - After write_staging succeeds, immediately call write_death_note.
+                - Do not end the run before write_staging succeeds.
+                - Then finish with write_death_note as your final action.
+            """.trimIndent())
+        }
         appendLine()
         if (attempt > 1) {
             appendLine("=== RETRY CONTEXT ===")
             appendLine(
                 "This is retry attempt $attempt because a previous final-deliverable writer finished " +
-                    "without persisting the required standalone HTML document."
+                    "without persisting the required final output file."
             )
             appendLine(
                 "On this retry, prefer acting over exploration: perform at most one quick read, then " +
-                    "call write_staging with the full HTML document."
+                    "immediately call write_staging with the full final file content. Do not end with " +
+                    "analysis or a plain-text answer."
             )
             appendLine()
         }
@@ -278,7 +325,8 @@ object RolePromptBuilder {
         appendLine("""
             - read_kb(query, domain?, maxResults?): inspect your group's knowledge base
             - read_kg(subject?, relation?, obj?, maxResults?): inspect your group's knowledge graph
-            - write_staging(type, content, wipTaskRef?, speculative?): persist the final HTML document
+            - read_run_artifact(relativePath?, listOnly?): inspect uploaded run-start context artifacts and previous-stage pipeline artifacts
+            - write_staging(type, content, wipTaskRef?, speculative?): persist the final generated file
             - write_death_note(summary, whatWorked, whatFailed, recommendations): mandatory final action
         """.trimIndent())
     }

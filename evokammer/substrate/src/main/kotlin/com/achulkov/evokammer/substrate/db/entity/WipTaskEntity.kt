@@ -11,6 +11,10 @@ import androidx.room.Index
  * multiple times before completion.
  *
  * Composite primary key: (nodeId, runId, groupId) — same node can exist in multiple groups.
+ *
+ * @param dstNodeRef Optional deliverable skeleton node reference linking this task to a
+ *   specific part of the evolving deliverable. When set, Critic promotions and grader
+ *   results are attributed to the corresponding DST node.
  */
 @Entity(
     tableName = "wip_tasks",
@@ -36,5 +40,7 @@ data class WipTaskEntity(
     /** Number of times this task has been claimed and abandoned (for Inspector anomaly detection). */
     val abandonCount: Int = 0,
     /** Knowledge node this task is linked to (for ResourceMapEngine integration). */
-    val linkedNodeId: String? = null
+    val linkedNodeId: String? = null,
+    /** Deliverable skeleton node reference for DST-grade attribution. */
+    val dstNodeRef: String? = null
 )

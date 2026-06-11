@@ -2,6 +2,19 @@ package com.achulkov.evokammer.api.service
 
 import com.achulkov.evokammer.api.events.EvoKammerEvent
 import com.achulkov.evokammer.api.model.RunConfig
+import com.achulkov.evokammer.core.contract.OverseerDeadEnd
+import com.achulkov.evokammer.core.contract.OverseerDeadEndHistoryEntry
+import com.achulkov.evokammer.core.contract.OverseerKernelEligibility
+import com.achulkov.evokammer.core.contract.OverseerExperimentPlanEligibility
+import com.achulkov.evokammer.core.contract.OverseerKernelArchive
+import com.achulkov.evokammer.core.contract.OverseerKernelAuditEntry
+import com.achulkov.evokammer.core.contract.OverseerExperimentPlan
+import com.achulkov.evokammer.core.contract.OverseerExperimentPlanHistoryEntry
+import com.achulkov.evokammer.core.contract.OverseerExperimentResult
+import com.achulkov.evokammer.api.model.OverseerExperimentLaunchRequest
+import com.achulkov.evokammer.api.model.OverseerExperimentLaunchResponse
+import com.achulkov.evokammer.core.contract.OverseerHypothesis
+import com.achulkov.evokammer.core.contract.OverseerKernelState
 import kotlinx.serialization.Serializable
 import kotlinx.coroutines.flow.SharedFlow
 
@@ -26,6 +39,22 @@ interface EvoKammerEngineService {
      * @return The run ID (same as [RunConfig.runId]).
      */
     suspend fun startRun(config: RunConfig): String
+
+    /**
+     * Resumes a previously persisted run after process death using the supplied [config].
+     *
+     * The [RunConfig.runId] must point at an unfinished persisted run. Implementations may
+     * validate that the non-secret fields of [config] match the persisted recovery snapshot
+     * when one exists.
+     *
+     * The caller must supply a fresh API key in [RunConfig.openRouterApiKey]; secrets are not
+     * expected to be stored in the persisted recovery snapshot.
+     *
+     * @return The resumed run ID (same as [RunConfig.runId]).
+     */
+    suspend fun resumePersistedRun(config: RunConfig): String {
+        error("Persisted run resume is not supported by this engine service")
+    }
 
     /**
      * Pauses the active run (suspends all agent loops).
@@ -80,9 +109,96 @@ interface EvoKammerEngineService {
      * Returns the downloadable results ZIP for a completed or partial run.
      *
      * @param runId The run identifier.
-     * @return ZIP bytes, or null if the bundle is not yet available.
+     * @return ZIP bytes, or null if the bundle is not yet available. Implementations should
+     *   prefer the run-service output-spec cache first, then the request's completion record
+     *   `requestedOutputSpec`, and finally persisted-state inference when no other durable
+     *   source is available.
      */
     suspend fun getResultsBundle(runId: String): ByteArray?
+
+    /**
+     * Returns the current durable Overseer kernel snapshot.
+     */
+    suspend fun getOverseerKernelState(): OverseerKernelState
+
+    /**
+     * Returns the deterministic preflight verdict for an Overseer hypothesis.
+     *
+     * @param hypothesis Hypothesis to validate.
+     */
+    suspend fun preflightOverseerHypothesis(hypothesis: OverseerHypothesis): OverseerKernelEligibility
+
+    /**
+     * Returns the deterministic preflight verdict for an Overseer experiment plan.
+     *
+     * @param experimentPlan Experiment plan to validate.
+     */
+    suspend fun preflightOverseerExperimentPlan(experimentPlan: OverseerExperimentPlan): OverseerExperimentPlanEligibility
+
+    /**
+     * Persists a formalized Overseer hypothesis and returns the updated snapshot.
+     */
+    suspend fun formalizeOverseerHypothesis(hypothesis: OverseerHypothesis): OverseerKernelState
+
+    /**
+     * Persists an Overseer experiment plan and returns the updated snapshot.
+     */
+    suspend fun registerOverseerExperimentPlan(experimentPlan: OverseerExperimentPlan): OverseerKernelState
+
+    /**
+     * Schedules all eligible Overseer experiment plans and returns the updated snapshot.
+     */
+    suspend fun scheduleOverseerExperimentPlans(): OverseerKernelState
+
+    /**
+     * Launches a scheduled Overseer experiment run using an operator-supplied run config.
+     *
+     * @param experimentPlanId Experiment plan whose schedule is being consumed.
+     * @param launchRequest Scheduled run identifier and concrete run configuration to start.
+     * @return Launch response with the started run identifier.
+     */
+    suspend fun launchOverseerExperimentRun(
+        experimentPlanId: String,
+        launchRequest: OverseerExperimentLaunchRequest
+    ): OverseerExperimentLaunchResponse {
+        error("Overseer experiment launch is not supported by this engine service")
+    }
+
+    /**
+     * Persists an Overseer experiment result and returns the updated snapshot.
+     *
+     * @param experimentResult Deterministic experiment outcome to store.
+     */
+    suspend fun recordOverseerExperimentResult(experimentResult: OverseerExperimentResult): OverseerKernelState
+
+    /**
+     * Persists an Overseer dead-end record and returns the updated snapshot.
+     */
+    suspend fun recordOverseerDeadEnd(deadEnd: OverseerDeadEnd): OverseerKernelState
+
+    /**
+     * Returns the append-only audit trail for Overseer kernel mutations.
+     */
+    suspend fun getOverseerAuditEntries(): List<OverseerKernelAuditEntry>
+
+    /**
+     * Returns the lifecycle history for a specific Overseer experiment plan.
+     *
+     * @param experimentPlanId Experiment plan identifier.
+     */
+    suspend fun getOverseerExperimentPlanHistory(experimentPlanId: String): List<OverseerExperimentPlanHistoryEntry>
+
+    /**
+     * Returns the history of dead-end records for a specific hypothesis.
+     *
+     * @param hypothesisId Hypothesis identifier.
+     */
+    suspend fun getOverseerDeadEndHistory(hypothesisId: String): List<OverseerDeadEndHistoryEntry>
+
+    /**
+     * Returns the archived mirror of the Overseer audit trail.
+     */
+    suspend fun getOverseerAuditArchiveEntries(): List<MetaArchiveEntryRecord>
 }
 
 /**

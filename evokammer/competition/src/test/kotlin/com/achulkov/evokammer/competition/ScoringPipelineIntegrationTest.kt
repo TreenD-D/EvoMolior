@@ -7,6 +7,7 @@ import com.achulkov.evokammer.competition.grader.MetaJudge
 import com.achulkov.evokammer.competition.grader.RubricDimension
 import com.achulkov.evokammer.competition.scoring.BlindSubmissionGate
 import com.achulkov.evokammer.competition.scoring.GroupRoundResult
+import com.achulkov.evokammer.competition.scoring.ScoreSealAudit
 import com.achulkov.evokammer.competition.scoring.RevealedScores
 import com.achulkov.evokammer.competition.scoring.ScoringEngine
 import com.achulkov.evokammer.core.model.GradingResult
@@ -192,6 +193,32 @@ class ScoringPipelineIntegrationTest {
         gate.closeAndReveal(forceReveal = true)
         val revealed = revealedDeferred.await()
         assertEquals(0, revealed.scores["g2"]?.automatedTestsFailed)
+    }
+
+    @Test
+    fun `blind gate emits a seal audit when it closes`() = runTest {
+        val gate = BlindSubmissionGate(listOf("g1", "g2"))
+        val auditDeferred = async { gate.sealAuditEvents.first() }
+        yield()
+
+        gate.openGate(7)
+        gate.submitGroupResults(
+            "g1", GroupRoundResult(
+                groupId = "g1", roundIndex = 7,
+                dimensionScores = mapOf("accuracy" to 10.0),
+                failureModesTriggered = emptyList(),
+                automatedTestsPassed = 1, automatedTestsFailed = 0
+            )
+        )
+        gate.closeAndReveal(forceReveal = true)
+
+        val audit: ScoreSealAudit = auditDeferred.await()
+        assertEquals(7, audit.roundIndex)
+        assertEquals(2, audit.expectedGroupCount)
+        assertEquals(1, audit.sealedGroupCount)
+        assertEquals(listOf("g2"), audit.missingGroupIds)
+        assertTrue(audit.forcedReveal)
+        assertTrue(audit.sealLatencyMs >= 0)
     }
 
     // ── ScoringEngine math ────────────────────────────────────────────────────

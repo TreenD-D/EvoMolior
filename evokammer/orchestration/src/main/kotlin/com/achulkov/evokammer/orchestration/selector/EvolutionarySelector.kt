@@ -2,6 +2,7 @@ package com.achulkov.evokammer.orchestration.selector
 
 import com.achulkov.evokammer.core.contract.RoleAllocation
 import com.achulkov.evokammer.core.contract.RoleAllocationEntry
+import com.achulkov.evokammer.core.contract.DeliverableSkeletonTreeSummary
 import com.achulkov.evokammer.core.model.GroupProfile
 import com.achulkov.evokammer.core.model.Role
 import com.achulkov.evokammer.substrate.db.EvoKammerDatabase
@@ -30,7 +31,8 @@ class EvolutionarySelector(
     private val db: EvoKammerDatabase,
     private val profile: GroupProfile,
     private val runId: String,
-    private val groupId: String
+    private val groupId: String,
+    private val deliverableTreeSummary: DeliverableSkeletonTreeSummary? = null
 ) {
     /**
      * Computes the role allocation for [generation].
@@ -80,6 +82,7 @@ class EvolutionarySelector(
                         append(""""budgetCeiling":$globalBudgetCeiling,"kbSize":${signals.kbSize},""")
                         append(""""stagingBacklog":${signals.stagingBacklog},"toolFailureRate":${signals.toolFailureRate},""")
                         append(""""unclaimedTasks":${signals.unclaimedTasks},"noRecentPromotions":${signals.noRecentPromotions},""")
+                        append(""""deliverableOpenGaps":${signals.deliverableOpenGaps},"deliverableContested":${signals.deliverableContested},""")
                         append(""""roleCounts":[$roleCountsJson],"rationale":"$escapedRationale"}""")
                     }
                 )
@@ -123,6 +126,11 @@ class EvolutionarySelector(
             unclaimedTasks = unclaimedTasks,
             planIsStale = planIsStale,
             noRecentPromotions = recentPromotions,
+            deliverableOpenGaps = deliverableTreeSummary?.openGapCount ?: 0,
+            deliverableContested = deliverableTreeSummary?.contestedNodeCount ?: 0,
+            deliverableDeadEnds = deliverableTreeSummary?.deadEndCount ?: 0,
+            deliverableAverageTrust = deliverableTreeSummary?.averageTrustScore ?: 0.0,
+            deliverableMaxComplexity = deliverableTreeSummary?.maxComplexityLevel ?: 0,
             generation = generation
         )
     }
@@ -158,22 +166,22 @@ class EvolutionarySelector(
         val remainingSlots = maxFleet - entries.sumOf { it.count }
         if (remainingSlots > 0) {
             // High staging backlog → extra Critic
-            if (signals.stagingBacklog > 5 && remainingSlots >= 1) {
+            if ((signals.stagingBacklog > 5 || signals.deliverableContested > 0) && remainingSlots >= 1) {
                 entries.add(RoleAllocationEntry(Role.Critic, 1, budgetPerAgent))
             }
 
             // Many unclaimed tasks → extra Researcher or Builder
-            if (signals.unclaimedTasks > 3 && remainingSlots >= 1) {
+            if ((signals.unclaimedTasks > 3 || signals.deliverableOpenGaps > 0) && remainingSlots >= 1) {
                 entries.add(RoleAllocationEntry(Role.Researcher, 1, budgetPerAgent))
             }
 
             // KB growing → add Archivist (Phase 2+)
-            if (signals.kbSize > 10 && generation >= 3 && remainingSlots >= 1) {
+            if ((signals.kbSize > 10 || signals.deliverableDeadEnds > 0) && generation >= 3 && remainingSlots >= 1) {
                 entries.add(RoleAllocationEntry(Role.Archivist, 1, budgetPerAgent))
             }
 
             // Phase 2+ roles: Planner (once per few generations)
-            if (remainingSlots >= 1 && (signals.planIsStale || (generation >= 2 && generation % 3 == 0))) {
+            if (remainingSlots >= 1 && (signals.planIsStale || (deliverableTreeSummary != null && signals.deliverableAverageTrust < 0.4) || (generation >= 2 && generation % 3 == 0))) {
                 entries.add(RoleAllocationEntry(Role.Planner, 1, budgetPerAgent * 1.5))
             }
         }
@@ -211,6 +219,9 @@ class EvolutionarySelector(
         append("backlog=${signals.stagingBacklog}, ")
         append("toolFailRate=${String.format("%.1f%%", signals.toolFailureRate * 100)}, ")
         append("unclaimedTasks=${signals.unclaimedTasks}")
+        if (signals.deliverableOpenGaps > 0 || signals.deliverableContested > 0 || signals.deliverableDeadEnds > 0) {
+            append(", deliverableGaps=${signals.deliverableOpenGaps}, deliverableContested=${signals.deliverableContested}, deliverableDeadEnds=${signals.deliverableDeadEnds}")
+        }
         if (stasisDetected) append(", STASIS_DETECTED")
         append(" → allocating: ")
         append(entries.joinToString(", ") { "${it.count}x${it.role.name}" })
@@ -223,6 +234,11 @@ class EvolutionarySelector(
         val unclaimedTasks: Int,
         val planIsStale: Boolean,
         val noRecentPromotions: Boolean,
+        val deliverableOpenGaps: Int,
+        val deliverableContested: Int,
+        val deliverableDeadEnds: Int,
+        val deliverableAverageTrust: Double,
+        val deliverableMaxComplexity: Int,
         val generation: Int
     )
 }

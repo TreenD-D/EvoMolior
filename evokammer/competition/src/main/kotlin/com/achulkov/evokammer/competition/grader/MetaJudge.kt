@@ -1,5 +1,8 @@
 package com.achulkov.evokammer.competition.grader
 
+import com.achulkov.evokammer.core.contract.DstRefinementProposal
+import com.achulkov.evokammer.core.contract.DstRefinementRejection
+import com.achulkov.evokammer.core.contract.DstRubricPolicy
 import io.github.aakira.napier.Napier
 import kotlinx.serialization.Serializable
 
@@ -57,18 +60,25 @@ class MetaJudge(
         val failureModes = roundSheets.flatMap { it.failureModes }.distinctBy { it.modeId }
         val automatedTests = roundSheets.flatMap { it.automatedTests }.distinctBy { it.testId }
 
+        // Phase 7.5: Evaluate DST structural refinement proposals
+        val (accepted, rejected) = evaluateRefinements(roundSheets)
+
         val verdict = MetaJudgeVerdict(
             roundIndex = roundIndex,
             dimensionWeights = dimensionWeights,
+            dimensionNodeRefs = mergeDimensionNodeRefs(roundSheets),
             contestedDimensionIds = contestedDimensions,
             finalFailureModes = failureModes,
             finalAutomatedTests = automatedTests,
+            acceptedRefinements = accepted,
+            rejectedRefinements = rejected,
             graderSheetIds = roundSheets.map { it.sheetId },
             averageSheetQuality = roundSheets.mapNotNull { it.qualityScore }.average()
         )
 
         Napier.i("MetaJudge: verdict for round $roundIndex — ${dimensionWeights.size} dims, " +
-                "${contestedDimensions.size} contested, quality=${verdict.averageSheetQuality}")
+                "${contestedDimensions.size} contested, ${accepted.size} refinements accepted, " +
+                "quality=${verdict.averageSheetQuality}")
         return verdict
     }
 
@@ -112,6 +122,15 @@ class MetaJudge(
         return if (total > 0) merged.mapValues { it.value / total } else merged
     }
 
+    private fun mergeDimensionNodeRefs(sheetList: List<GradingSheet>): Map<String, String?> {
+        val allDimIds = sheetList.flatMap { it.rubricDimensions }.map { it.dimensionId }.toSet()
+        return allDimIds.associateWith { dimId ->
+            sheetList.asSequence()
+                .mapNotNull { sheet -> sheet.rubricDimensions.find { it.dimensionId == dimId }?.dstNodeRef }
+                .firstOrNull()
+        }
+    }
+
     private fun detectContested(
         sheetList: List<GradingSheet>,
         mergedWeights: Map<String, Double>
@@ -132,6 +151,69 @@ class MetaJudge(
         }
         return contested
     }
+
+    /**
+     * Evaluates DST refinement proposals from all grader sheets.
+     *
+     * A proposal is accepted only when 2+ grader groups independently propose the same
+     * change (same target node and same kind). Single-grader proposals are rejected
+     * with an "insufficient consensus" reason.
+     *
+     * SPLIT_NODE proposals additionally require agreement on the child specs count.
+     *
+     * @param sheetList Grader sheets for this round.
+     * @return Pair of (accepted proposals, rejected proposals with reasons).
+     */
+    private fun evaluateRefinements(
+        sheetList: List<GradingSheet>
+    ): Pair<List<DstRefinementProposal>, List<DstRefinementRejection>> {
+        val allProposals = sheetList.flatMap { it.proposedRefinements }
+        if (allProposals.isEmpty()) return emptyList<DstRefinementProposal>() to emptyList()
+
+        // Group proposals by (targetNodeRef, kind) to detect consensus
+        val byTarget = allProposals.groupBy { "${it.targetNodeRef}|${it.kind.name}" }
+
+        val accepted = mutableListOf<DstRefinementProposal>()
+        val rejected = mutableListOf<DstRefinementRejection>()
+
+        for ((_, group) in byTarget) {
+            // Consensus requires at least 2 independent graders
+            val distinctGraders = group.map { it.proposedByGraderGroupId }.distinct().size
+            val minVotes = if (sheetList.size >= 3) 2 else sheetList.size.coerceAtMost(2)
+
+            if (distinctGraders < minVotes) {
+                group.forEach { proposal ->
+                    rejected += DstRefinementRejection(
+                        proposal = proposal,
+                        reason = "insufficient consensus: ${distinctGraders}/${minVotes} grader groups agreed"
+                    )
+                }
+                continue
+            }
+
+            // For SPLIT_NODE, check that child count is consistent
+            val first = group.first()
+            if (first.kind == com.achulkov.evokammer.core.contract.DstRefinementKind.SPLIT_NODE) {
+                val childCounts = group.map { it.childSpecs.size }.distinct()
+                if (childCounts.size > 1) {
+                    group.forEach { proposal ->
+                        rejected += DstRefinementRejection(
+                            proposal = proposal,
+                            reason = "SPLIT_NODE consensus failed: conflicting child counts (${childCounts.joinToString()})"
+                        )
+                    }
+                    continue
+                }
+            }
+
+            // Accept the first proposal as representative (they agree)
+            accepted += first
+            Napier.i("MetaJudge: accepted DST refinement ${first.kind.name} on ${first.targetNodeRef} " +
+                    "from ${distinctGraders} grader groups")
+        }
+
+        return accepted to rejected
+    }
 }
 
 /**
@@ -142,6 +224,10 @@ class MetaJudge(
  * @param contestedDimensionIds Dimension IDs with significant grader disagreement.
  * @param finalFailureModes Union of all failure modes from all sheets.
  * @param finalAutomatedTests Union of all automated tests.
+ * @param dimensionNodeRefs Optional deliverable node refs keyed by rubric dimension ID.
+ * @param acceptedRefinements DST structural refinement proposals accepted by consensus.
+ * @param rejectedRefinements DST refinement proposals rejected with reasons.
+ * @param newRubricPolicies Rubric policies enacted from grader consensus this round.
  * @param graderSheetIds IDs of all contributing GradingSheets.
  * @param averageSheetQuality Average quality score across contributing sheets.
  */
@@ -149,9 +235,13 @@ class MetaJudge(
 data class MetaJudgeVerdict(
     val roundIndex: Int,
     val dimensionWeights: Map<String, Double>,
+    val dimensionNodeRefs: Map<String, String?> = emptyMap(),
     val contestedDimensionIds: List<String>,
     val finalFailureModes: List<FailureMode>,
     val finalAutomatedTests: List<AutomatedTest>,
+    val acceptedRefinements: List<DstRefinementProposal> = emptyList(),
+    val rejectedRefinements: List<DstRefinementRejection> = emptyList(),
+    val newRubricPolicies: List<DstRubricPolicy> = emptyList(),
     val graderSheetIds: List<String>,
     val averageSheetQuality: Double
 )

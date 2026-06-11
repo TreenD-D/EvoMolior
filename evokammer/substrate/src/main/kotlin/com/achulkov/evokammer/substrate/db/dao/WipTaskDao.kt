@@ -48,6 +48,15 @@ interface WipTaskDao {
     """)
     suspend fun countCompleted(runId: String, groupId: String): Int
 
+    /** Oldest still-open tasks, used for planning and hierarchical decomposition. */
+    @Query("""
+        SELECT * FROM wip_tasks
+        WHERE runId = :runId AND groupId = :groupId AND status IN ('unclaimed', 'claimed')
+        ORDER BY abandonCount DESC, lastChangedGeneration ASC
+        LIMIT :limit
+    """)
+    suspend fun getOpenTasks(runId: String, groupId: String, limit: Int): List<WipTaskEntity>
+
     /** Atomically claim a task. Returns 1 if claim succeeded, 0 if already claimed. */
     @Query("""
         UPDATE wip_tasks 
@@ -71,10 +80,26 @@ interface WipTaskDao {
     """)
     suspend fun abandonTask(nodeId: String, runId: String, groupId: String, agentId: String, generation: Int): Int
 
+    @Query("""
+        UPDATE wip_tasks
+        SET status = 'unclaimed', claimedByAgentId = NULL,
+            lastChangedGeneration = :generation, abandonCount = abandonCount + 1
+        WHERE runId = :runId AND groupId = :groupId AND status = 'claimed' AND lastChangedGeneration >= :generation
+    """)
+    suspend fun releaseClaimsFromGeneration(runId: String, groupId: String, generation: Int): Int
+
     /** Tasks abandoned 3+ times — for Inspector anomaly detection. */
     @Query("""
         SELECT * FROM wip_tasks 
         WHERE runId = :runId AND groupId = :groupId AND abandonCount >= :minAbandonCount
     """)
     suspend fun getFrequentlyAbandoned(runId: String, groupId: String, minAbandonCount: Int = 3): List<WipTaskEntity>
+
+    /** All tasks linked to a specific DST node, ordered by last changed generation. */
+    @Query("""
+        SELECT * FROM wip_tasks
+        WHERE runId = :runId AND groupId = :groupId AND dstNodeRef = :dstNodeRef
+        ORDER BY lastChangedGeneration ASC
+    """)
+    suspend fun getByDstNodeRef(runId: String, groupId: String, dstNodeRef: String): List<WipTaskEntity>
 }

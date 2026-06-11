@@ -3,8 +3,12 @@ package com.achulkov.evokammer.orchestration.lifecycle
 import com.achulkov.evokammer.agents.factory.CriticReviewAgent
 import com.achulkov.evokammer.agents.factory.KgCriticArbitrationAgent
 import com.achulkov.evokammer.core.config.ModelSelectionConfig
+import com.achulkov.evokammer.core.contract.DeliverableArtifactType
+import com.achulkov.evokammer.core.contract.DeliverableSkeletonNodeStatus
+import com.achulkov.evokammer.core.contract.DeliverableSkeletonNodeUpdate
 import com.achulkov.evokammer.core.contract.CriticOutcome
 import com.achulkov.evokammer.core.contract.CriticReview
+import com.achulkov.evokammer.substrate.DeliverableSkeletonTreeStore
 import com.achulkov.evokammer.substrate.db.EvoKammerDatabase
 import com.achulkov.evokammer.core.embedding.EmbeddingEngine
 import com.achulkov.evokammer.orchestration.kg.KGConsistencyChecker as KGConflictConsistencyChecker
@@ -67,7 +71,8 @@ class CriticPipeline(
         criticId: String
     ) -> CriticReview)? = null,
     private val toolsMountHostPath: String,
-    private val onWipTaskCompleted: (suspend (groupId: String, nodeId: String, agentId: String, generation: Int) -> Unit)? = null
+    private val onWipTaskCompleted: (suspend (groupId: String, nodeId: String, agentId: String, generation: Int) -> Unit)? = null,
+    private val deliverableTreeStore: DeliverableSkeletonTreeStore? = null
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val toolMaterializer = ToolMaterializer(File(toolsMountHostPath))
@@ -119,7 +124,31 @@ class CriticPipeline(
                         reason = null,
                         reviewedAtMs = System.currentTimeMillis()
                     )
-                    promoteStagingToSubstrate(submission.id, 0.8)
+                    val deadEndRef = promoteStagingToSubstrate(submission.id, 0.8)
+                    if (deadEndRef != null) {
+                        // Record dead-end reference on the linked DST node, if any.
+                        val wipRef = submission.wipTaskRef?.takeIf { it.isNotBlank() }
+                        if (wipRef != null) {
+                            deliverableTreeStore?.read(runId, groupId)?.let { tree ->
+                                val node = tree.nodes.firstOrNull { it.nodeId == wipRef }
+                                if (node != null) {
+                                    val updatedNode = node.copy(
+                                        deadEndRefs = (node.deadEndRefs + deadEndRef.ref).distinct().take(20),
+                                        updatedAtGeneration = submission.generation
+                                    )
+                                    deliverableTreeStore?.write(tree.replaceNode(updatedNode))
+                                }
+                            }
+                            // Mark the linked task as completed since a dead-end documents the failure.
+                            db.wipTaskDao().completeTask(
+                                nodeId = wipRef,
+                                runId = runId,
+                                groupId = groupId,
+                                agentId = submission.agentId,
+                                generation = submission.generation
+                            )
+                        }
+                    }
                     promoted++
                     continue
                 }
@@ -343,9 +372,27 @@ class CriticPipeline(
 
         if (review.outcome == CriticOutcome.PROMOTE) {
             val promoted = promoteStagingToSubstrate(submission.id, review.initialTrustScore ?: 0.7)
-            if (promoted) {
+            if (promoted != null) {
                 val wipTaskRef = submission.wipTaskRef?.takeIf { it.isNotBlank() }
                 if (wipTaskRef != null) {
+                    deliverableTreeStore?.applyUpdate(
+                        runId = runId,
+                        groupId = groupId,
+                        update = DeliverableSkeletonNodeUpdate(
+                            dstNodeRef = wipTaskRef,
+                            groupId = groupId,
+                            dimensionScores = emptyMap(),
+                            graderIds = listOfNotNull(review.criticAgentId),
+                            rubricVersion = "critic-promotion",
+                            graderNotes = listOfNotNull(review.rejectionReason, review.disputeReason).takeIf { it.isNotEmpty() } ?: emptyList(),
+                            passedThreshold = true,
+                            artifactRef = promoted.ref,
+                            artifactType = promoted.artifactType,
+                            trustScore = review.initialTrustScore ?: 0.7,
+                            owningGeneration = submission.generation,
+                            owningAgentId = submission.agentId
+                        )
+                    )
                     val completed = db.wipTaskDao().completeTask(
                         nodeId = wipTaskRef,
                         runId = runId,
@@ -373,18 +420,24 @@ class CriticPipeline(
         )
     }
 
-    private suspend fun promoteStagingToSubstrate(submissionId: String, trustScore: Double): Boolean {
-        val submission = db.stagingDao().getById(submissionId) ?: return false
+    private data class PromotedArtifact(
+        val ref: String,
+        val artifactType: DeliverableArtifactType
+    )
+
+    private suspend fun promoteStagingToSubstrate(submissionId: String, trustScore: Double): PromotedArtifact? {
+        val submission = db.stagingDao().getById(submissionId) ?: return null
 
         return try {
             when (submission.type) {
                 "DOC", "DEATH_NOTE" -> {
                     val isDeadEnd = submission.type == "DEATH_NOTE"
                     // Compute TF-IDF embedding for semantic search (SearchKBTool)
+                    val kbId = UUID.randomUUID().toString()
                     val embedding = runCatching { EmbeddingEngine.embed(submission.content) }.getOrNull()
                     db.knowledgeBaseDao().insert(
                         KnowledgeBaseEntryEntity(
-                            id = UUID.randomUUID().toString(),
+                            id = kbId,
                             content = submission.content,
                             embedding = embedding,
                             sourceAgentId = submission.agentId,
@@ -397,30 +450,34 @@ class CriticPipeline(
                             isDeadEnd = isDeadEnd
                         )
                     )
+                    PromotedArtifact(ref = "kb:$kbId", artifactType = DeliverableArtifactType.KB_DOC)
                 }
                 "TOOL" -> {
                     // Tool promotion is handled by a separate ToolPromotionService
                     // that parses the tool JSON and creates ToolRegistryEntryEntity
-                    promoteToolSubmission(submission, trustScore)
+                    val toolId = promoteToolSubmission(submission, trustScore)
+                    if (toolId != null) PromotedArtifact(ref = "tool:$toolId", artifactType = DeliverableArtifactType.TOOL) else null
                 }
                 "KG_FACT" -> {
                     // Parse and promote typed KG fact to the knowledge_graph_facts table
-                    promoteKgFactSubmission(submission, trustScore)
+                    val factId = promoteKgFactSubmission(submission, trustScore)
+                    if (factId != null) PromotedArtifact(ref = "kg:$factId", artifactType = DeliverableArtifactType.OTHER) else null
                 }
                 "KG_CONSTRAINT" -> {
                     // B-2: KG constraints are applied to the live KGSchemaDao so future KGConsistencyChecker
                     // validations (B-1) reflect agent-proposed schema extensions.
-                    applyKgConstraintToSchema(submission)
+                    val constraintId = applyKgConstraintToSchema(submission)
+                    if (constraintId != null) PromotedArtifact(ref = "constraint:$constraintId", artifactType = DeliverableArtifactType.OTHER) else null
                 }
                 else -> {
                     // PLAN_UPDATE, DISPATCH handled by respective services
                     Napier.d { "[$groupId] Non-KB submission promoted: ${submission.type} ${submission.id}" }
+                    PromotedArtifact(ref = "submission:${submission.id}", artifactType = DeliverableArtifactType.OTHER)
                 }
             }
-            true
         } catch (e: Exception) {
             Napier.e(e) { "[$groupId] Failed to promote staging submission ${submission.id}" }
-            false
+            null
         }
     }
 
@@ -436,7 +493,7 @@ class CriticPipeline(
     private suspend fun promoteKgFactSubmission(
         submission: StagingSubmissionEntity,
         trustScore: Double
-    ) {
+    ): String? {
         try {
             val subject = extractField(submission.content, "SUBJECT")
             val relation = extractField(submission.content, "RELATION")
@@ -446,12 +503,13 @@ class CriticPipeline(
 
             if (subject == null || relation == null || obj == null) {
                 Napier.w { "[$groupId] KG_FACT ${submission.id} missing required fields — cannot promote to KG" }
-                return
+                return null
             }
 
+            val factId = UUID.randomUUID().toString()
             db.knowledgeGraphFactDao().insert(
                 KnowledgeGraphFactEntity(
-                    id = UUID.randomUUID().toString(),
+                    id = factId,
                     subject = subject,
                     relation = relation,
                     objectNode = obj,
@@ -481,22 +539,25 @@ class CriticPipeline(
             } else {
                 Napier.i { "[$groupId] KG fact promoted: ($subject, $relation, $obj) trust=$trustScore" }
             }
+            return factId
         } catch (e: Exception) {
             Napier.e(e) { "[$groupId] Failed to promote KG_FACT submission ${submission.id}" }
+            return null
         }
     }
 
     private suspend fun promoteToolSubmission(
         submission: StagingSubmissionEntity,
         @Suppress("UNUSED_PARAMETER") trustScore: Double
-    ) {
+    ): String? {
         try {
-            val toolPayload = json.parseToJsonElement(submission.content) as? JsonObject ?: return
+            val toolPayload = json.parseToJsonElement(submission.content) as? JsonObject ?: return null
             val toolName = toolPayload["name"]?.jsonPrimitive?.content ?: "unnamed_tool"
             val previousVersion = db.toolRegistryDao().getLatestVersionByName(runId, groupId, toolName)
             val nextVersion = (previousVersion?.version ?: 0) + 1
+            val toolId = UUID.randomUUID().toString()
             val newTool = ToolRegistryEntryEntity(
-                id = UUID.randomUUID().toString(),
+                id = toolId,
                 name = toolName,
                 version = nextVersion,
                 authorAgentId = submission.agentId,
@@ -516,8 +577,10 @@ class CriticPipeline(
                 db.toolRegistryDao().update(previousVersion.copy(status = "archived"))
             }
             db.toolRegistryDao().insert(newTool)
+            return toolId
         } catch (e: Exception) {
             Napier.e(e) { "[$groupId] Failed to promote tool submission ${submission.id}" }
+            return null
         }
     }
 
@@ -536,7 +599,7 @@ class CriticPipeline(
      *
      * @param submission The `KG_CONSTRAINT` staging submission to apply.
      */
-    private suspend fun applyKgConstraintToSchema(submission: StagingSubmissionEntity) {
+    private suspend fun applyKgConstraintToSchema(submission: StagingSubmissionEntity): String? {
         try {
             val constraintObj: JsonObject? = try {
                 json.parseToJsonElement(submission.content) as? JsonObject
@@ -575,7 +638,7 @@ class CriticPipeline(
                 constraintObj["relationType"]?.jsonPrimitive?.content != null -> {
                     val rel = constraintObj["relationType"]!!.jsonPrimitive.content
                     val types = parseStringList(base.relationTypesJson)
-                    if (rel in types) return  // already present — no-op
+                    if (rel in types) return null  // already present — no-op
                     base.copy(
                         relationTypesJson = stringListToJson(types + rel),
                         schemaVersion = base.schemaVersion + 1
@@ -584,7 +647,7 @@ class CriticPipeline(
                 constraintObj["entityType"]?.jsonPrimitive?.content != null -> {
                     val et = constraintObj["entityType"]!!.jsonPrimitive.content
                     val types = parseStringList(base.entityTypesJson)
-                    if (et in types) return
+                    if (et in types) return null
                     base.copy(
                         entityTypesJson = stringListToJson(types + et),
                         schemaVersion = base.schemaVersion + 1
@@ -607,8 +670,10 @@ class CriticPipeline(
 
             db.kgSchemaDao().upsert(updated)
             Napier.i { "[$groupId] KG_CONSTRAINT applied to schema (v${updated.schemaVersion}): ${submission.id}" }
+            return submission.id
         } catch (e: Exception) {
             Napier.e(e) { "[$groupId] Failed to apply KG_CONSTRAINT to schema: ${submission.id}" }
+            return null
         }
     }
 

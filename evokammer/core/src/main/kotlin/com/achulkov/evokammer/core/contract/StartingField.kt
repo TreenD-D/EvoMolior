@@ -31,6 +31,8 @@ import kotlinx.serialization.Serializable
  * @param scoreNormalization Council-defined per-dimension max-score overrides used by the
  *   scoring pipeline when the deterministic sealed-suite evaluator normalizes raw scores.
  * @param nodeGraph JSON-serialised knowledge node graph (ResourceMapEngine seed).
+ * @param deliverableSkeletonTreeJson JSON-serialised deliverable skeleton tree seed. When
+ *   present, this becomes the canonical per-group deliverable blueprint at run start.
  * @param primordialKb Seed KB documents to pre-populate each group's KB at genesis.
  * @param primordialKgFacts Seed KG facts to pre-populate each group's KG at genesis.
  * @param primordialTools Seed tools to pre-populate each group's Tool Registry at genesis.
@@ -66,6 +68,7 @@ data class StartingField(
     val actionCosts: Map<String, Double>,
     val scoreNormalization: Map<String, Double> = emptyMap(),
     val nodeGraph: String,
+    val deliverableSkeletonTreeJson: String = "{}",
     val primordialKb: List<SeedKBDocument>,
     val primordialKgFacts: List<SeedKGFact>,
     val primordialTools: List<SeedTool>,
@@ -127,6 +130,7 @@ data class StartingField(
                 actionCosts = emptyMap(),
                 scoreNormalization = emptyMap(),
                 nodeGraph = "{}",
+                deliverableSkeletonTreeJson = "{}",
                 primordialKb = emptyList(),
                 primordialKgFacts = emptyList(),
                 primordialTools = emptyList(),

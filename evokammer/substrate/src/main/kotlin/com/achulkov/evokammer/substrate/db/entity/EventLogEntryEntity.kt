@@ -82,4 +82,6 @@ object EventTypes {
     const val LEGACY_PROTOCOL_EXPIRED = "LEGACY_PROTOCOL_EXPIRED"
     /** Emitted when a KG_CONSTRAINT submission is promoted and applied to the schema table. */
     const val KG_CONSTRAINT_APPLIED = "KG_CONSTRAINT_APPLIED"
+    /** Emitted when a nested inner group has been rolled up into the outer substrate. */
+    const val NESTED_GROUP_ROLLUP = "NESTED_GROUP_ROLLUP"
 }

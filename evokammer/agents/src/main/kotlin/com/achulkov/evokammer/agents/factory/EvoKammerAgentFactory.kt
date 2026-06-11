@@ -10,8 +10,10 @@ import ai.koog.agents.features.eventHandler.feature.EventHandler
 import ai.koog.prompt.dsl.prompt as koogPrompt
 import ai.koog.prompt.llm.LLModel
 import ai.koog.serialization.kotlinx.KotlinxSerializer
+import com.achulkov.evokammer.agents.delegation.SubAgentCoordinator
 import com.achulkov.evokammer.agents.tools.ClaimTaskTool
 import com.achulkov.evokammer.agents.tools.CheckConsistencyTool
+import com.achulkov.evokammer.agents.tools.DelegateSubTaskTool
 import com.achulkov.evokammer.agents.tools.EmitConstraintTool
 import com.achulkov.evokammer.agents.tools.EmitFactTool
 import com.achulkov.evokammer.agents.tools.ExecuteToolTool
@@ -66,6 +68,9 @@ class EvoKammerAgentFactory(
     private val contentSanitiser: ContentSanitiser = ContentSanitiser()
 ) {
     private val executor by lazy { createOpenRouterPromptExecutor(openRouterApiKey) }
+
+    internal fun shouldInstallDelegationTool(bootContext: AgentBootContext): Boolean =
+        bootContext.role.canDelegateToSubAgents && !bootContext.isSubAgent
 
     /**
      * Creates an [AgentContext] containing a Koog [AIAgent] and its [BudgetLedger].
@@ -205,6 +210,20 @@ class EvoKammerAgentFactory(
                     generation = bootContext.generation
                 )
             )
+            if (shouldInstallDelegationTool(bootContext)) {
+                tool(
+                    DelegateSubTaskTool(
+                        coordinator = SubAgentCoordinator(
+                            parentContext = bootContext,
+                            parentBudgetLedger = budgetLedger,
+                            db = db,
+                            openRouterApiKey = openRouterApiKey,
+                            budgetConfig = budgetConfig
+                        ),
+                        bootContext = bootContext
+                    )
+                )
+            }
         }
 
         // Resolve the model — each agent gets the model assigned in the boot context

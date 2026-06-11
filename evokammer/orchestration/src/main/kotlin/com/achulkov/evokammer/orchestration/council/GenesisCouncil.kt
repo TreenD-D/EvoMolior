@@ -198,10 +198,12 @@ class GenesisCouncil(
             val rescuedReport = extractConsistencyReport(cleaned)
             val rescuedSuiteJson = extractJsonStringField(cleaned, "sealedTestSuiteJson")
             val rescuedSuiteHash = extractJsonStringField(cleaned, "sealedTestSuiteHash")
+            val rescuedDeliverableTree = extractJsonStringField(cleaned, "deliverableSkeletonTreeJson")
             val rescuedStageContents = extractJsonStringArrayField(cleaned, "stageContents")
             StartingField.default(objective).copy(
                 sealedTestSuiteJson = rescuedSuiteJson,
                 sealedTestSuiteHash = rescuedSuiteHash,
+                deliverableSkeletonTreeJson = rescuedDeliverableTree,
                 stageContents = rescuedStageContents,
                 consistencyReport = rescuedReport
             )

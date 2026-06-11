@@ -1,5 +1,6 @@
 package com.achulkov.evokammer.api.service
 
+import com.achulkov.evokammer.api.model.FinalOutputSpec
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -14,6 +15,11 @@ class RunCompletionRecordSerializationTest {
             winnerId = "group-0",
             finalAnswerSummary = "winner=group-0",
             finalDeliverableHtml = "<!doctype html><html><body><article>done</article></body></html>",
+            requestedOutputSpec = FinalOutputSpec(
+                relativePath = "briefs/evidence-brief.json",
+                mediaType = "application/json",
+                description = "Machine-readable evidence brief"
+            ),
             judgeOutputsByGrader = mapOf("grader-0" to "judge output"),
             submissionSummariesByGroup = mapOf("group-0" to "submission summary"),
             completedAtMs = 42L

@@ -5,6 +5,7 @@ import com.achulkov.evokammer.competition.scoring.BlindSubmissionGate
 import com.achulkov.evokammer.competition.scoring.FailureTelemetry
 import com.achulkov.evokammer.competition.scoring.GroupRoundResult
 import com.achulkov.evokammer.competition.scoring.ScoringEngine
+import com.achulkov.evokammer.core.contract.DeliverableSkeletonNodeUpdate
 import com.achulkov.evokammer.core.model.GradingResult
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
@@ -23,12 +24,14 @@ import kotlinx.coroutines.flow.first
  * still remaining in the same JVM process.
  */
 internal class BlindTournamentService(
-    private val onFailureTelemetry: suspend (FailureTelemetry) -> Unit
+    private val onFailureTelemetry: suspend (FailureTelemetry) -> Unit,
+    private val onDeliverableNodeUpdates: suspend (List<DeliverableSkeletonNodeUpdate>) -> Unit = {}
 ) {
     private var scope: CoroutineScope? = null
     private var gate: BlindSubmissionGate? = null
     private var engine: ScoringEngine? = null
     private var failureTelemetryJob: Job? = null
+    private var deliverableNodeUpdatesJob: Job? = null
 
     fun start(groupIds: List<String>) {
         check(scope == null) { "BlindTournamentService is already running" }
@@ -46,6 +49,14 @@ internal class BlindTournamentService(
         failureTelemetryJob = runtimeScope.launch {
             scoringEngine.failureTelemetry.collect { telemetry ->
                 onFailureTelemetry(telemetry)
+            }
+        }
+
+        deliverableNodeUpdatesJob = runtimeScope.launch {
+            scoringEngine.deliverableNodeUpdates.collect { updates ->
+                if (updates.isNotEmpty()) {
+                    onDeliverableNodeUpdates(updates)
+                }
             }
         }
     }
@@ -78,6 +89,8 @@ internal class BlindTournamentService(
     fun stop() {
         failureTelemetryJob?.cancel()
         failureTelemetryJob = null
+        deliverableNodeUpdatesJob?.cancel()
+        deliverableNodeUpdatesJob = null
         scope?.cancel()
         scope = null
         gate = null

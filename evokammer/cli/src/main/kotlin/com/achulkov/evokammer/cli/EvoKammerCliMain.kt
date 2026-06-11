@@ -27,7 +27,7 @@ import java.time.Instant
 import java.util.UUID
 import kotlin.system.exitProcess
 
-private val cliJson = Json { prettyPrint = true }
+internal val cliJson = Json { prettyPrint = true }
 
 /**
  * Entry point for the EvoKammer console runner.
@@ -42,7 +42,15 @@ private val cliJson = Json { prettyPrint = true }
  */
 fun main(args: Array<String>) {
     try {
-        val options = CliArguments.parse(args) ?: run {
+        val routedArgs = when (args.firstOrNull()) {
+            "self-improve" -> {
+                runSelfImprovementCli(args.drop(1).toTypedArray())
+                return
+            }
+            "run" -> args.drop(1).toTypedArray()
+            else -> args
+        }
+        val options = CliArguments.parse(routedArgs) ?: run {
             println(CliArguments.usage())
             exitProcess(0)
         }
@@ -80,140 +88,20 @@ internal fun runCli(
         }
     }
 ): CliRunResult = runBlocking {
-    val runId = options.runId ?: "cli-${UUID.randomUUID()}"
-    val outputRoot = options.outputDir.toFile().absoluteFile
-    val runOutputDir = outputRoot.resolve(runId).apply { mkdirs() }
-    val debugLogFile = if (options.debug || options.fast) runOutputDir.resolve("debug-log.txt") else null
-    val promptFile = runOutputDir.resolve("prompt.txt")
-    promptFile.writeText(options.prompt)
-
-    val fileAntilog = debugLogFile?.let { FileAntilog(it.toPath()) }
-    val logAntilog = if (fileAntilog != null) {
-        CompositeAntilog(listOf(DebugAntilog(), fileAntilog))
-    } else {
-        DebugAntilog()
-    }
-    Napier.base(logAntilog)
-    Napier.i("EvoKammer CLI starting runId=$runId outputDir=${runOutputDir.absolutePath}")
-
-    val dataRoot = runOutputDir.resolve(".evokammer-data").also { it.mkdirs() }
-    val runtime = runtimeFactory(dataRoot, options)
-
-    val inputArtifacts = loadRunInputArtifacts(options.inputDir)
-    Napier.i("EvoKammer CLI loaded ${inputArtifacts.size} input artifacts from ${options.inputDir}")
-
-    val rounds = options.rounds ?: if (options.fast) 5 else 1
-    val objectiveProfile = buildCliObjectiveProfile(options.prompt, options.fast)
-    val modelOverrides = if (options.fast) {
-        FastModelSelectionConfig.fastRuntimeAssignments().toMutableMap().apply {
-            putAll(options.modelOverrides)
-        }
-    } else {
-        options.modelOverrides
-    }
-
-    val runConfig = RunConfig(
-        runId = runId,
-        objective = options.prompt,
-        groupCount = if (options.fast) 2 else 1,
-        groupProfiles = if (options.fast) {
-            listOf(GroupProfileType.Library, GroupProfileType.Library)
-        } else {
-            listOf(GroupProfileType.Library)
-        },
-        rounds = rounds,
-        roundDurationMinutes = if (options.fast) 1 else 0,
-        maxAgentsPerGroup = objectiveProfile.maxAgentsPerGroup,
-        scoringDimensions = objectiveProfile.scoringDimensions,
-        openRouterApiKey = options.openRouterApiKey,
-        modelOverrides = modelOverrides,
-        contextArtifacts = inputArtifacts,
-        isTestRun = true,
-        budgetOverride = objectiveProfile.budgetOverride
-    )
-
-    val completion = CompletableDeferred<EvoKammerEvent>()
-    val eventCollector = launch(Dispatchers.Default) {
-        runtime.engineService.events.collect { event ->
-            when (event) {
-                is EvoKammerEvent.RunStarted -> Napier.i("EvoKammer CLI run started runId=${event.runId}")
-                is EvoKammerEvent.RoundStarted -> Napier.i("EvoKammer CLI round started round=${event.roundIndex}")
-                is EvoKammerEvent.RoundCompleted -> Napier.i("EvoKammer CLI round completed round=${event.result.roundIndex}")
-                is EvoKammerEvent.RunCompleted -> {
-                    Napier.i("EvoKammer CLI run completed runId=${event.runId} winner=${event.winnerId}")
-                    if (!completion.isCompleted) completion.complete(event)
-                }
-                is EvoKammerEvent.RunAborted -> {
-                    Napier.e("EvoKammer CLI run aborted runId=${event.runId} reason=${event.reason}")
-                    if (!completion.isCompleted) completion.complete(event)
-                }
-                is EvoKammerEvent.EngineProgress -> Napier.d("EvoKammer CLI progress phase=${event.phase} msg=${event.message}")
-                else -> Unit
-            }
-        }
-    }
-
-    val startedAt = Instant.now()
-    val completedEvent = try {
-        runtime.engineService.startRun(runConfig)
-        completion.await()
-    } finally {
-        eventCollector.cancelAndJoin()
-    }
-
-    val durationMs = java.time.Duration.between(startedAt, Instant.now()).toMillis()
-    val resultsBundle = runtime.engineService.getResultsBundle(runId)
-    val resultsBundleFile = resultsBundle?.let {
-        val file = runOutputDir.resolve("results.zip")
-        Files.write(file.toPath(), it)
-        file
-    }
-
-    val summary = CliRunSummary(
-        runId = runId,
-        prompt = options.prompt,
-        inputDirectory = options.inputDir.toString(),
-        inputArtifactCount = inputArtifacts.size,
-        outputDirectory = runOutputDir.absolutePath,
-        completedAt = Instant.now().toString(),
-        durationMs = durationMs,
-        debugLogPath = debugLogFile?.absolutePath,
-        resultsBundlePath = resultsBundleFile?.absolutePath,
-        status = when (completedEvent) {
-            is EvoKammerEvent.RunCompleted -> "COMPLETED"
-            is EvoKammerEvent.RunAborted -> "ABORTED"
-            else -> "UNKNOWN"
-        },
-        winnerId = (completedEvent as? EvoKammerEvent.RunCompleted)?.winnerId,
-        modelOverrides = modelOverrides
-    )
-
-    Files.writeString(
-        runOutputDir.resolve("summary.json").toPath(),
-        cliJson.encodeToString(summary)
-    )
-
-    Napier.i("EvoKammer CLI wrote summary to ${runOutputDir.resolve("summary.json").absolutePath}")
-    if (fileAntilog != null) {
-        Napier.base(DebugAntilog())
-    }
-    fileAntilog?.close()
-    CliRunResult(
-        completedSuccessfully = completedEvent is EvoKammerEvent.RunCompleted
-    )
+    runCliPipeline(options, runtimeFactory)
 }
 
 internal data class CliRunResult(
     val completedSuccessfully: Boolean
 )
 
-private data class CliObjectiveProfile(
+internal data class CliObjectiveProfile(
     val maxAgentsPerGroup: Int,
     val scoringDimensions: List<ScoringDimension>,
     val budgetOverride: Double
 )
 
-private fun buildCliObjectiveProfile(
+internal fun buildCliObjectiveProfile(
     objective: String,
     fastMode: Boolean
 ): CliObjectiveProfile {
@@ -240,7 +128,7 @@ private fun buildCliObjectiveProfile(
     }
 }
 
-private fun defaultCliScoringDimensions(): List<ScoringDimension> = listOf(
+internal fun defaultCliScoringDimensions(): List<ScoringDimension> = listOf(
     ScoringDimension(
         id = "accuracy",
         name = "Accuracy",
@@ -249,7 +137,7 @@ private fun defaultCliScoringDimensions(): List<ScoringDimension> = listOf(
     )
 )
 
-private fun browserArticleScoringDimensions(): List<ScoringDimension> = listOf(
+internal fun browserArticleScoringDimensions(): List<ScoringDimension> = listOf(
     ScoringDimension(
         id = "content_depth",
         name = "Content Depth",
@@ -291,7 +179,11 @@ internal data class CliOptions(
     val debug: Boolean,
     val fast: Boolean,
     val rounds: Int?,
-    val runId: String? = null
+    val groupCount: Int? = null,
+    val maxAgentsPerGroup: Int? = null,
+    val budgetOverride: Double? = null,
+    val runId: String? = null,
+    val pipelineConfigPath: Path? = null
 )
 
 internal data class CliRuntime(
@@ -331,7 +223,11 @@ internal object CliArguments {
         var debug = false
         var fast = false
         var rounds: Int? = null
+        var groupCount: Int? = null
+        var maxAgentsPerGroup: Int? = null
+        var budgetOverride: Double? = null
         var runId: String? = null
+        var pipelineConfigPath: Path? = null
         val modelOverrides = linkedMapOf<String, String>()
 
         var index = 0
@@ -362,8 +258,27 @@ internal object CliArguments {
                     rounds = value.toIntOrNull()?.takeIf { it > 0 }
                         ?: throw CliUsageException("Rounds must be a positive integer, got: $value")
                 }
+                "-groupcount", "-group-count", "--group-count" -> {
+                    val value = args.getOrNull(++index) ?: throw CliUsageException("Missing value for $arg")
+                    groupCount = value.toIntOrNull()?.takeIf { it > 0 }
+                        ?: throw CliUsageException("Group count must be a positive integer, got: $value")
+                }
+                "-maxagents", "-max-agents", "-max-agents-per-group", "--max-agents-per-group" -> {
+                    val value = args.getOrNull(++index) ?: throw CliUsageException("Missing value for $arg")
+                    maxAgentsPerGroup = value.toIntOrNull()?.takeIf { it > 0 }
+                        ?: throw CliUsageException("Max agents per group must be a positive integer, got: $value")
+                }
+                "-budgetoverride", "-budget-override", "--budget-override" -> {
+                    val value = args.getOrNull(++index) ?: throw CliUsageException("Missing value for $arg")
+                    budgetOverride = value.toDoubleOrNull()?.takeIf { it > 0.0 }
+                        ?: throw CliUsageException("Budget override must be a positive number, got: $value")
+                }
                 "-runid", "-run-id", "--run-id" -> {
                     runId = args.getOrNull(++index) ?: throw CliUsageException("Missing value for $arg")
+                }
+                "-pipelineconfig", "-pipeline-config", "--pipeline-config" -> {
+                    val value = args.getOrNull(++index) ?: throw CliUsageException("Missing value for $arg")
+                    pipelineConfigPath = Path.of(value)
                 }
                 "-model", "--model" -> {
                     val mapping = args.getOrNull(++index) ?: throw CliUsageException("Missing value for $arg")
@@ -420,7 +335,11 @@ internal object CliArguments {
             debug = debug || fast,
             fast = fast,
             rounds = resolvedRounds,
-            runId = runId
+            groupCount = groupCount,
+            maxAgentsPerGroup = maxAgentsPerGroup,
+            budgetOverride = budgetOverride,
+            runId = runId,
+            pipelineConfigPath = pipelineConfigPath?.toAbsolutePath()?.normalize()
         )
     }
 
@@ -435,16 +354,20 @@ internal object CliArguments {
         Optional:
           -fast
           -rounds N
+          -group-count N
+          -max-agents-per-group N
+          -budget-override N
           -openrouter-api-key KEY
           -debug
           -run-id custom-run-id
+          -pipeline-config /path/to/pipeline.json
           -model ROLE=MODEL   (repeatable)
     """.trimIndent()
 }
 
 internal class CliUsageException(message: String) : IllegalArgumentException(message)
 
-private class CompositeAntilog(
+internal class CompositeAntilog(
     private val delegates: List<Antilog>
 ) : Antilog() {
     override fun performLog(priority: LogLevel, tag: String?, throwable: Throwable?, message: String?) {
@@ -452,7 +375,7 @@ private class CompositeAntilog(
     }
 }
 
-private class FileAntilog(
+internal class FileAntilog(
     private val path: Path
 ) : Antilog(), AutoCloseable {
     private val lock = Any()

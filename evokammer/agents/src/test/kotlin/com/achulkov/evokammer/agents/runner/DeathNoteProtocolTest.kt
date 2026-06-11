@@ -56,6 +56,7 @@ class DeathNoteProtocolTest {
         override suspend fun update(submission: StagingSubmissionEntity) {}
         override suspend fun getById(id: String): StagingSubmissionEntity? = null
         override suspend fun getPending(runId: String, groupId: String) = emptyList<StagingSubmissionEntity>()
+        override suspend fun getPendingByGeneration(runId: String, groupId: String, generation: Int) = emptyList<StagingSubmissionEntity>()
         override fun observePending(runId: String, groupId: String): Flow<List<StagingSubmissionEntity>> = flowOf(emptyList())
         override suspend fun getByAgent(runId: String, groupId: String, agentId: String) = emptyList<StagingSubmissionEntity>()
         override suspend fun countPendingByType(runId: String, groupId: String, type: String) = 0
@@ -66,6 +67,7 @@ class DeathNoteProtocolTest {
         override suspend fun getPromotedKgFactCountForAgent(runId: String, groupId: String, agentId: String) = 0
         override suspend fun getTotalCountForAgent(runId: String, groupId: String, agentId: String) = 0
         override suspend fun getAll(runId: String, groupId: String, limit: Int) = emptyList<StagingSubmissionEntity>()
+        override suspend fun getMaxGeneration(runId: String, groupId: String): Int? = null
         override suspend fun getDistinctAgentIds(runId: String, groupId: String, generation: Int) = emptyList<String>()
     }
 

@@ -1,0 +1,40 @@
+{
+  "stages": [
+    {
+      "id": "localize-de",
+      "prompt": "Read the uploaded previous-stage HTML article and create a German localized version with equivalent structure, CTA, and accessibility quality.",
+      "fast": true,
+      "rounds": 1,
+      "inheritsPreviousOutputs": true,
+      "finalOutput": {
+        "relativePath": "localized/final-article-de.html",
+        "mediaType": "text/html",
+        "description": "German localized HTML article"
+      }
+    },
+    {
+      "id": "localize-fr",
+      "prompt": "Read the uploaded previous-stage HTML article and create a French localized version with equivalent structure, CTA, and accessibility quality.",
+      "fast": true,
+      "rounds": 1,
+      "inheritsPreviousOutputs": true,
+      "finalOutput": {
+        "relativePath": "localized/final-article-fr.html",
+        "mediaType": "text/html",
+        "description": "French localized HTML article"
+      }
+    },
+    {
+      "id": "content-brief",
+      "prompt": "Read the uploaded previous-stage outputs and produce a structured JSON content brief with title, audience, sections, CTA, SEO metadata, and localization notes.",
+      "fast": true,
+      "rounds": 1,
+      "inheritsPreviousOutputs": true,
+      "finalOutput": {
+        "relativePath": "briefs/content-brief.json",
+        "mediaType": "application/json",
+        "description": "Machine-readable content brief"
+      }
+    }
+  ]
+}

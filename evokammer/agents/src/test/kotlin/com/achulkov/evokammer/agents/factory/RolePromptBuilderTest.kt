@@ -110,10 +110,13 @@ class RolePromptBuilderTest {
 
     @Test
     fun `final deliverable prompt requires publication grade html article`() {
-        val prompt = RolePromptBuilder.buildFinalDeliverableHtml(
+        val prompt = RolePromptBuilder.buildFinalDeliverableFile(
             runObjective = "Create a standalone HTML article for mindvortex.app",
             roundCount = 10,
-            groupId = "group-0"
+            groupId = "group-0",
+            relativePath = "final-article.html",
+            mediaType = "text/html",
+            description = "Publication article"
         )
 
         assertContains(prompt, "embedded <style> rules")
@@ -121,5 +124,25 @@ class RolePromptBuilderTest {
         assertContains(prompt, "FINAL publication artifact")
         assertContains(prompt, "roughly 1,200-2,000 words")
         assertContains(prompt, "CTA or next-step section")
+    }
+
+    @Test
+    fun `final deliverable prompt supports generic non-html file outputs`() {
+        val prompt = RolePromptBuilder.buildFinalDeliverableFile(
+            runObjective = "Produce a machine-readable JSON content brief",
+            roundCount = 1,
+            groupId = "group-0",
+            relativePath = "content-brief.json",
+            mediaType = "application/json",
+            description = "Structured content brief",
+            attempt = 2
+        )
+
+        assertContains(prompt, "Relative path: content-brief.json")
+        assertContains(prompt, "Media type: application/json")
+        assertContains(prompt, "FULL file body only")
+        assertContains(prompt, "do not restate them in the body")
+        assertContains(prompt, "valid JSON")
+        assertContains(prompt, "=== RETRY CONTEXT ===")
     }
 }

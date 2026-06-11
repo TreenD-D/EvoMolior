@@ -52,6 +52,22 @@ class SubstrateDatabaseFactory(private val dataRootDir: File) {
         return File(dataRootDir, "evokammer/runs/$runId/groups/$groupId/substrate.db")
     }
 
+    /** Returns the filesystem root for a run. */
+    fun runRootDir(runId: String): File = File(dataRootDir, "evokammer/runs/$runId")
+
+    /** Returns the control directory for durable non-DB run metadata. */
+    fun runControlDir(runId: String): File = File(runRootDir(runId), "control")
+
+    /** Returns the control directory for global Overseer state. */
+    fun overseerControlDir(): File = File(dataRootDir, "evokammer/overseer")
+
+    /** Returns the durable state file for the Overseer kernel. */
+    fun overseerStateFile(): File = File(overseerControlDir(), "overseer-kernel-state.json")
+
+    /** Returns the control directory for a specific group inside a run. */
+    fun groupControlDir(runId: String, groupId: String): File =
+        File(runControlDir(runId), "groups/$groupId")
+
     /**
      * Returns (or creates) the [EvoKammerDatabase] for a Grader Group.
      *

@@ -673,7 +673,7 @@ class EvoKammerRunServiceModeGatingTest {
             metaPlannerRunner = MetaPlannerRunner()
         )
 
-        val blindTournamentService = BlindTournamentService { }
+        val blindTournamentService = BlindTournamentService(onFailureTelemetry = {})
         blindTournamentService.start(listOf("group-0"))
         val field = service.javaClass.getDeclaredField("activeBlindTournamentService").apply { isAccessible = true }
         field.set(service, blindTournamentService)

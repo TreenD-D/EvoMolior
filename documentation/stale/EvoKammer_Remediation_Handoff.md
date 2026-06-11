@@ -59,7 +59,7 @@
 - The broader remediation plan still has other items outside this slice.
 - If continuing, next useful steps are:
   - Audit any remaining AIAgent builder call sites for response processor coverage if new ones are added.
-  - Continue the remaining remediation-plan items in `documentation/EvoKammer_Remediation_Plan.md`.
+  - Continue the remaining remediation-plan items in `documentation/stale/EvoKammer_Remediation_Plan.md`.
 
 ## Core Flow Recheck Status (2026-05-27)
 

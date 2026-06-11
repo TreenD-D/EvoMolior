@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 6,
-    "identityHash": "15c5781b21264014cb53e497dc303ea2",
+    "identityHash": "2635ff8c681857ac48fcc06d293d5d04",
     "entities": [
       {
         "tableName": "knowledge_base_entries",
@@ -681,7 +681,7 @@
       },
       {
         "tableName": "wip_tasks",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`nodeId` TEXT NOT NULL, `runId` TEXT NOT NULL, `groupId` TEXT NOT NULL, `description` TEXT NOT NULL, `claimedByAgentId` TEXT, `status` TEXT NOT NULL, `lastChangedGeneration` INTEGER NOT NULL, `abandonCount` INTEGER NOT NULL, `linkedNodeId` TEXT, PRIMARY KEY(`nodeId`, `runId`, `groupId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`nodeId` TEXT NOT NULL, `runId` TEXT NOT NULL, `groupId` TEXT NOT NULL, `description` TEXT NOT NULL, `claimedByAgentId` TEXT, `status` TEXT NOT NULL, `lastChangedGeneration` INTEGER NOT NULL, `abandonCount` INTEGER NOT NULL, `linkedNodeId` TEXT, `dstNodeRef` TEXT, PRIMARY KEY(`nodeId`, `runId`, `groupId`))",
         "fields": [
           {
             "fieldPath": "nodeId",
@@ -733,6 +733,11 @@
           {
             "fieldPath": "linkedNodeId",
             "columnName": "linkedNodeId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "dstNodeRef",
+            "columnName": "dstNodeRef",
             "affinity": "TEXT"
           }
         ],
@@ -1759,7 +1764,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '15c5781b21264014cb53e497dc303ea2')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2635ff8c681857ac48fcc06d293d5d04')"
     ]
   }
 }

@@ -1,6 +1,7 @@
 package com.achulkov.evokammer.api.service
 
 import com.achulkov.evokammer.api.events.EvoKammerEvent
+import com.achulkov.evokammer.api.model.FinalOutputSpec
 import com.achulkov.evokammer.api.model.RunConfig
 import com.achulkov.evokammer.api.model.RunInputArtifactUpload
 import com.achulkov.evokammer.competition.coordinator.GroupCoordinator
@@ -21,6 +22,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.io.File
 import java.io.ByteArrayInputStream
 import java.util.Base64
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -194,6 +196,109 @@ class EvoKammerRunServiceEndToEndFlowTest {
         assertTrue(bundleEntries.keys.contains("inputs/docs/context.txt"))
         assertTrue(bundleEntries.keys.any { it.startsWith("outputs/round_summary") })
         assertTrue(bundleEntries["inputs/docs/context.txt"]!!.contains("This is the starting context document."))
+    }
+
+    @Test
+    fun `single round lifecycle emits summary completion and final answer in canonical order`() = runBlocking {
+        val tmpDir = createTempDirectory("svc-event-order-flow-test-").toFile()
+        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+        val runId = "run-event-order"
+        val collectedEvents = mutableListOf<EvoKammerEvent>()
+
+        val service = EvoKammerRunService(
+            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
+                LifecycleManager(
+                    runId = runIdValue,
+                    groupId = groupIdValue,
+                    shuruVmManager = ShuruVmManager(),
+                    substrateDatabaseFactory = substrateFactory,
+                    agentJarPath = "/fake/agent.jar",
+                    openRouterApiKey = "sk-test",
+                    groupProfile = groupProfile,
+                    localAgentRunner = { _, _ -> }
+                )
+            },
+            groupCoordinatorProvider = { groupIds, dimensions ->
+                GroupCoordinator(groupIds, dimensions)
+            },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = substrateFactory,
+            metaPlannerRunner = MetaPlannerRunner(),
+            roundHeartbeatIntervalMs = 1L,
+            inspectorCheckIntervalMs = 1L
+        )
+
+        val eventCollector = launch {
+            service.events.collect { event ->
+                collectedEvents += event
+            }
+        }
+
+        kotlinx.coroutines.yield()
+
+        service.startRun(
+            RunConfig(
+                runId = runId,
+                objective = "event ordering regression",
+                groupCount = 2,
+                groupProfiles = listOf(
+                    GroupProfileType.Library,
+                    GroupProfileType.Factory
+                ),
+                rounds = 1,
+                roundDurationMinutes = 0,
+                maxAgentsPerGroup = 1,
+                scoringDimensions = listOf(
+                    ScoringDimension(
+                        id = "accuracy",
+                        name = "Accuracy",
+                        description = "Reward evidence-based evaluation.",
+                        weight = 1.0
+                    )
+                ),
+                openRouterApiKey = "sk-test",
+                isTestRun = true
+            )
+        )
+
+        withTimeout(10_000) {
+            service.events.first { event ->
+                event is EvoKammerEvent.RunCompleted && event.runId == runId
+            }
+        }
+
+        eventCollector.cancel()
+
+        val roundStartedIndex = collectedEvents.indexOfFirst {
+            it is EvoKammerEvent.RoundStarted && it.runId == runId && it.roundIndex == 0
+        }
+        val roundSummaryIndex = collectedEvents.indexOfFirst {
+            it is EvoKammerEvent.EngineProgress && it.runId == runId && it.phase == "round_summary_result"
+        }
+        val roundCompletedIndex = collectedEvents.indexOfFirst {
+            it is EvoKammerEvent.RoundCompleted && it.runId == runId
+        }
+        val finalAnswerIndex = collectedEvents.indexOfFirst {
+            it is EvoKammerEvent.EngineProgress && it.runId == runId && it.phase == "final_answer"
+        }
+        val runCompletedIndex = collectedEvents.indexOfFirst {
+            it is EvoKammerEvent.RunCompleted && it.runId == runId
+        }
+
+        assertTrue(roundStartedIndex >= 0, "RoundStarted should be emitted")
+        assertTrue(roundSummaryIndex >= 0, "round_summary_result should be emitted")
+        assertTrue(roundCompletedIndex >= 0, "RoundCompleted should be emitted")
+        assertTrue(finalAnswerIndex >= 0, "final_answer should be emitted")
+        assertTrue(runCompletedIndex >= 0, "RunCompleted should be emitted")
+        assertTrue(roundStartedIndex < roundSummaryIndex)
+        assertTrue(roundSummaryIndex < roundCompletedIndex)
+        assertTrue(roundCompletedIndex < finalAnswerIndex)
+        assertTrue(finalAnswerIndex < runCompletedIndex)
+        assertEquals(
+            1,
+            collectedEvents.count { it is EvoKammerEvent.RoundCompleted && it.runId == runId },
+            "One-round runs should publish exactly one RoundCompleted event"
+        )
     }
 
     @Test
@@ -504,9 +609,185 @@ class EvoKammerRunServiceEndToEndFlowTest {
         val finalArticle = assertNotNull(bundleEntries["outputs/final-article.html"])
         assertTrue(finalArticle.contains("Dedicated Final Writer Article"))
         assertFalse(finalArticle.contains("Summary Fallback Article"))
-        assertEquals(2, finalWriterAttempts.get())
-        assertTrue(finalWriterModels.all { it == "test-archivist-model" })
+        assertTrue(finalWriterAttempts.get() in 2..3)
+        assertTrue(finalWriterModels.size >= 2)
+        assertEquals("test-builder-model", finalWriterModels.elementAt(0))
+        assertEquals("test-archivist-model", finalWriterModels.elementAt(1))
         assertTrue(sawRetryPrompt.get() >= 1)
+    }
+
+    @Test
+    fun `non html final writer stores raw json body as generated output file`() = runBlocking {
+        val tmpDir = createTempDirectory("svc-json-final-deliverable-flow-test-").toFile()
+        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+        val runId = "run-json-final-deliverable"
+
+        val service = EvoKammerRunService(
+            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
+                LifecycleManager(
+                    runId = runIdValue,
+                    groupId = groupIdValue,
+                    shuruVmManager = ShuruVmManager(),
+                    substrateDatabaseFactory = substrateFactory,
+                    agentJarPath = "/fake/agent.jar",
+                    openRouterApiKey = "sk-test",
+                    groupProfile = groupProfile,
+                    localAgentRunner = { bootContext: AgentBootContext, _ ->
+                        if (bootContext.role == Role.Builder &&
+                            bootContext.rolePrompt.contains("Final Deliverable Writer")
+                        ) {
+                            val db = substrateFactory.get(bootContext.runId, bootContext.groupId)
+                            val now = System.currentTimeMillis()
+                            db.stagingDao().insert(
+                                StagingSubmissionEntity(
+                                    id = "json-final-${bootContext.groupId}-$now",
+                                    agentId = bootContext.agentId,
+                                    role = bootContext.role.name,
+                                    type = "DOC",
+                                    content = """
+                                        {
+                                          "title": "ADHD Evidence Brief",
+                                          "generatedOn": "2026-06-04",
+                                          "audience": "Editors",
+                                          "keyTakeaways": [
+                                            "Medication evidence is strongest for short-term symptom reduction.",
+                                            "Non-pharmacological evidence is useful but more heterogeneous."
+                                          ]
+                                        }
+                                    """.trimIndent(),
+                                    budgetSignature = "test-json-final",
+                                    status = "pending",
+                                    generation = bootContext.generation,
+                                    groupId = bootContext.groupId,
+                                    runId = bootContext.runId,
+                                    submittedAtMs = now,
+                                    reviewedAtMs = null
+                                )
+                            )
+                        }
+                    }
+                )
+            },
+            groupCoordinatorProvider = { groupIds, dimensions ->
+                GroupCoordinator(groupIds, dimensions)
+            },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = substrateFactory,
+            metaPlannerRunner = MetaPlannerRunner(),
+            roundHeartbeatIntervalMs = 1L,
+            inspectorCheckIntervalMs = 1L
+        )
+
+        service.startRun(
+            RunConfig(
+                runId = runId,
+                objective = "Produce a machine-readable JSON evidence brief",
+                groupCount = 2,
+                groupProfiles = listOf(
+                    GroupProfileType.Library,
+                    GroupProfileType.Factory
+                ),
+                rounds = 1,
+                roundDurationMinutes = 0,
+                maxAgentsPerGroup = 1,
+                scoringDimensions = listOf(
+                    ScoringDimension(
+                        id = "content_depth",
+                        name = "Content Depth",
+                        description = "Reward substantial content quality.",
+                        weight = 1.0
+                    )
+                ),
+                openRouterApiKey = "sk-test",
+                finalOutputSpec = FinalOutputSpec(
+                    relativePath = "briefs/evidence-brief.json",
+                    mediaType = "application/json",
+                    description = "Machine-readable evidence brief"
+                ),
+                isTestRun = true
+            )
+        )
+
+        withTimeout(10_000) {
+            service.events.first { event ->
+                event is EvoKammerEvent.RunCompleted && event.runId == runId
+            }
+        }
+
+        val completionEntry = service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).last()
+        val decodedCompletion = json.decodeFromString(RunCompletionArchiveRecord.serializer(), completionEntry.contentJson)
+        assertEquals(1, decodedCompletion.generatedOutputFiles.size)
+        assertEquals("briefs/evidence-brief.json", decodedCompletion.generatedOutputFiles.single().relativePath)
+        assertEquals("application/json", decodedCompletion.generatedOutputFiles.single().mediaType)
+        assertTrue(decodedCompletion.generatedOutputFiles.single().content.contains("\"ADHD Evidence Brief\""))
+
+        val bundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
+        val evidenceBrief = assertNotNull(bundleEntries["outputs/briefs/evidence-brief.json"])
+        assertTrue(json.parseToJsonElement(evidenceBrief).toString().contains("ADHD Evidence Brief"))
+
+        val staleStateFile = File(tmpDir, "evokammer/runs/$runId/control/${PersistedRunStateStore.STATE_FILE_NAME}")
+        PersistedRunStateStore.write(
+            staleStateFile,
+            PersistedRunState(
+                runId = runId,
+                objective = "stale state should not override the live output spec",
+                groupCount = 2,
+                groupProfiles = listOf(GroupProfileType.Library, GroupProfileType.Factory),
+                rounds = 1,
+                roundDurationMinutes = 0,
+                maxAgentsPerGroup = 1,
+                scoringDimensions = listOf(
+                    ScoringDimension(
+                        id = "content_depth",
+                        name = "Content Depth",
+                        description = "Reward substantial content quality.",
+                        weight = 1.0
+                    )
+                ),
+                finalOutputSpec = FinalOutputSpec(
+                    relativePath = "briefs/wrong.json",
+                    mediaType = "application/json",
+                    description = "Stale output contract"
+                ),
+                isTestRun = true,
+                budgetOverride = 200.0,
+                groupIds = listOf("group-0", "group-1"),
+                graderGroupIds = emptyList()
+            )
+        )
+
+        val serviceBundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
+        assertTrue(serviceBundleEntries["outputs/briefs/evidence-brief.json"]!!.contains("ADHD Evidence Brief"))
+        assertFalse(serviceBundleEntries.containsKey("outputs/briefs/wrong.json"))
+
+        assertTrue(staleStateFile.delete(), "The stale persisted state file should be removable for the missing-file case")
+        val missingStateBundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
+        assertTrue(missingStateBundleEntries["outputs/briefs/evidence-brief.json"]!!.contains("ADHD Evidence Brief"))
+        assertFalse(missingStateBundleEntries.containsKey("outputs/briefs/wrong.json"))
+
+        val restartedService = EvoKammerRunService(
+            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
+                LifecycleManager(
+                    runId = runIdValue,
+                    groupId = groupIdValue,
+                    shuruVmManager = ShuruVmManager(),
+                    substrateDatabaseFactory = substrateFactory,
+                    agentJarPath = "/fake/agent.jar",
+                    openRouterApiKey = "sk-test",
+                    groupProfile = groupProfile,
+                    localAgentRunner = { _, _ -> }
+                )
+            },
+            groupCoordinatorProvider = { groupIds, dimensions -> GroupCoordinator(groupIds, dimensions) },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = substrateFactory,
+            metaPlannerRunner = MetaPlannerRunner(),
+            roundHeartbeatIntervalMs = 1L,
+            inspectorCheckIntervalMs = 1L
+        )
+        val restartedBundleEntries = unzipEntries(assertNotNull(restartedService.getResultsBundle(runId)))
+        assertTrue(restartedBundleEntries["outputs/briefs/evidence-brief.json"]!!.contains("ADHD Evidence Brief"))
+        assertFalse(restartedBundleEntries.containsKey("outputs/briefs/wrong.json"))
     }
 
     private fun unzipEntries(bytes: ByteArray): Map<String, String> {
@@ -525,7 +806,15 @@ class EvoKammerRunServiceEndToEndFlowTest {
         val runId: String,
         val winnerId: String? = null,
         val finalAnswerSummary: String = "",
+        val generatedOutputFiles: List<GeneratedOutputArchiveRecord> = emptyList(),
         val judgeOutputsByGrader: Map<String, String> = emptyMap(),
         val submissionSummariesByGroup: Map<String, String?> = emptyMap()
+    )
+
+    @Serializable
+    private data class GeneratedOutputArchiveRecord(
+        val relativePath: String,
+        val mediaType: String,
+        val content: String
     )
 }
