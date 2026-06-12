@@ -624,7 +624,7 @@ class CliArgumentsTest {
         val configuredStage = assertNotNull(fakeEngine.capturedConfigs.getOrNull(1))
         val configuredStageArtifacts = configuredStage.contextArtifacts.map { it.relativePath }.toSet()
         assertFalse(configuredStageArtifacts.any { it.startsWith("previous-stage/") })
-        assertTrue(configuredStageArtifacts.contains("original-inputs/brief.txt"))
+        assertTrue(configuredStageArtifacts.contains("brief.txt"))
     }
 
     @Test

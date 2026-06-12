@@ -34,6 +34,30 @@
   - log: `/tmp/evokammer-self-improve-smoke/smoke-20260606/.evokammer-self-improve/launch.log`
 - The smoke run exited `0` and the log contained the expected `smoke-ok` marker.
 
+## Current Live Validation (2026-06-12)
+- The overseer-cycle runner now receives the source repo root and reads real repository context during bootstrap.
+- Added bootstrap-context coverage to `SelfImprovementLoopRunnerTest`:
+  - verifies the empty-kernel fallback can read the current session handoff and operator guide from the source repo copy
+  - verifies bootstrap metadata is persisted in hypothesis notes
+- Added CLI wiring coverage:
+  - `SelfImprovementCliOverseerCycleWiringTest` verifies `runOverseerCycle(...)` threads the source repo root, isolated workspace root, OpenRouter key, and cycle limit into the runner seam
+- Added fast pipeline patch-application coverage:
+  - `CliPipelineCodeImprovementPlanTest` verifies a published `outputs/improvements/code-improvement-plan.json` is mirrored into pipeline outputs
+  - the same test verifies the next stage input tree on disk is rewritten before the next stage starts
+  - the next stage receives the updated file content through uploaded run context artifacts
+- Added live fast pipeline proof:
+  - `fast-code-live-reuse-20260612` reused a published code-improvement plan and completed a follow-up `verify` stage
+  - the follow-up stage input tree shows the rewritten `Example.kt` content before that stage started
+  - the live pipeline published `outputs/improvements/code-improvement-plan.json` and reused it successfully across the stage boundary
+- Verified a live 2-cycle overseer run against the updated code:
+  - command: `:evokammer:cli:run` with `self-improve ... -overseer-cycle -overseer-cycles 2`
+  - output root: `/tmp/evokammer-self-improve-loop/cycle-002`
+  - cycle 1: formalized `HYP-001`
+  - cycle 2: registered `EXP-001` and scheduled it
+  - persisted state now contains an under-experiment hypothesis plus one scheduled experiment plan
+- Remaining limitation:
+  - the overseer loop still seeds and schedules; it does not yet apply code edits back into a repo copy automatically
+
 ## Fresh Rerun Result
 - Fresh rerun output root:
   - `/Volumes/CrucialX9_1TB/AStudioProjects/EvoMolior/documentation/tmp/fast_cli_variant6_output_rerun2/fast-cli-variant6-20260606-rerun2/`

@@ -3,8 +3,10 @@ package com.achulkov.evokammer.cli
 import com.achulkov.evokammer.cli.selfimprovement.SelfImprovementLaunchReport
 import com.achulkov.evokammer.cli.selfimprovement.SelfImprovementLaunchSpec
 import com.achulkov.evokammer.cli.selfimprovement.SelfImprovementLauncher
+import com.achulkov.evokammer.cli.selfimprovement.SelfImprovementCycleRunner
 import com.achulkov.evokammer.cli.selfimprovement.SelfImprovementLoopRunner
 import kotlinx.serialization.encodeToString
+import java.nio.file.Path
 import kotlin.system.exitProcess
 
 /**
@@ -60,7 +62,16 @@ private fun runWorkspaceIsolation(options: SelfImprovementCliOptions) {
     }
 }
 
-private fun runOverseerCycle(options: SelfImprovementCliOptions) {
+internal fun runOverseerCycle(
+    options: SelfImprovementCliOptions,
+    runnerFactory: (Path, Path, String) -> SelfImprovementCycleRunner = { sourceRepoRoot, workspaceRoot, apiKey ->
+        SelfImprovementLoopRunner(
+            sourceRepoRoot = sourceRepoRoot,
+            workspaceRoot = workspaceRoot,
+            openRouterApiKey = apiKey
+        )
+    }
+) {
     val apiKey = options.environment["OPENROUTER_API_KEY"]
         ?: System.getenv("OPENROUTER_API_KEY")
         ?: throw SelfImprovementCliUsageException(
@@ -69,10 +80,7 @@ private fun runOverseerCycle(options: SelfImprovementCliOptions) {
 
     val outputRoot = options.workspaceRootDir.resolve(options.workspaceName)
 
-    val runner = SelfImprovementLoopRunner(
-        workspaceRoot = outputRoot,
-        openRouterApiKey = apiKey
-    )
+    val runner = runnerFactory(options.sourceRepoDir, outputRoot, apiKey)
 
     val reports = runner.runCycle(cycleLimit = options.overseerCycles)
 

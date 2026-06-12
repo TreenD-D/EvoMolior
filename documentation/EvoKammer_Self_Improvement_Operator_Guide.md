@@ -68,7 +68,7 @@ The `self-improve` subcommand supports two modes:
 | Mode | Flag | What it does |
 |---|---|---|
 | **Workspace isolation** | (default) | Creates an isolated copy of the repo, runs a command inside it, captures a manifest |
-| **Overseer cycle** | `--overseer-cycle` | Runs the full recursive self-improvement loop: hypothesis proposal → formalisation → scheduling → (future: experiment execution & evaluation) |
+| **Overseer cycle** | `--overseer-cycle` | Runs the full recursive self-improvement loop: hypothesis proposal → formalisation → scheduling → (future: experiment execution & evaluation). When the kernel starts empty and the agent returns nothing, a bootstrap hypothesis is seeded so the first cycle still discovers concrete work. |
 
 ---
 
@@ -164,7 +164,11 @@ Use this mode to run the full recursive self-improvement loop. The loop scans th
 4. **Experiment plan registration** — Plans referencing formalized hypotheses are stored and marked `UNDER_EXPERIMENT`.
 5. **Scheduling** — Eligible experiment plans are scheduled with deterministic run IDs.
 
+**Bootstrap note:** If the loop starts from an empty kernel and the agent returns no proposals, the runner seeds a small CLI-oriented bootstrap hypothesis so the first cycle can still produce actionable work rather than ending as a no-op.
+
 **Note:** In the current MVP, experiment runs are scheduled but not automatically executed. The operator launches scheduled runs separately (see §7).
+
+**Cold-start behavior:** A completely empty overseer kernel no longer ends as a no-op. If the LLM returns no proposals on cycle 1, the runner seeds a bootstrap hypothesis focused on CLI integration coverage so the run produces a concrete improvement target.
 
 ### 5.4 Output
 
@@ -208,6 +212,20 @@ The append-only audit trail is stored at:
 ```
 <workspace-root>/<workspace-name>/.evokammer-data/evokammer/overseer/overseer-kernel-audit.jsonl
 ```
+
+### 5.6 Fast Pipeline Plan Application
+
+When the fast CLI pipeline emits `outputs/improvements/code-improvement-plan.json`, the next configured stage starts from a copied repo root under `.pipeline-inputs/<stageId>/`, and that plan is applied before the stage launches.
+
+The applied-change report is written into the copied repo at:
+
+```
+<workspace-root>/<workspace-name>/.pipeline-inputs/<stageId>/.evokammer-self-improve/applied-code-improvement-report.json
+```
+
+This keeps the original checkout untouched while still making the next stage consume the rewritten tree as its uploaded run context.
+
+Live validation: the `fast-code-live-reuse-20260612` run reused a published plan, rewrote `Example.kt` in the follow-up stage input tree, and completed the verification stage with the rewritten tree in place.
 
 ---
 

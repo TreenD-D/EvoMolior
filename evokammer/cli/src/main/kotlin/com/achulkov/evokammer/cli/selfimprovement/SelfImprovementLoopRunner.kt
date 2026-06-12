@@ -2,6 +2,13 @@ package com.achulkov.evokammer.cli.selfimprovement
 
 import com.achulkov.evokammer.agents.factory.OverseerAgentRunner
 import com.achulkov.evokammer.api.service.OverseerKernelService
+import com.achulkov.evokammer.core.contract.OverseerExpectedEffect
+import com.achulkov.evokammer.core.contract.OverseerHypothesis
+import com.achulkov.evokammer.core.contract.OverseerKernelState
+import com.achulkov.evokammer.core.contract.OverseerMutabilityLevel
+import com.achulkov.evokammer.core.contract.OverseerOrigin
+import com.achulkov.evokammer.core.contract.OverseerOriginType
+import com.achulkov.evokammer.core.contract.OverseerTargetScope
 import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
 import io.github.aakira.napier.DebugAntilog
 import io.github.aakira.napier.Napier
@@ -31,9 +38,11 @@ private val loopJson = Json { prettyPrint = true; encodeDefaults = true }
  * @param openRouterApiKey API key for LLM calls.
  */
 class SelfImprovementLoopRunner(
+    private val sourceRepoRoot: Path,
     private val workspaceRoot: Path,
-    private val openRouterApiKey: String
-) {
+    private val openRouterApiKey: String,
+    private val proposalProvider: ProposalProvider? = null
+) : SelfImprovementCycleRunner {
     /**
      * Structured report for a single loop cycle.
      *
@@ -64,8 +73,13 @@ class SelfImprovementLoopRunner(
         )
     }
 
-    private val agentRunner: OverseerAgentRunner by lazy {
-        OverseerAgentRunner(openRouterApiKey = openRouterApiKey)
+    private val agentRunner: ProposalProvider by lazy {
+        proposalProvider ?: ProposalProvider { kernelState, metaArchiveSummary ->
+            OverseerAgentRunner(openRouterApiKey = openRouterApiKey).propose(
+                kernelState = kernelState,
+                metaArchiveSummary = metaArchiveSummary
+            )
+        }
     }
 
     /**
@@ -74,7 +88,7 @@ class SelfImprovementLoopRunner(
      * @param cycleLimit Maximum number of cycles to run.
      * @return List of cycle reports.
      */
-    fun runCycle(cycleLimit: Int = 3): List<CycleReport> {
+    override fun runCycle(cycleLimit: Int): List<CycleReport> {
         Napier.base(DebugAntilog())
         Napier.i("SelfImprovementLoopRunner: starting loop (max $cycleLimit cycles)")
         Files.createDirectories(workspaceRoot)
@@ -126,11 +140,20 @@ class SelfImprovementLoopRunner(
                 kernelState = stateBefore,
                 metaArchiveSummary = ""
             )
+            val effectiveProposal = if (proposal.proposedHypotheses.isEmpty() &&
+                proposal.proposedExperimentPlans.isEmpty() &&
+                stateBefore.hypotheses.isEmpty()
+            ) {
+                Napier.w("SelfImprovementLoopRunner: agent returned no proposals for an empty kernel; seeding bootstrap hypothesis.")
+                bootstrapProposal()
+            } else {
+                proposal
+            }
 
-            proposalsCount = proposal.proposedHypotheses.size + proposal.proposedExperimentPlans.size
+            proposalsCount = effectiveProposal.proposedHypotheses.size + effectiveProposal.proposedExperimentPlans.size
 
             // 2. Formalize proposed hypotheses through the kernel
-            for (hypothesis in proposal.proposedHypotheses) {
+            for (hypothesis in effectiveProposal.proposedHypotheses) {
                 runCatching {
                     val preflight = kernelService.preflightHypothesis(hypothesis)
                     if (preflight.allowed) {
@@ -148,7 +171,7 @@ class SelfImprovementLoopRunner(
             }
 
             // 3. Register proposed experiment plans
-            for (plan in proposal.proposedExperimentPlans) {
+            for (plan in effectiveProposal.proposedExperimentPlans) {
                 runCatching {
                     val preflight = kernelService.preflightExperimentPlan(plan)
                     if (preflight.allowed) {
@@ -194,4 +217,84 @@ class SelfImprovementLoopRunner(
             errors = errors
         )
     }
+
+    private fun bootstrapProposal(): OverseerAgentRunner.OverseerProposal =
+        OverseerAgentRunner.OverseerProposal(
+            proposedHypotheses = listOf(
+                OverseerHypothesis(
+                    id = "HYP-self-improve-bootstrap-001",
+                    title = "Add CLI-level overseer-cycle integration coverage",
+                    origin = OverseerOrigin(
+                        type = OverseerOriginType.INTERNAL_LOGS,
+                        sources = listOf(
+                            "documentation/EvoKammer_Current_Session_Handoff.md",
+                            "documentation/EvoKammer_Self_Improvement_Operator_Guide.md"
+                        )
+                    ),
+                    targetScope = OverseerTargetScope(
+                        paths = listOf(
+                            "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/SelfImprovementCli.kt",
+                            "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/selfimprovement/SelfImprovementLoopRunner.kt",
+                            "evokammer/cli/src/test/kotlin/com/achulkov/evokammer/cli/SelfImprovementLoopRunnerTest.kt",
+                            "documentation/EvoKammer_Self_Improvement_Operator_Guide.md"
+                        ),
+                        mutabilityLevel = OverseerMutabilityLevel.FULLY_MUTABLE
+                    ),
+                    rationale = buildString {
+                        appendLine("The live overseer-cycle run started from an empty kernel and produced no actionable proposals.")
+                        appendLine("Seed the first improvement around CLI integration coverage and bootstrap context so the loop can discover concrete work from a cold start.")
+                        appendLine()
+                        appendLine("Current session context:")
+                        appendLine(loadBootstrapContext("documentation/EvoKammer_Current_Session_Handoff.md"))
+                        appendLine()
+                        appendLine("Operator guide context:")
+                        appendLine(loadBootstrapContext("documentation/EvoKammer_Self_Improvement_Operator_Guide.md"))
+                    }.trim(),
+                    expectedEffect = OverseerExpectedEffect(
+                        metricsUp = listOf("proposal_count", "bootstrap_coverage"),
+                        metricsDown = listOf("no_progress_runs")
+                    ),
+                    notes = "Bootstrap-triggered because the agent returned no proposals for an empty kernel in the first overseer cycle. Context extracted from handoff and operator guide files."
+                )
+            ),
+            rationale = "Bootstrap proposal synthesized from handoff guide and operator guide context, enriched with actual file content."
+        )
+
+    private fun loadBootstrapContext(relativePath: String, maxLines: Int = 80): String {
+        val file = sourceRepoRoot.resolve(relativePath).normalize()
+        if (!Files.exists(file) || !Files.isRegularFile(file)) {
+            return "[Missing bootstrap context: $relativePath]"
+        }
+
+        return runCatching {
+            Files.readAllLines(file)
+                .take(maxLines)
+                .joinToString("\n")
+                .trim()
+        }.getOrElse { error ->
+            "[Failed to read $relativePath: ${error.message}]"
+        }
+    }
+}
+
+/**
+ * Runs a recursive self-improvement cycle and returns structured reports.
+ *
+ * This seam exists so the CLI wiring can be tested without requiring a live model call.
+ */
+internal fun interface SelfImprovementCycleRunner {
+    fun runCycle(cycleLimit: Int): List<SelfImprovementLoopRunner.CycleReport>
+}
+
+/**
+ * Produces a structured overseer proposal for a single self-improvement cycle.
+ *
+ * @param kernelState Current overseer kernel snapshot.
+ * @param metaArchiveSummary Recent evidence summary passed to the proposer.
+ */
+fun interface ProposalProvider {
+    suspend fun propose(
+        kernelState: OverseerKernelState,
+        metaArchiveSummary: String
+    ): OverseerAgentRunner.OverseerProposal
 }

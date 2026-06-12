@@ -5,6 +5,7 @@ import com.achulkov.evokammer.api.model.FinalOutputSpec
 import com.achulkov.evokammer.api.model.RunConfig
 import com.achulkov.evokammer.api.service.PersistedRunStateStore
 import com.achulkov.evokammer.api.util.loadRunInputArtifacts
+import com.achulkov.evokammer.cli.selfimprovement.CodeImprovementPlanApplicator
 import com.achulkov.evokammer.core.config.FastModelSelectionConfig
 import com.achulkov.evokammer.core.config.RunObjectiveHeuristics
 import com.achulkov.evokammer.core.model.GroupProfileType
@@ -107,6 +108,8 @@ internal data class CliPipelineStageSummary(
     val publishedOutputRelativePath: String? = null
 )
 
+private const val CODE_IMPROVEMENT_PLAN_RELATIVE_PATH = "improvements/code-improvement-plan.json"
+
 internal fun runCliPipeline(
     options: CliOptions,
     runtimeFactory: (File, CliOptions) -> CliRuntime
@@ -203,6 +206,11 @@ internal fun runCliPipeline(
         val result = loadCompletedStageResult(resolvedStagePlan)
             ?: executeCliStage(resolvedStagePlan, options, runtimeFactory)
         stageResults += result
+        publishStageOutput(
+            stageOutputDir = result.stageOutputDir,
+            relativePath = CODE_IMPROVEMENT_PLAN_RELATIVE_PATH,
+            pipelineOutputDir = runOutputDir.toPath().resolve("outputs")
+        )
         result.publishedOutputRelativePath?.let { relativePath ->
             publishStageOutput(
                 stageOutputDir = result.stageOutputDir,
@@ -503,7 +511,11 @@ private fun preparePipelineStageInput(
     val stageInputRoot = pipelineRoot.resolve(".pipeline-inputs").resolve(stageId)
     stageInputRoot.toFile().deleteRecursively()
     Files.createDirectories(stageInputRoot)
-    copyDirectoryContents(baseInputDir, stageInputRoot.resolve("original-inputs"))
+    copyDirectoryContents(baseInputDir, stageInputRoot)
+    applyCodeImprovementPlanIfPresent(
+        repoRoot = stageInputRoot,
+        pipelineRoot = pipelineRoot
+    )
     if (previousStage != null) {
         val previousStageDir = stageInputRoot.resolve("previous-stage")
         Files.createDirectories(previousStageDir)
@@ -519,6 +531,21 @@ private fun preparePipelineStageInput(
         }
     }
     return stageInputRoot
+}
+
+private fun applyCodeImprovementPlanIfPresent(
+    repoRoot: Path,
+    pipelineRoot: Path
+) {
+    val planFile = pipelineRoot.resolve("outputs").resolve(CODE_IMPROVEMENT_PLAN_RELATIVE_PATH)
+    if (!Files.exists(planFile)) return
+
+    CodeImprovementPlanApplicator.applyIfPresent(planFile, repoRoot)
+        ?.also { report ->
+            Napier.i(
+                "CliPipeline: applied code improvement plan ${report.planPath} into ${report.repoRoot} with ${report.changedFiles.size} changed file(s)"
+            )
+        }
 }
 
 private fun publishStageOutput(
@@ -626,14 +653,16 @@ private fun validatePublishedOutputContent(
 
 private fun copyDirectoryContents(sourceDir: Path, targetDir: Path) {
     if (!Files.exists(sourceDir)) return
-    Files.walk(sourceDir).forEach { source ->
-        val relative = sourceDir.relativize(source)
-        val target = targetDir.resolve(relative.toString())
-        if (Files.isDirectory(source)) {
-            Files.createDirectories(target)
-        } else {
-            Files.createDirectories(target.parent)
-            Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING)
+    Files.walk(sourceDir).use { stream ->
+        stream.forEach { source ->
+            val relative = sourceDir.relativize(source)
+            val target = targetDir.resolve(relative.toString())
+            if (Files.isDirectory(source)) {
+                Files.createDirectories(target)
+            } else {
+                Files.createDirectories(target.parent)
+                Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING)
+            }
         }
     }
 }
