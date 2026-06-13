@@ -331,6 +331,86 @@ object RolePromptBuilder {
         """.trimIndent())
     }
 
+    /**
+     * Builds the system prompt for a machine-readable patch-bundle output file.
+     *
+     * The agent must emit a single JSON object describing code edits and their
+     * accompanying documentation so downstream tooling can apply or review the change set.
+     *
+     * @param runObjective The run objective that defines the patch bundle.
+     * @param roundCount Number of completed rounds in the run.
+     * @param groupId Winning group whose substrate should be synthesised.
+     * @param relativePath Target patch bundle path under `outputs/`.
+     * @param mediaType MIME type of the patch bundle output.
+     * @param description Human-readable purpose of the patch bundle.
+     * @param attempt Final deliverable retry attempt count.
+     * @return The complete system prompt.
+     */
+    fun buildPatchBundleFile(
+        runObjective: String,
+        roundCount: Int,
+        groupId: String,
+        relativePath: String,
+        mediaType: String,
+        description: String,
+        attempt: Int = 1
+    ): String = buildString {
+        appendLine("""
+            You are the Patch Bundle Writer for group '$groupId'.
+
+            Your job is to produce a single machine-readable JSON patch bundle that captures the
+            edited code files or diffs required to implement the run's improvement.
+
+            Output target:
+            - Relative path: $relativePath
+            - Media type: $mediaType
+            - Description: ${description.ifBlank { "Machine-readable patch bundle" }}
+
+            Required output:
+            - This agent must not finish with a chat-only answer.
+            - Your job is only complete if you persist the final file with write_staging(type="DOC", ...).
+            - First, optionally inspect the run via exactly one quick read tool call if needed.
+            - Then write a staging entry with type="DOC".
+            - The DOC content must be valid JSON and must begin with `{`.
+            - The JSON object must include:
+              1. `summary` - concise human-readable summary of the change set,
+              2. `changedFiles` - array of objects with `path`, `status`, `diff`, and `rationale`,
+              3. `documentation` - a short documentation section explaining what changed and why,
+              4. `verification` - concrete steps or commands that verify the patch,
+              5. `notes` - any relevant caveats or rollback notes.
+            - Prefer edited files or unified diffs in the `diff` field so downstream tooling can
+              apply the patch set directly.
+            - If no code edits are needed, emit an empty `changedFiles` array and explain why in
+              `summary` and `documentation`.
+            - Do not wrap the JSON in markdown fences.
+            - Do not add commentary outside the JSON object.
+            - After write_staging succeeds, immediately call write_death_note.
+            - Do not end the run before write_staging succeeds.
+            - Then finish with write_death_note as your final action.
+        """.trimIndent())
+        appendLine()
+        if (attempt > 1) {
+            appendLine("=== RETRY CONTEXT ===")
+            appendLine(
+                "This is retry attempt $attempt because a previous patch bundle attempt finished " +
+                    "without persisting the required JSON file."
+            )
+            appendLine(
+                "On this retry, prefer acting over exploration: perform at most one quick read, then " +
+                    "immediately call write_staging with the full JSON patch bundle. Do not end with " +
+                    "analysis or a plain-text answer."
+            )
+            appendLine()
+        }
+        appendLine("=== RUN OBJECTIVE ===")
+        appendLine(runObjective)
+        appendLine()
+        appendLine("=== PATCH BUNDLE HINTS ===")
+        appendLine("- Focus on the changed code files or diffs, not on the article-style narrative.")
+        appendLine("- Include documentation of the change set so downstream reviewers can apply it safely.")
+        appendLine("- Keep the bundle compact and directly actionable.")
+    }
+
     private val GRADER_RESEARCHER_PROMPT = """
         You are a GraderResearcher — the first evaluator in a three-stage evaluation pipeline.
         

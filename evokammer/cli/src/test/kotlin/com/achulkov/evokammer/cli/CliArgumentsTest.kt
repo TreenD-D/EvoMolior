@@ -1,6 +1,7 @@
 package com.achulkov.evokammer.cli
 
 import com.achulkov.evokammer.api.events.EvoKammerEvent
+import com.achulkov.evokammer.api.model.FinalOutputKind
 import com.achulkov.evokammer.api.model.RunConfig
 import com.achulkov.evokammer.api.service.EngineState
 import com.achulkov.evokammer.api.service.EngineStatus
@@ -135,6 +136,30 @@ class CliArgumentsTest {
             pipelineFile.toPath().toAbsolutePath().normalize(),
             options.pipelineConfigPath
         )
+    }
+
+    @Test
+    fun `parses overseer execution mode flag explicitly`() {
+        val sourceDir = createTempDirectory("self-improve-source-").toFile()
+        val workspaceRoot = createTempDirectory("self-improve-workspace-").toFile()
+
+        val options = SelfImprovementCliArguments.parse(
+            arrayOf(
+                "-source", sourceDir.absolutePath,
+                "-workspace-root", workspaceRoot.absolutePath,
+                "-workspace-name", "cycle-001",
+                "-overseer-cycle",
+                "-overseer-execute",
+                "-overseer-run-all-cycles",
+                "-env", "OPENROUTER_API_KEY=sk-test"
+            )
+        )
+
+        assertNotNull(options)
+        assertTrue(options.overseerCycle)
+        assertTrue(options.overseerExecuteExperiments)
+        assertTrue(options.overseerRunAllCycles)
+        assertEquals(3, options.overseerCycles)
     }
 
     @Test
@@ -358,6 +383,7 @@ class CliArgumentsTest {
                       "promptFile": "prompts/brief-json.txt",
                       "fast": true,
                       "rounds": 1,
+                      "finalOutputKind": "PATCH_BUNDLE",
                       "finalOutput": {
                         "relativePath": "briefs/summary.json",
                         "mediaType": "application/json",
@@ -397,6 +423,7 @@ class CliArgumentsTest {
         assertEquals(promptFile.readText(), configuredStage.objective)
         assertEquals("briefs/summary.json", configuredStage.finalOutputSpec?.relativePath)
         assertEquals("application/json", configuredStage.finalOutputSpec?.mediaType)
+        assertEquals(FinalOutputKind.PATCH_BUNDLE, configuredStage.finalOutputSpec?.kind)
 
         val configuredStageArtifacts = configuredStage.contextArtifacts.map { it.relativePath }.toSet()
         assertTrue("previous-stage/results-bundle/outputs/final-article.html" in configuredStageArtifacts)
@@ -625,6 +652,48 @@ class CliArgumentsTest {
         val configuredStageArtifacts = configuredStage.contextArtifacts.map { it.relativePath }.toSet()
         assertFalse(configuredStageArtifacts.any { it.startsWith("previous-stage/") })
         assertTrue(configuredStageArtifacts.contains("brief.txt"))
+    }
+
+    @Test
+    fun `aborted follow up stage reruns after stale output directory is cleaned`() = runBlocking {
+        val inputDir = createTempDirectory("cli-pipeline-abort-input-").toFile().apply {
+            resolve("brief.txt").writeText("mindvortex brief")
+        }
+        val outputDir = createTempDirectory("cli-pipeline-abort-output-").toFile()
+        val runRoot = outputDir.resolve("cli-pipeline-abort")
+        val followUpDir = runRoot.resolve("stages").resolve("fast-follow-up")
+        followUpDir.mkdirs()
+        followUpDir.resolve("summary.json").writeText("""{"status":"ABORTED"}""")
+        val staleMarker = followUpDir.resolve("stale-marker.txt").apply {
+            writeText("stale")
+        }
+
+        val fakeEngine = FakeCliPipelineEngineService()
+
+        val result = runCli(
+            options = CliOptions(
+                prompt = "Create a long-form HTML5 article for mindvortex.app with embedded styles",
+                inputDir = inputDir.toPath(),
+                outputDir = outputDir.toPath(),
+                openRouterApiKey = "sk-test",
+                modelOverrides = emptyMap(),
+                debug = true,
+                fast = true,
+                rounds = 5,
+                runId = "cli-pipeline-abort"
+            ),
+            runtimeFactory = { _, _ -> CliRuntime(fakeEngine) }
+        )
+
+        assertTrue(result.completedSuccessfully)
+        assertTrue(!staleMarker.exists(), "Aborted follow-up stage output should be cleaned before rerun")
+        assertTrue(followUpDir.resolve("summary.json").exists())
+        assertTrue(followUpDir.resolve("results.zip").exists())
+        assertTrue(followUpDir.resolve("summary.json").readText().contains("\"status\": \"COMPLETED\""))
+        assertEquals(
+            listOf("cli-pipeline-abort", "cli-pipeline-abort-fast-follow-up"),
+            fakeEngine.capturedConfigs.map { it.runId }
+        )
     }
 
     @Test

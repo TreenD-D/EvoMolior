@@ -59,6 +59,25 @@ Before launching, confirm the project compiles and tests pass:
 ./gradlew --no-daemon :evokammer:core:test :evokammer:cli:test
 ```
 
+### 2.4 Long-Run Readiness
+
+Current readiness verdict:
+
+- Use the self-improvement loop for supervised runs only.
+- Do not leave long multi-stage runs unattended until all of the following are revalidated end to end:
+  - final-deliverable discovery after high-volume `DOC` staging activity,
+  - safe rerun of aborted stages with stale output directories or sealed starting fields,
+  - provider-failure tolerance under load for the final writer and judge paths.
+
+Current verification status:
+
+- Final-deliverable discovery after high-volume `DOC` staging is now covered by a focused regression
+  that keeps the canonical HTML file visible after 180 late-stage `DOC` noise entries.
+- Aborted follow-up stage reruns are now covered by a regression that confirms stale stage output
+  directories are cleaned before re-execution.
+- Provider-failure tolerance under load still needs a dedicated end-to-end proof before long
+  unattended runs are considered ready.
+
 ---
 
 ## 3. Two Launch Modes
@@ -68,7 +87,7 @@ The `self-improve` subcommand supports two modes:
 | Mode | Flag | What it does |
 |---|---|---|
 | **Workspace isolation** | (default) | Creates an isolated copy of the repo, runs a command inside it, captures a manifest |
-| **Overseer cycle** | `--overseer-cycle` | Runs the full recursive self-improvement loop: hypothesis proposal → formalisation → scheduling → (future: experiment execution & evaluation). When the kernel starts empty and the agent returns nothing, a bootstrap hypothesis is seeded so the first cycle still discovers concrete work. |
+| **Overseer cycle** | `--overseer-cycle` | Runs the full recursive self-improvement loop: hypothesis proposal → formalisation → scheduling → execution → result recording. When the kernel starts empty and the agent returns nothing, a bootstrap hypothesis and minimal experiment plan are seeded so the first cycle still discovers concrete work and can execute it. |
 
 ---
 
@@ -145,6 +164,22 @@ Use this mode to run the full recursive self-improvement loop. The loop scans th
     -env OPENROUTER_API_KEY=sk-or-v1-..."
 ```
 
+To force the loop to execute scheduled experiments and keep running all requested cycles even
+when a cycle makes no progress, add the explicit execution flags:
+
+```bash
+./gradlew --no-daemon :evokammer:cli:run \
+  --args="self-improve \
+    -source /path/to/EvoMolior \
+    -workspace-root /tmp/evokammer-self-improve \
+    -workspace-name cycle-001 \
+    -overseer-cycle \
+    -overseer-execute \
+    -overseer-run-all-cycles \
+    -overseer-cycles 3 \
+    -env OPENROUTER_API_KEY=sk-or-v1-..."
+```
+
 ### 5.2 Arguments
 
 | Argument | Required | Description |
@@ -153,6 +188,7 @@ Use this mode to run the full recursive self-improvement loop. The loop scans th
 | `-workspace-root` | Yes | Output root for persistent state (created if missing) |
 | `-workspace-name` | Yes | Directory name for this cycle's output |
 | `-overseer-cycle` | Yes | Enables the overseer loop mode |
+| `-overseer-execute` | No | Launch scheduled experiment runs instead of stopping after scheduling |
 | `-overseer-cycles` | No | Maximum cycles (default: `3`, must be ≥ 1) |
 | `-env OPENROUTER_API_KEY=...` | Yes* | API key for LLM calls (*or set via shell env) |
 
@@ -166,9 +202,9 @@ Use this mode to run the full recursive self-improvement loop. The loop scans th
 
 **Bootstrap note:** If the loop starts from an empty kernel and the agent returns no proposals, the runner seeds a small CLI-oriented bootstrap hypothesis so the first cycle can still produce actionable work rather than ending as a no-op.
 
-**Note:** In the current MVP, experiment runs are scheduled but not automatically executed. The operator launches scheduled runs separately (see §7).
+**Note:** In the current MVP, overseer-cycle execution now launches scheduled bootstrap/experiment plans through `SelfImprovementRunOrchestrator`. The operator can still inspect or resume runs separately, but the CLI loop itself now produces experiment results.
 
-**Cold-start behavior:** A completely empty overseer kernel no longer ends as a no-op. If the LLM returns no proposals on cycle 1, the runner seeds a bootstrap hypothesis focused on CLI integration coverage so the run produces a concrete improvement target.
+**Cold-start behavior:** A completely empty overseer kernel no longer ends as a no-op. If the LLM returns no proposals on cycle 1, the runner seeds a bootstrap hypothesis focused on CLI integration coverage and a matching minimal experiment plan so the run produces a concrete improvement target and can execute it immediately.
 
 ### 5.4 Output
 
@@ -226,6 +262,12 @@ The applied-change report is written into the copied repo at:
 This keeps the original checkout untouched while still making the next stage consume the rewritten tree as its uploaded run context.
 
 Live validation: the `fast-code-live-reuse-20260612` run reused a published plan, rewrote `Example.kt` in the follow-up stage input tree, and completed the verification stage with the rewritten tree in place.
+
+### 5.7 Patch Bundle Outputs
+
+For fully mutable experiments, the self-improvement run should prefer a machine-readable JSON patch bundle over a prose-only report. The bundle should include the edited files or diffs, documentation of the change set, and verification steps so downstream tooling can apply or review the result without scraping HTML.
+
+When the overseer loop is running against an isolated workspace, accepted patch bundles are applied back into the mutable repo copy under `.evokammer-self-improve/repo/` before the next cycle reads bootstrap context.
 
 ---
 
@@ -335,6 +377,16 @@ You're using the default workspace-isolation mode but forgot `-command`. Either 
 ### 10.2 "OPENROUTER_API_KEY must be set"
 
 In overseer-cycle mode, the API key must be available. Pass it via `-env OPENROUTER_API_KEY=...` or export it in your shell.
+
+### 10.3 Long-Run Preflight Checklist
+
+Before starting a long unattended run:
+
+1. Confirm the output root is clean or intentionally reusable.
+2. Verify any previously aborted stage directories have been removed or intentionally resumed.
+3. Confirm the publication scan path still finds the canonical final HTML after many late-stage `DOC` entries.
+4. Check provider health and recent failure rates for the configured OpenRouter models.
+5. Prefer a supervised first pass on any new 4-stage or larger pipeline shape.
 
 ### 10.3 "Workspace directory already exists"
 

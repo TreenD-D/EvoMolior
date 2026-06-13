@@ -62,4 +62,68 @@ class SelfImprovementCliOverseerCycleWiringTest {
         assertEquals(2, capturedCycleLimit)
         assertTrue(capturedWorkspaceRoot?.startsWith(workspaceRoot) == true)
     }
+
+    @Test
+    fun `runOverseerCycle honors explicit execution flags and returns all requested cycle reports`() {
+        val sourceRepo = createTempDirectory("self-improve-cli-source-")
+        val workspaceRoot = createTempDirectory("self-improve-cli-workspace-")
+
+        val options = SelfImprovementCliArguments.parse(
+            arrayOf(
+                "-source", sourceRepo.toString(),
+                "-workspace-root", workspaceRoot.toString(),
+                "-workspace-name", "cycle-002",
+                "-overseer-cycle",
+                "-overseer-execute",
+                "-overseer-run-all-cycles",
+                "-overseer-cycles", "3",
+                "-env", "OPENROUTER_API_KEY=sk-test"
+            )
+        )
+        assertNotNull(options)
+        assertTrue(options.overseerExecuteExperiments)
+        assertTrue(options.overseerRunAllCycles)
+
+        var capturedCycleLimit: Int? = null
+        var capturedReportsCount: Int? = null
+
+        runOverseerCycle(
+            options = options,
+            runnerFactory = { _, _, _ ->
+                object : SelfImprovementCycleRunner {
+                    override fun runCycle(cycleLimit: Int): List<SelfImprovementLoopRunner.CycleReport> {
+                        capturedCycleLimit = cycleLimit
+                        val reports = listOf(
+                            SelfImprovementLoopRunner.CycleReport(
+                                cycleIndex = 0,
+                                hypothesesCount = 1,
+                                proposalsCount = 1,
+                                formalizedCount = 1,
+                                experimentResults = 1
+                            ),
+                            SelfImprovementLoopRunner.CycleReport(
+                                cycleIndex = 1,
+                                hypothesesCount = 2,
+                                proposalsCount = 1,
+                                formalizedCount = 1,
+                                experimentResults = 1
+                            ),
+                            SelfImprovementLoopRunner.CycleReport(
+                                cycleIndex = 2,
+                                hypothesesCount = 2,
+                                proposalsCount = 0,
+                                formalizedCount = 0,
+                                experimentResults = 0
+                            )
+                        )
+                        capturedReportsCount = reports.size
+                        return reports
+                    }
+                }
+            }
+        )
+
+        assertEquals(3, capturedCycleLimit)
+        assertEquals(3, capturedReportsCount)
+    }
 }

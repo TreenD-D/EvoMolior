@@ -55,6 +55,7 @@ class CliPipelineCodeImprovementPlanTest {
             writeText(
                 """
                 {
+                  "applyCodeImprovementPlans": true,
                   "stages": [
                     {
                       "id": "verify",
@@ -132,13 +133,117 @@ class CliPipelineCodeImprovementPlanTest {
 
         val stagedRepoCopy = runRoot.resolve(".pipeline-inputs/verify/Example.kt")
         assertTrue(stagedRepoCopy.exists())
-        assertTrue(stagedRepoCopy.readText().contains("updated"))
-        assertTrue(stagedRepoCopy.readText().contains("keep"))
-        assertTrue(!stagedRepoCopy.readText().contains("original"))
+        assertEquals(
+            """
+            fun message(): String = "updated"
+
+            fun sentinel(): String = "keep"
+            """.trimIndent(),
+            stagedRepoCopy.readText()
+        )
 
         val verifyConfig = assertNotNull(fakeEngine.capturedConfigs.lastOrNull())
         val exampleArtifact = assertNotNull(verifyConfig.contextArtifacts.firstOrNull { it.relativePath == "Example.kt" })
         assertTrue(exampleArtifact.textPreview?.contains("updated") == true)
+    }
+
+    @Test
+    fun `normal pipeline does not propagate code improvement plans unless explicitly enabled`() = runBlocking {
+        val inputDir = createTempDirectory("cli-plan-input-").toFile().apply {
+            resolve("Example.kt").writeText(
+                """
+                fun message(): String = "original"
+                
+                fun sentinel(): String = "keep"
+                """.trimIndent()
+            )
+        }
+        val outputDir = createTempDirectory("cli-plan-output-").toFile()
+        val pipelineDir = createTempDirectory("cli-plan-pipeline-").toFile()
+        val pipelineFile = pipelineDir.resolve("pipeline.json").apply {
+            writeText(
+                """
+                {
+                  "stages": [
+                    {
+                      "id": "verify",
+                      "prompt": "Verify the modified repo copy",
+                      "fast": true,
+                      "rounds": 1
+                    }
+                  ]
+                }
+                """.trimIndent()
+            )
+        }
+        val planJson = """
+            {
+              "title": "Rewrite the example function",
+              "problem": "The input repo copy should be updated before the next stage starts.",
+              "affectedFiles": ["Example.kt"],
+              "proposedChanges": [
+                {
+                  "changeId": "change-1",
+                  "description": "Update the returned message",
+                  "implementationDetails": {
+                    "location": "Example.kt",
+                    "method": "message",
+                    "changes": [
+                      {
+                        "type": "replace",
+                        "detail": "Replace the function body",
+                        "codeSnippet": "fun message(): String = \"updated\""
+                      }
+                    ]
+                  }
+                }
+              ],
+              "verification": {
+                "steps": ["Re-open Example.kt in the next stage"],
+                "expectedOutcome": "The Example.kt file should contain the updated function."
+              },
+              "risk": {
+                "level": "low",
+                "details": ["This test only rewrites a single Kotlin function."]
+              }
+            }
+        """.trimIndent()
+        val fakeEngine = PlanPublishingEngineService(
+            bundleEntriesByRunId = mapOf(
+                "cli-code-improve" to mapOf(
+                    "outputs/improvements/code-improvement-plan.json" to planJson
+                )
+            )
+        )
+
+        val result = runCli(
+            options = CliOptions(
+                prompt = "Generate a code improvement plan",
+                inputDir = inputDir.toPath(),
+                outputDir = outputDir.toPath(),
+                openRouterApiKey = "sk-test",
+                modelOverrides = emptyMap(),
+                debug = true,
+                fast = true,
+                rounds = 1,
+                runId = "cli-code-improve",
+                pipelineConfigPath = pipelineFile.toPath()
+            ),
+            runtimeFactory = { _, _ -> CliRuntime(fakeEngine) }
+        )
+
+        assertTrue(result.completedSuccessfully)
+
+        val runRoot = outputDir.resolve("cli-code-improve")
+        assertTrue(!runRoot.resolve("outputs/improvements/code-improvement-plan.json").exists())
+        assertEquals(
+            """
+            fun message(): String = "original"
+            
+            fun sentinel(): String = "keep"
+            """.trimIndent(),
+            runRoot.resolve(".pipeline-inputs/verify/Example.kt").readText()
+        )
     }
 }
 

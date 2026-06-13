@@ -1,6 +1,7 @@
 package com.achulkov.evokammer.api.service
 
 import com.achulkov.evokammer.api.events.EvoKammerEvent
+import com.achulkov.evokammer.api.model.FinalOutputKind
 import com.achulkov.evokammer.api.model.FinalOutputSpec
 import com.achulkov.evokammer.api.model.OverseerExperimentLaunchRequest
 import com.achulkov.evokammer.api.model.OverseerExperimentLaunchResponse
@@ -2591,7 +2592,8 @@ class EvoKammerRunService(
             FinalOutputSpec(
                 relativePath = "final-article.html",
                 mediaType = "text/html",
-                description = "Final browser-renderable deliverable"
+                description = "Final browser-renderable deliverable",
+                kind = FinalOutputKind.HTML_ARTICLE
             )
         } else {
             null
@@ -2649,15 +2651,27 @@ class EvoKammerRunService(
                 modelAssignment = selectedModel,
                 modelAssignments = activeModelAssignments,
                 modelPools = activeModelPools,
-                rolePrompt = RolePromptBuilder.buildFinalDeliverableFile(
-                    runObjective = config.objective,
-                    roundCount = finalRoundIndex + 1,
-                    groupId = groupId,
-                    relativePath = outputSpec.relativePath,
-                    mediaType = outputSpec.mediaType,
-                    description = outputSpec.description,
-                    attempt = attempt
-                ),
+                rolePrompt = if (outputSpec.kind == FinalOutputKind.PATCH_BUNDLE) {
+                    RolePromptBuilder.buildPatchBundleFile(
+                        runObjective = config.objective,
+                        roundCount = finalRoundIndex + 1,
+                        groupId = groupId,
+                        relativePath = outputSpec.relativePath,
+                        mediaType = outputSpec.mediaType,
+                        description = outputSpec.description,
+                        attempt = attempt
+                    )
+                } else {
+                    RolePromptBuilder.buildFinalDeliverableFile(
+                        runObjective = config.objective,
+                        roundCount = finalRoundIndex + 1,
+                        groupId = groupId,
+                        relativePath = outputSpec.relativePath,
+                        mediaType = outputSpec.mediaType,
+                        description = outputSpec.description,
+                        attempt = attempt
+                    )
+                },
                 scope = scope
             )
 
@@ -2740,7 +2754,10 @@ class EvoKammerRunService(
             .getOrElse { return null }
 
         return runCatching {
-            db.stagingDao().getAll(runId, groupId, limit = 150)
+            // Large, long-running stages can emit many staging records after the final writer
+            // starts. Use a wider window so the canonical final HTML file is not missed simply
+            // because it is older than an arbitrary shallow limit.
+            db.stagingDao().getAll(runId, groupId, limit = 1000)
                 .asSequence()
                 .filter { it.submittedAtMs >= startedAtMs }
                 .filter { it.type == com.achulkov.evokammer.core.model.SubmissionType.DOC.name }

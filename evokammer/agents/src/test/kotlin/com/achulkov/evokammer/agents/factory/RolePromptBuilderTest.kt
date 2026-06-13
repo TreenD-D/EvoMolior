@@ -145,4 +145,24 @@ class RolePromptBuilderTest {
         assertContains(prompt, "valid JSON")
         assertContains(prompt, "=== RETRY CONTEXT ===")
     }
+
+    @Test
+    fun `patch bundle prompt requires edited files and documentation`() {
+        val prompt = RolePromptBuilder.buildPatchBundleFile(
+            runObjective = "Produce a machine-readable patch bundle for the code changes",
+            roundCount = 2,
+            groupId = "group-0",
+            relativePath = "self-improvement-patch-bundle.json",
+            mediaType = "application/json",
+            description = "Machine-readable patch bundle with edited files, diffs, and documentation.",
+            attempt = 2
+        )
+
+        assertContains(prompt, "Patch Bundle Writer")
+        assertContains(prompt, "`changedFiles`")
+        assertContains(prompt, "`documentation`")
+        assertContains(prompt, "unified diffs")
+        assertContains(prompt, "=== RETRY CONTEXT ===")
+        assertContains(prompt, "PATCH BUNDLE HINTS")
+    }
 }

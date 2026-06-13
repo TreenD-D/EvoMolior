@@ -16,6 +16,10 @@ import java.nio.file.Path
  * @param keepWorkspace Whether to keep the workspace after a successful run.
  * @param overseerCycle When true, runs the full recursive self-improvement loop instead
  *   of just launching a command in an isolated workspace.
+ * @param overseerExecuteExperiments When true, overseer-cycle mode launches scheduled
+ *   experiment runs instead of stopping after scheduling.
+ * @param overseerRunAllCycles When true, overseer-cycle mode continues for the full
+ *   requested cycle count even if a cycle makes no progress.
  * @param overseerCycles Maximum number of overseer cycles to run (default 3).
  */
 internal data class SelfImprovementCliOptions(
@@ -27,6 +31,8 @@ internal data class SelfImprovementCliOptions(
     val environment: Map<String, String>,
     val keepWorkspace: Boolean,
     val overseerCycle: Boolean = false,
+    val overseerExecuteExperiments: Boolean = false,
+    val overseerRunAllCycles: Boolean = false,
     val overseerCycles: Int = 3
 )
 
@@ -48,6 +54,8 @@ internal object SelfImprovementCliArguments {
         val commandArgs = mutableListOf<String>()
         val environment = linkedMapOf<String, String>()
         var overseerCycle = false
+        var overseerExecuteExperiments = false
+        var overseerRunAllCycles = false
         var overseerCycles = 3
 
         var index = 0
@@ -91,6 +99,8 @@ internal object SelfImprovementCliArguments {
                 "-keep-workspace", "--keep-workspace" -> keepWorkspace = true
                 "-cleanup", "--cleanup" -> keepWorkspace = false
                 "-overseer-cycle", "--overseer-cycle" -> overseerCycle = true
+                "-overseer-execute", "--overseer-execute" -> overseerExecuteExperiments = true
+                "-overseer-run-all-cycles", "--overseer-run-all-cycles" -> overseerRunAllCycles = true
                 "-overseer-cycles", "--overseer-cycles" -> {
                     val value = args.getOrNull(++index) ?: throw SelfImprovementCliUsageException("Missing value for $arg")
                     overseerCycles = value.toIntOrNull()
@@ -133,6 +143,8 @@ internal object SelfImprovementCliArguments {
             environment = environment,
             keepWorkspace = keepWorkspace,
             overseerCycle = overseerCycle,
+            overseerExecuteExperiments = overseerExecuteExperiments,
+            overseerRunAllCycles = overseerRunAllCycles,
             overseerCycles = overseerCycles
         )
     }
@@ -177,6 +189,8 @@ internal object SelfImprovementCliArguments {
 
           Optional:
             -overseer-cycle           (enable this mode)
+            -overseer-execute         (launch scheduled experiment runs)
+            -overseer-run-all-cycles  (do not stop early when a cycle makes no progress)
             -overseer-cycles N        (max cycles, default 3)
 
           Example:

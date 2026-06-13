@@ -294,7 +294,7 @@ ExperimentPlan:
         - the metrics and invariants as typed KG constraints,
         - a sealed `judge_test_suite` specific to this experiment.[file:62]
 3. Each run yields:
-    - `PatchBundle` candidates (diffs against a working copy),
+    - `PatchBundle` candidates (JSON bundles containing edited files or diffs, documentation, and verification steps),
     - `RunReport` metrics (test results, cost, wall‑clock, constraint violations),
     - experiment‑local Dead Ends.
 4. Kernel aggregates results, evaluates acceptance predicates, and updates Hypothesis status.
@@ -330,6 +330,8 @@ If all checks pass, Kernel:
 
 - Marks the Hypothesis `accepted`, then `integrated`.
 - Applies the patchset to the baseline repo, tags the new version, and triggers a general regression run.
+
+Patch bundles should be emitted as machine-readable JSON so downstream tooling can either apply the edited files directly or reconstruct a diff from the bundle contents. The bundle should include at least `summary`, `changedFiles`, `documentation`, and `verification`.
 
 ### 7.2 Rejection & Dead Ends
 

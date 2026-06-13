@@ -2,13 +2,19 @@ package com.achulkov.evokammer.cli.selfimprovement
 
 import com.achulkov.evokammer.agents.factory.OverseerAgentRunner
 import com.achulkov.evokammer.api.service.OverseerKernelService
+import com.achulkov.evokammer.api.service.SelfImprovementRunOrchestrator
+import com.achulkov.evokammer.core.contract.OverseerAcceptanceCriteria
 import com.achulkov.evokammer.core.contract.OverseerExpectedEffect
+import com.achulkov.evokammer.core.contract.OverseerExperimentMetrics
+import com.achulkov.evokammer.core.contract.OverseerExperimentPlan
 import com.achulkov.evokammer.core.contract.OverseerHypothesis
 import com.achulkov.evokammer.core.contract.OverseerKernelState
 import com.achulkov.evokammer.core.contract.OverseerMutabilityLevel
 import com.achulkov.evokammer.core.contract.OverseerOrigin
 import com.achulkov.evokammer.core.contract.OverseerOriginType
 import com.achulkov.evokammer.core.contract.OverseerTargetScope
+import com.achulkov.evokammer.core.contract.OverseerVariationSpec
+import com.achulkov.evokammer.runtime.createProductionRuntime
 import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
 import io.github.aakira.napier.DebugAntilog
 import io.github.aakira.napier.Napier
@@ -34,14 +40,21 @@ private val loopJson = Json { prettyPrint = true; encodeDefaults = true }
  * 4. The orchestrator launches experiment runs and evaluates results.
  * 5. Results are fed back into the kernel, updating hypothesis status.
  *
- * @param workspaceRoot Output root for the loop's persistent state and run data.
+ * The loop also prepares a mutable repo copy under the workspace root so accepted patch bundles
+ * can be applied before the next cycle reads bootstrap context.
+ *
+ * @param sourceRepoRoot Read-only source checkout used as the initial baseline.
+ * @param workspaceRoot Output root for the loop's persistent state, run data, and mutable copy.
  * @param openRouterApiKey API key for LLM calls.
  */
 class SelfImprovementLoopRunner(
     private val sourceRepoRoot: Path,
     private val workspaceRoot: Path,
     private val openRouterApiKey: String,
-    private val proposalProvider: ProposalProvider? = null
+    private val proposalProvider: ProposalProvider? = null,
+    private val experimentCycleRunner: (suspend () -> Int)? = null,
+    private val executeScheduledExperiments: Boolean = false,
+    private val stopOnNoProgress: Boolean = true
 ) : SelfImprovementCycleRunner {
     /**
      * Structured report for a single loop cycle.
@@ -63,6 +76,10 @@ class SelfImprovementLoopRunner(
         val errors: List<String> = emptyList()
     )
 
+    private val mutableRepoRoot: Path by lazy {
+        RepoWorkspaceManager.prepareMutableRepoCopy(sourceRepoRoot, workspaceRoot)
+    }
+
     private val substrateFactory: SubstrateDatabaseFactory by lazy {
         SubstrateDatabaseFactory(workspaceRoot.resolve(".evokammer-data").toFile())
     }
@@ -70,6 +87,23 @@ class SelfImprovementLoopRunner(
     private val kernelService: OverseerKernelService by lazy {
         OverseerKernelService(
             substrateFactory = substrateFactory
+        )
+    }
+
+    private val productionRuntime by lazy {
+        if (executeScheduledExperiments) {
+            createProductionRuntime(workspaceRoot.resolve(".evokammer-data").toFile())
+        } else {
+            null
+        }
+    }
+
+    private val orchestrator: SelfImprovementRunOrchestrator? by lazy {
+        val runtime = productionRuntime ?: return@lazy null
+        SelfImprovementRunOrchestrator(
+            kernelService = kernelService,
+            runService = runtime.engineService,
+            repoWorkspaceRoot = mutableRepoRoot
         )
     }
 
@@ -92,6 +126,7 @@ class SelfImprovementLoopRunner(
         Napier.base(DebugAntilog())
         Napier.i("SelfImprovementLoopRunner: starting loop (max $cycleLimit cycles)")
         Files.createDirectories(workspaceRoot)
+        mutableRepoRoot
 
         val reports = mutableListOf<CycleReport>()
 
@@ -116,7 +151,7 @@ class SelfImprovementLoopRunner(
                 reports += report
 
                 // Stop early if no progress was made
-                if (report.proposalsCount == 0 && report.experimentResults == 0) {
+                if (stopOnNoProgress && report.proposalsCount == 0 && report.experimentResults == 0) {
                     Napier.i("SelfImprovementLoopRunner: no progress in cycle $cycle, stopping.")
                     break
                 }
@@ -145,7 +180,7 @@ class SelfImprovementLoopRunner(
                 stateBefore.hypotheses.isEmpty()
             ) {
                 Napier.w("SelfImprovementLoopRunner: agent returned no proposals for an empty kernel; seeding bootstrap hypothesis.")
-                bootstrapProposal()
+                bootstrapProposal(includeExperimentPlan = executeScheduledExperiments)
             } else {
                 proposal
             }
@@ -191,19 +226,31 @@ class SelfImprovementLoopRunner(
             Napier.e("SelfImprovementLoopRunner: proposal failed", e)
         }
 
-        // 4. Schedule and run experiments (if kernel state and run service are available)
+        // 4. Schedule and run experiments (if configured)
         var experimentResults = 0
 
-        // The orchestrator requires a full EvoKammerRunService which needs the runtime.
-        // For MVP, we record that scheduling happened without live execution.
         runCatching {
-            val scheduled = kernelService.scheduleEligibleExperimentPlansWithAudit()
-            val newlyScheduled = scheduled.state.experimentSchedules.values.count { it.launchedAtMs == null }
-            if (newlyScheduled > 0) {
-                Napier.i("SelfImprovementLoopRunner: $newlyScheduled experiment plans scheduled (awaiting launch)")
+            if (executeScheduledExperiments) {
+                val cycleExperimentResults = experimentCycleRunner?.invoke()
+                    ?: orchestrator?.runCycle(openRouterApiKey)?.experimentResults?.size
+                    ?: 0
+                experimentResults = cycleExperimentResults
+                if (experimentResults > 0) {
+                    Napier.i("SelfImprovementLoopRunner: executed $experimentResults overseer experiment result(s)")
+                }
+            } else {
+                val scheduled = kernelService.scheduleEligibleExperimentPlansWithAudit()
+                val newlyScheduled = scheduled.state.experimentSchedules.values.count { it.launchedAtMs == null }
+                if (newlyScheduled > 0) {
+                    Napier.i("SelfImprovementLoopRunner: $newlyScheduled experiment plans scheduled (awaiting launch)")
+                }
             }
         }.onFailure { e ->
-            errors += "Scheduling failed: ${e.message}"
+            errors += if (executeScheduledExperiments) {
+                "Experiment execution failed: ${e.message}"
+            } else {
+                "Scheduling failed: ${e.message}"
+            }
         }
 
         val stateAfter = kernelService.currentState()
@@ -218,50 +265,73 @@ class SelfImprovementLoopRunner(
         )
     }
 
-    private fun bootstrapProposal(): OverseerAgentRunner.OverseerProposal =
-        OverseerAgentRunner.OverseerProposal(
-            proposedHypotheses = listOf(
-                OverseerHypothesis(
-                    id = "HYP-self-improve-bootstrap-001",
-                    title = "Add CLI-level overseer-cycle integration coverage",
-                    origin = OverseerOrigin(
-                        type = OverseerOriginType.INTERNAL_LOGS,
-                        sources = listOf(
-                            "documentation/EvoKammer_Current_Session_Handoff.md",
-                            "documentation/EvoKammer_Self_Improvement_Operator_Guide.md"
-                        )
-                    ),
-                    targetScope = OverseerTargetScope(
-                        paths = listOf(
-                            "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/SelfImprovementCli.kt",
-                            "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/selfimprovement/SelfImprovementLoopRunner.kt",
-                            "evokammer/cli/src/test/kotlin/com/achulkov/evokammer/cli/SelfImprovementLoopRunnerTest.kt",
-                            "documentation/EvoKammer_Self_Improvement_Operator_Guide.md"
-                        ),
-                        mutabilityLevel = OverseerMutabilityLevel.FULLY_MUTABLE
-                    ),
-                    rationale = buildString {
-                        appendLine("The live overseer-cycle run started from an empty kernel and produced no actionable proposals.")
-                        appendLine("Seed the first improvement around CLI integration coverage and bootstrap context so the loop can discover concrete work from a cold start.")
-                        appendLine()
-                        appendLine("Current session context:")
-                        appendLine(loadBootstrapContext("documentation/EvoKammer_Current_Session_Handoff.md"))
-                        appendLine()
-                        appendLine("Operator guide context:")
-                        appendLine(loadBootstrapContext("documentation/EvoKammer_Self_Improvement_Operator_Guide.md"))
-                    }.trim(),
-                    expectedEffect = OverseerExpectedEffect(
-                        metricsUp = listOf("proposal_count", "bootstrap_coverage"),
-                        metricsDown = listOf("no_progress_runs")
-                    ),
-                    notes = "Bootstrap-triggered because the agent returned no proposals for an empty kernel in the first overseer cycle. Context extracted from handoff and operator guide files."
+    private fun bootstrapProposal(includeExperimentPlan: Boolean = false): OverseerAgentRunner.OverseerProposal {
+        val bootstrapHypothesis = OverseerHypothesis(
+            id = "HYP-self-improve-bootstrap-001",
+            title = "Add CLI-level overseer-cycle integration coverage",
+            origin = OverseerOrigin(
+                type = OverseerOriginType.INTERNAL_LOGS,
+                sources = listOf(
+                    "documentation/EvoKammer_Current_Session_Handoff.md",
+                    "documentation/EvoKammer_Self_Improvement_Operator_Guide.md"
                 )
             ),
-            rationale = "Bootstrap proposal synthesized from handoff guide and operator guide context, enriched with actual file content."
+            targetScope = OverseerTargetScope(
+                paths = listOf(
+                    "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/SelfImprovementCli.kt",
+                    "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/selfimprovement/SelfImprovementLoopRunner.kt",
+                    "evokammer/cli/src/test/kotlin/com/achulkov/evokammer/cli/SelfImprovementLoopRunnerTest.kt",
+                    "documentation/EvoKammer_Self_Improvement_Operator_Guide.md"
+                ),
+                mutabilityLevel = OverseerMutabilityLevel.FULLY_MUTABLE
+            ),
+            rationale = buildString {
+                appendLine("The live overseer-cycle run started from an empty kernel and produced no actionable proposals.")
+                appendLine("Seed the first improvement around CLI integration coverage and bootstrap context so the loop can discover concrete work from a cold start.")
+                appendLine()
+                appendLine("Current session context:")
+                appendLine(loadBootstrapContext("documentation/EvoKammer_Current_Session_Handoff.md"))
+                appendLine()
+                appendLine("Operator guide context:")
+                appendLine(loadBootstrapContext("documentation/EvoKammer_Self_Improvement_Operator_Guide.md"))
+            }.trim(),
+            expectedEffect = OverseerExpectedEffect(
+                metricsUp = listOf("proposal_count", "bootstrap_coverage"),
+                metricsDown = listOf("no_progress_runs")
+            ),
+            notes = "Bootstrap-triggered because the agent returned no proposals for an empty kernel in the first overseer cycle. Context extracted from handoff and operator guide files."
         )
 
+        val bootstrapPlans = if (includeExperimentPlan) {
+            listOf(
+                OverseerExperimentPlan(
+                    id = "PLAN-self-improve-bootstrap-001",
+                    hypothesisId = bootstrapHypothesis.id,
+                    runCount = 1,
+                    generationsPerRun = 1,
+                    variationSpec = OverseerVariationSpec(
+                        configChanges = listOf("enable overseer execution bridge")
+                    ),
+                    metrics = OverseerExperimentMetrics(primary = listOf("run_completed")),
+                    acceptanceCriteria = OverseerAcceptanceCriteria(
+                        predicates = listOf("run_completed > 0.5")
+                    ),
+                    maxCost = 1.0
+                )
+            )
+        } else {
+            emptyList()
+        }
+
+        return OverseerAgentRunner.OverseerProposal(
+            proposedHypotheses = listOf(bootstrapHypothesis),
+            proposedExperimentPlans = bootstrapPlans,
+            rationale = "Bootstrap proposal synthesized from handoff guide and operator guide context, enriched with actual file content."
+        )
+    }
+
     private fun loadBootstrapContext(relativePath: String, maxLines: Int = 80): String {
-        val file = sourceRepoRoot.resolve(relativePath).normalize()
+        val file = mutableRepoRoot.resolve(relativePath).normalize()
         if (!Files.exists(file) || !Files.isRegularFile(file)) {
             return "[Missing bootstrap context: $relativePath]"
         }

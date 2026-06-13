@@ -1,6 +1,7 @@
 package com.achulkov.evokammer.api.service
 
 import com.achulkov.evokammer.api.model.FinalOutputSpec
+import com.achulkov.evokammer.api.model.FinalOutputKind
 import com.achulkov.evokammer.core.contract.RunInputArtifact
 import com.achulkov.evokammer.core.contract.RunInputArtifactKind
 import com.achulkov.evokammer.core.contract.StartingField
@@ -10,6 +11,9 @@ import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
 import com.achulkov.evokammer.substrate.db.entity.MetaArchiveEntryEntity
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.security.MessageDigest
@@ -354,6 +358,101 @@ class RunArchiveServiceTest {
         val entries = unzipEntries(bundle)
         assertEquals("""{"headline":"MindVortex","lang":"de"}""", entries["outputs/briefs/summary.json"])
         assertFalse(entries.keys.contains("outputs/final-article.html"))
+    }
+
+    @Test
+    fun `buildResultsBundle includes patch bundle output with structured change set`() = runTest {
+        val rootDir = createTempDirectory("run-archive-patch-bundle-test-").toFile()
+        val dbFactory = SubstrateDatabaseFactory(rootDir)
+        val service = RunArchiveService(dbFactory, json)
+        val runId = "run-archive-patch-bundle"
+        val metaDb = dbFactory.get(runId, "__meta_archive__")
+
+        val startingField = StartingField.default("archive the run", runId = runId)
+        metaDb.metaArchiveDao().insert(
+            MetaArchiveEntryEntity(
+                id = UUID.randomUUID().toString(),
+                runId = runId,
+                entryType = RunArchiveService.ENTRY_STARTING_FIELD,
+                groupId = null,
+                label = "StartingField — $runId",
+                contentJson = json.encodeToString(StartingField.serializer(), startingField),
+                runObjective = startingField.objective,
+                finalScore = null,
+                isFromWinner = false,
+                generation = 0,
+                archivedAtMs = System.currentTimeMillis()
+            )
+        )
+        metaDb.metaArchiveDao().insert(
+            MetaArchiveEntryEntity(
+                id = "run-completed-$runId",
+                runId = runId,
+                entryType = RunArchiveService.ENTRY_RUN_COMPLETED,
+                groupId = null,
+                label = "Run Completed — $runId",
+                contentJson = json.encodeToString(
+                    RunCompletionRecord.serializer(),
+                    RunCompletionRecord(
+                        runId = runId,
+                        winnerId = "group-0",
+                        requestedOutputSpec = FinalOutputSpec(
+                            relativePath = "self-improvement-patch-bundle.json",
+                            mediaType = "application/json",
+                            description = "Machine-readable patch bundle with edited files, diffs, and documentation.",
+                            kind = FinalOutputKind.PATCH_BUNDLE
+                        ),
+                        generatedOutputFiles = listOf(
+                            GeneratedOutputFile(
+                                relativePath = "self-improvement-patch-bundle.json",
+                                mediaType = "application/json",
+                                content = """
+                                    {
+                                      "summary": "Update Example.kt",
+                                      "changedFiles": [
+                                        {
+                                          "path": "Example.kt",
+                                          "status": "modified",
+                                          "diff": "--- a/Example.kt\n+++ b/Example.kt\n@@\n-fun message(): String = \"original\"\n+fun message(): String = \"updated\"",
+                                          "rationale": "The message function must return the updated string."
+                                        }
+                                      ],
+                                      "documentation": "Example.kt now returns the updated message.",
+                                      "verification": [
+                                        "Compile Example.kt",
+                                        "Invoke message() and confirm updated output"
+                                      ],
+                                      "notes": "Rollback restores the original return value."
+                                    }
+                                """.trimIndent()
+                            )
+                        )
+                    )
+                ),
+                runObjective = startingField.objective,
+                finalScore = null,
+                isFromWinner = false,
+                generation = 1,
+                archivedAtMs = System.currentTimeMillis()
+            )
+        )
+
+        val bundle = service.buildResultsBundle(runId)
+        assertNotNull(bundle)
+
+        val entries = unzipEntries(bundle)
+        val patchBundle = entries["outputs/self-improvement-patch-bundle.json"]
+        assertNotNull(patchBundle)
+
+        val patchJson = json.parseToJsonElement(patchBundle).jsonObject
+        assertEquals("Update Example.kt", patchJson["summary"]?.jsonPrimitive?.content)
+        val changedFiles = patchJson["changedFiles"]?.jsonArray
+        assertNotNull(changedFiles)
+        assertEquals("Example.kt", changedFiles.first().jsonObject["path"]?.jsonPrimitive?.content)
+        assertEquals("modified", changedFiles.first().jsonObject["status"]?.jsonPrimitive?.content)
+        assertTrue(patchJson["documentation"]?.jsonPrimitive?.content.orEmpty().contains("Example.kt"))
+        assertTrue(patchJson["verification"]?.jsonArray?.isNotEmpty() == true)
+        assertTrue(patchJson["notes"]?.jsonPrimitive?.content.orEmpty().contains("Rollback"))
     }
 
     @Test

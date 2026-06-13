@@ -76,13 +76,28 @@ data class RunConfig(
  * @param relativePath Relative path under the run's `outputs/` directory.
  * @param mediaType MIME type of the generated file.
  * @param description Human-readable purpose of the generated file.
+ * @param kind Structural classification used to route the final output writer.
  */
 @Serializable
 data class FinalOutputSpec(
     val relativePath: String,
     val mediaType: String,
-    val description: String = ""
+    val description: String = "",
+    val kind: FinalOutputKind = FinalOutputKind.GENERIC_FILE
 )
+
+/**
+ * Structural classification for a run's operator-facing final output.
+ *
+ * The kind is intentionally separate from MIME type so the engine can route prompt contracts
+ * without inferring intent from human-readable descriptions.
+ */
+@Serializable
+enum class FinalOutputKind {
+    HTML_ARTICLE,
+    GENERIC_FILE,
+    PATCH_BUNDLE
+}
 
 /**
  * Uploaded run-start artifact bytes encoded for transport over JSON or multipart bridging.

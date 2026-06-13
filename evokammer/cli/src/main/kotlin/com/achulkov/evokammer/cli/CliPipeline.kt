@@ -2,6 +2,7 @@ package com.achulkov.evokammer.cli
 
 import com.achulkov.evokammer.api.events.EvoKammerEvent
 import com.achulkov.evokammer.api.model.FinalOutputSpec
+import com.achulkov.evokammer.api.model.FinalOutputKind
 import com.achulkov.evokammer.api.model.RunConfig
 import com.achulkov.evokammer.api.service.PersistedRunStateStore
 import com.achulkov.evokammer.api.util.loadRunInputArtifacts
@@ -32,7 +33,8 @@ import java.util.zip.ZipOutputStream
 
 @Serializable
 internal data class CliPipelineConfig(
-    val stages: List<CliPipelineStageConfig> = emptyList()
+    val stages: List<CliPipelineStageConfig> = emptyList(),
+    val applyCodeImprovementPlans: Boolean = false
 )
 
 internal data class LoadedCliPipelineConfig(
@@ -52,6 +54,7 @@ internal data class CliPipelineStageConfig(
     val budgetOverride: Double? = null,
     val inheritsPreviousOutputs: Boolean = true,
     val modelOverrides: Map<String, String> = emptyMap(),
+    val finalOutputKind: FinalOutputKind = FinalOutputKind.GENERIC_FILE,
     val finalOutput: CliPipelineFinalOutputSpec? = null
 )
 
@@ -59,7 +62,8 @@ internal data class CliPipelineStageConfig(
 internal data class CliPipelineFinalOutputSpec(
     val relativePath: String,
     val mediaType: String,
-    val description: String = ""
+    val description: String = "",
+    val kind: FinalOutputKind = FinalOutputKind.GENERIC_FILE
 )
 
 internal data class CliStagePlan(
@@ -118,6 +122,7 @@ internal fun runCliPipeline(
     val outputRoot = options.outputDir.toFile().absoluteFile
     val runOutputDir = outputRoot.resolve(pipelineRunId).apply { mkdirs() }
     val pipelineConfig = loadPipelineConfig(options.pipelineConfigPath)
+    val applyCodeImprovementPlans = pipelineConfig?.config?.applyCodeImprovementPlans == true
 
     val stagePlans = mutableListOf<CliStagePlan>()
     val primaryOutputSpec = defaultFinalOutputSpec(
@@ -155,7 +160,13 @@ internal fun runCliPipeline(
             budgetOverride = stageConfig.budgetOverride,
             inheritsPreviousOutputs = stageConfig.inheritsPreviousOutputs,
             modelOverrides = stageConfig.modelOverrides,
-            finalOutputSpec = stageConfig.finalOutput
+            finalOutputSpec = stageConfig.finalOutput?.let { outputSpec ->
+                if (stageConfig.finalOutputKind == FinalOutputKind.GENERIC_FILE) {
+                    outputSpec
+                } else {
+                    outputSpec.copy(kind = stageConfig.finalOutputKind)
+                }
+            }
         )
     }.orEmpty()
 
@@ -199,18 +210,26 @@ internal fun runCliPipeline(
                 baseInputDir = options.inputDir,
                 pipelineRoot = runOutputDir.toPath(),
                 stageId = stagePlan.id,
-                previousStage = previousStageResult.takeIf { stagePlan.inheritsPreviousOutputs }
+                previousStage = previousStageResult.takeIf { stagePlan.inheritsPreviousOutputs },
+                applyCodeImprovementPlans = applyCodeImprovementPlans
             )
         }
         val resolvedStagePlan = stagePlan.copy(inputDir = resolvedInputDir)
         val result = loadCompletedStageResult(resolvedStagePlan)
-            ?: executeCliStage(resolvedStagePlan, options, runtimeFactory)
+            ?: run {
+                if (resolvedStagePlan.outputDir != runOutputDir.toPath()) {
+                    resolvedStagePlan.outputDir.toFile().deleteRecursively()
+                }
+                executeCliStage(resolvedStagePlan, options, runtimeFactory)
+            }
         stageResults += result
-        publishStageOutput(
-            stageOutputDir = result.stageOutputDir,
-            relativePath = CODE_IMPROVEMENT_PLAN_RELATIVE_PATH,
-            pipelineOutputDir = runOutputDir.toPath().resolve("outputs")
-        )
+        if (applyCodeImprovementPlans) {
+            publishStageOutput(
+                stageOutputDir = result.stageOutputDir,
+                relativePath = CODE_IMPROVEMENT_PLAN_RELATIVE_PATH,
+                pipelineOutputDir = runOutputDir.toPath().resolve("outputs")
+            )
+        }
         result.publishedOutputRelativePath?.let { relativePath ->
             publishStageOutput(
                 stageOutputDir = result.stageOutputDir,
@@ -363,7 +382,8 @@ private suspend fun executeCliStage(
             FinalOutputSpec(
                 relativePath = it.relativePath,
                 mediaType = it.mediaType,
-                description = it.description
+                description = it.description,
+                kind = it.kind
             )
         },
         isTestRun = true,
@@ -495,7 +515,8 @@ private fun defaultFinalOutputSpec(
         CliPipelineFinalOutputSpec(
             relativePath = preferredPath,
             mediaType = "text/html",
-            description = "Browser-renderable final deliverable"
+            description = "Browser-renderable final deliverable",
+            kind = FinalOutputKind.HTML_ARTICLE
         )
     } else {
         null
@@ -506,16 +527,19 @@ private fun preparePipelineStageInput(
     baseInputDir: Path,
     pipelineRoot: Path,
     stageId: String,
-    previousStage: CliStageExecutionResult?
+    previousStage: CliStageExecutionResult?,
+    applyCodeImprovementPlans: Boolean
 ): Path {
     val stageInputRoot = pipelineRoot.resolve(".pipeline-inputs").resolve(stageId)
     stageInputRoot.toFile().deleteRecursively()
     Files.createDirectories(stageInputRoot)
     copyDirectoryContents(baseInputDir, stageInputRoot)
-    applyCodeImprovementPlanIfPresent(
-        repoRoot = stageInputRoot,
-        pipelineRoot = pipelineRoot
-    )
+    if (applyCodeImprovementPlans) {
+        applyCodeImprovementPlanIfPresent(
+            repoRoot = stageInputRoot,
+            pipelineRoot = pipelineRoot
+        )
+    }
     if (previousStage != null) {
         val previousStageDir = stageInputRoot.resolve("previous-stage")
         Files.createDirectories(previousStageDir)

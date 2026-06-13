@@ -1,6 +1,7 @@
 package com.achulkov.evokammer.api.service
 
 import com.achulkov.evokammer.api.events.EvoKammerEvent
+import com.achulkov.evokammer.api.model.FinalOutputKind
 import com.achulkov.evokammer.api.model.FinalOutputSpec
 import com.achulkov.evokammer.api.model.RunConfig
 import com.achulkov.evokammer.core.contract.OverseerExperimentPlan
@@ -13,8 +14,11 @@ import com.achulkov.evokammer.core.contract.OverseerMutabilityLevel
 import com.achulkov.evokammer.core.model.GroupProfileType
 import com.achulkov.evokammer.core.model.ScoringDimension
 import com.achulkov.evokammer.core.overseer.PatchAcceptanceEvaluator
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
+import java.nio.file.Path
 import java.util.UUID
 import kotlin.time.Duration.Companion.hours
 
@@ -34,9 +38,8 @@ import kotlin.time.Duration.Companion.hours
  * 6. Evaluates acceptance criteria via [PatchAcceptanceEvaluator].
  * 7. Records results in the kernel, updating hypothesis status.
  *
- * The full StartingField self-improvement encoding and PatchBundle extraction are deferred to
- * a future enhancement; the MVP evaluates hypotheses based on runtime metrics from diagnostic
- * runs that exercise the target paths.
+ * Fully mutable runs can now emit a patch bundle and apply it to the mutable repo copy before the
+ * next cycle starts.
  *
  * @param kernelService Durable Overseer kernel service for state management.
  * @param runService EvoKammer run service for launching and monitoring runs.
@@ -47,7 +50,8 @@ class SelfImprovementRunOrchestrator(
     private val kernelService: OverseerKernelService,
     private val runService: EvoKammerRunService,
     private val evaluator: PatchAcceptanceEvaluator = PatchAcceptanceEvaluator(),
-    private val runTimeoutMs: Long = 2.hours.inWholeMilliseconds
+    private val runTimeoutMs: Long = 2.hours.inWholeMilliseconds,
+    private val repoWorkspaceRoot: Path? = null
 ) {
 
     /**
@@ -250,9 +254,30 @@ class SelfImprovementRunOrchestrator(
         val completed = event is EvoKammerEvent.RunCompleted
         val runPassed = completed // MVP: treat successful completion as pass
 
-        // Try to get results bundle for metric extraction
+        // Try to get results bundle for metric extraction and patch application.
+        val resultsBundle = if (completed) {
+            waitForResultsBundle(scheduledRunId)
+        } else {
+            runCatching { runService.getResultsBundle(scheduledRunId) }.getOrNull()
+        }
+
+        if (completed && resultsBundle != null && config.finalOutputSpec?.kind == FinalOutputKind.PATCH_BUNDLE && repoWorkspaceRoot != null) {
+            val outputSpec = config.finalOutputSpec
+            val applied = PatchBundleApplicator.applyIfPresent(
+                resultsBundle = resultsBundle,
+                repoRoot = repoWorkspaceRoot,
+                expectedRelativePath = outputSpec.relativePath,
+                runId = scheduledRunId
+            )
+            if (applied != null) {
+                Napier.i(
+                    "SelfImprovementRunOrchestrator: applied patch bundle ${outputSpec.relativePath} for run $scheduledRunId into ${applied.repoRoot}"
+                )
+            }
+        }
+
         val metricValues = runCatching {
-            runService.getResultsBundle(scheduledRunId)
+            resultsBundle
         }.fold(
             onSuccess = { bytes ->
                 if (bytes != null && bytes.isNotEmpty()) {
@@ -287,6 +312,21 @@ class SelfImprovementRunOrchestrator(
                 "Experiment run '$scheduledRunId' was aborted or timed out."
             }
         )
+    }
+
+    private suspend fun waitForResultsBundle(runId: String): ByteArray? {
+        var bundle: ByteArray? = null
+        withTimeoutOrNull(runTimeoutMs) {
+            while (bundle == null) {
+                val candidate = runCatching { runService.getResultsBundle(runId) }.getOrNull()
+                if (candidate != null && candidate.isNotEmpty()) {
+                    bundle = candidate
+                    break
+                }
+                delay(250)
+            }
+        }
+        return bundle
     }
 
     /**
@@ -346,11 +386,39 @@ class SelfImprovementRunOrchestrator(
             appendLine("the metrics and invariants listed above.")
         }
 
+        val requestedOutputSpec = when (hypothesis.targetScope.mutabilityLevel) {
+            OverseerMutabilityLevel.FULLY_MUTABLE -> FinalOutputSpec(
+                relativePath = "self-improvement-patch-bundle.json",
+                mediaType = "application/json",
+                description = "Machine-readable patch bundle with edited files, diffs, and documentation.",
+                kind = FinalOutputKind.PATCH_BUNDLE
+            )
+            OverseerMutabilityLevel.SEMI_MUTABLE -> FinalOutputSpec(
+                relativePath = "experiment-analysis.md",
+                mediaType = "text/markdown",
+                description = "Self-improvement experiment analysis report.",
+                kind = FinalOutputKind.GENERIC_FILE
+            )
+        }
+
+        val runObjective = if (requestedOutputSpec.kind == FinalOutputKind.PATCH_BUNDLE) {
+            buildString {
+                appendLine(objective)
+                appendLine()
+                appendLine("OUTPUT REQUIREMENT:")
+                appendLine("Produce a machine-readable JSON patch bundle, not a prose report.")
+                appendLine("The JSON must include edited files or diffs plus documentation of the change set.")
+                appendLine("Use the target paths as the patch scope and keep the bundle directly actionable.")
+            }
+        } else {
+            objective
+        }
+
         val groupProfiles = listOf(GroupProfileType.Library, GroupProfileType.Factory)
 
         return RunConfig(
             runId = scheduledRunId,
-            objective = objective,
+            objective = runObjective,
             groupCount = 2,
             groupProfiles = groupProfiles,
             rounds = plan.generationsPerRun.coerceIn(1, 5),
@@ -380,11 +448,7 @@ class SelfImprovementRunOrchestrator(
             modelOverrides = modelOverrides,
             isTestRun = true,
             budgetOverride = plan.maxCost.takeIf { it > 0 },
-            finalOutputSpec = FinalOutputSpec(
-                relativePath = "experiment-analysis.md",
-                mediaType = "text/markdown",
-                description = "Self-improvement experiment analysis report."
-            )
+            finalOutputSpec = requestedOutputSpec
         )
     }
 }

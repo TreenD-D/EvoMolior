@@ -68,7 +68,9 @@ internal fun runOverseerCycle(
         SelfImprovementLoopRunner(
             sourceRepoRoot = sourceRepoRoot,
             workspaceRoot = workspaceRoot,
-            openRouterApiKey = apiKey
+            openRouterApiKey = apiKey,
+            executeScheduledExperiments = options.overseerExecuteExperiments,
+            stopOnNoProgress = !options.overseerRunAllCycles
         )
     }
 ) {

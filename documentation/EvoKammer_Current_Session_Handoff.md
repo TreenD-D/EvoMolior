@@ -233,6 +233,72 @@
 - The shared run-input artifact loader now lives in `evokammer:api` and is used by both the desktop file picker and the CLI.
 - The production engine wiring was extracted into `evokammer:runtime` so the desktop app and CLI share the same runtime bootstrap.
 
+## Normal-Run Boundary Fix
+- Root cause discovered:
+  - the normal CLI pipeline was unconditionally publishing and re-applying `outputs/improvements/code-improvement-plan.json`
+  - that allowed self-improvement repair artifacts to leak into ordinary browser/article runs
+- Boundary fix applied:
+  - `CliPipelineConfig.applyCodeImprovementPlans` now defaults to `false`
+  - code-improvement plan propagation only occurs when a pipeline config explicitly opts in
+  - ordinary article runs no longer inherit repo-rewrite artifacts from the self-improvement path
+- Verification added:
+  - one regression now proves an explicit improvement pipeline still rewrites the next-stage repo copy
+  - another regression proves a normal pipeline leaves the repo copy untouched and does not publish the repair artifact
+
+## New Article Run Goal (2026-06-13)
+- New active goal:
+  - redo the browser-deliverable article generation run
+  - use a larger staged pipeline with 4 total stages
+  - keep 12 rounds per stage
+  - use 4 groups per stage
+  - use 4 agents per group
+  - keep the run content-only; do not enable code-improvement propagation
+- Locked run shape:
+  - primary stage comes from `-promptfile documentation/tmp/fast_cli_variant6_prompt_high_bar.txt`
+  - follow-up stages come from:
+    - `documentation/tmp/fast_cli_variant6_stage2_prompt.txt`
+    - `documentation/tmp/fast_cli_variant6_stage3_prompt.txt`
+    - `documentation/tmp/fast_cli_variant6_stage4_prompt.txt`
+  - pipeline config: `documentation/tmp/fast_cli_variant6_4stage_pipeline.json`
+  - run id: `fast-cli-variant6-20260613-4stage`
+- Expected artifacts:
+  - `summary.json`
+  - `pipeline-summary.json`
+  - `pipeline-results.zip`
+  - `results.zip`
+  - `debug-log.txt`
+  - `outputs/final-article.html`
+  - `outputs/refined/final-article-refined.html`
+
+## Stage-3 Abort Root Cause
+- The larger 4-stage run reached stage 3 and then aborted during final deliverable publication.
+- Root cause:
+  - the final-deliverable reader in `EvoKammerRunService` only inspected the newest 150 `DOC`
+    staging entries when looking for the authored final HTML file
+  - on a 12-round, 4-group run that window is too shallow, so the canonical article can be missed
+    even when the builder successfully writes it
+- Fix applied:
+  - widened the final deliverable scan window to 1000 staging entries so the HTML article can be
+    recovered and published after high-volume stages
+- Next step:
+  - rerun the same 4-stage pipeline and verify that stage 3 now publishes `outputs/final-article.html`
+    and that stage 4 can start normally
+
+## Readiness Check Result
+- Current assessment:
+  - the self-improvement loop is operational, but it is not yet ready for an unattended long run
+- Evidence:
+  - large article runs can still fail during final-deliverable publication if the output scan window is too narrow
+  - aborted stage reruns can hit sealed-starting-field / stale-stage-directory issues unless the stage workspace is reset
+  - provider-side OpenRouter failures still abort individual builder attempts under load
+  - long browser-deliverable runs still take hours and produce many warning-only grader paths
+- Practical conclusion:
+  - use the self-improvement loop for controlled runs, but keep a human in the loop for now
+  - long autonomous runs need one more hardening pass around publication discovery, retry/resume hygiene, and provider fallback stability
+- Revalidated during this pass:
+  - final-deliverable discovery after 180 late-stage `DOC` entries is now covered by a regression
+  - stale follow-up stage directories are now cleaned before rerun and covered by a regression
+
 ## Files touched most recently
 - `evokammer/api/src/main/kotlin/com/achulkov/evokammer/api/service/EvoKammerRunService.kt`
 - `composeApp/src/jvmMain/kotlin/com/achulkov/evomolior/evokammer/viewmodel/EvoKammerViewModel.kt`
@@ -683,3 +749,28 @@
   - `./gradlew --no-daemon -Pkotlin.incremental=false :evokammer:api:test --tests com.achulkov.evokammer.api.service.EvoKammerIpcServerSmokeTest --tests com.achulkov.evokammer.api.service.OverseerKernelServiceTest --tests com.achulkov.evokammer.api.service.OverseerKernelClientAndRestartRegressionTest`
 - Next slice from `documentation/EvoKammer_Recursive_Self_Improvement_Plan_v4.md`:
   - execution hardening and launch semantics, especially how launch requests should be constrained or versioned once real experiment bundles are in use
+
+## Live Overseer Execution Proof (2026-06-12)
+- Live execution root:
+  - `/tmp/evokammer-overseer-live-2/cycle-001`
+- Explicit execution-mode rerun:
+  - `/tmp/evokammer-overseer-live-3/cycle-001`
+- Forced 3-cycle rerun with explicit no-stop flag:
+  - `/tmp/evokammer-overseer-live-5/cycle-001`
+- The overseer cycle now executes scheduled bootstrap plans through the production runtime:
+  - the empty-kernel fallback seeded `HYP-self-improve-bootstrap-001`
+  - it also seeded `PLAN-self-improve-bootstrap-001`
+  - the production runtime launched `PLAN-self-improve-bootstrap-001-run-01`
+  - the kernel recorded the result as `ACCEPTED`
+- Persistent proof artifacts:
+  - overseer kernel state: `/tmp/evokammer-overseer-live-2/cycle-001/.evokammer-data/evokammer/overseer/overseer-kernel-state.json`
+  - overseer audit log: `/tmp/evokammer-overseer-live-2/cycle-001/.evokammer-data/evokammer/overseer/overseer-kernel-audit.jsonl`
+  - generated patch bundle: `/tmp/evokammer-overseer-live-2/cycle-001/.evokammer-data/evokammer/runs/PLAN-self-improve-bootstrap-001-run-01/results/self-improvement-patch-bundle.json`
+- Result shape:
+  - explicit execution rerun: `experimentResults=1`
+  - forced 3-cycle rerun: `experimentResults=[0, 1, 1]` across three cycles
+  - forced 3-cycle kernel state:
+    - hypotheses: `HYP-001`, `HYP-002`
+    - plans: `EXP-001`, `EXP-002`
+    - results: both `EXP-001` and `EXP-002` recorded as `ACCEPTED`
+- The generated patch bundle was a real JSON change artifact with `summary`, `changedFiles`, `documentation`, `verification`, and `notes`, not a prose-only report.
