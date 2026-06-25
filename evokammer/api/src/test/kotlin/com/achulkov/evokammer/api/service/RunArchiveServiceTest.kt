@@ -145,6 +145,7 @@ class RunArchiveServiceTest {
         assertTrue(entries.keys.contains("starting-field.json"))
         assertTrue(entries.keys.contains("inputs/docs/specs/brief.txt"))
         assertTrue(entries.keys.contains("outputs/final-article.html"))
+        assertTrue(entries.keys.contains("outputs/high-level-run-log.txt"))
         assertTrue(entries.keys.any { it.startsWith("outputs/dead_ends_export") })
         assertTrue(entries.keys.any { it.startsWith("outputs/round_summary") })
         assertTrue(entries["manifest.json"]!!.contains("\"artifactCount\":1"))
@@ -744,6 +745,29 @@ class RunArchiveServiceTest {
         assertFailsWith<IllegalStateException> {
             validateGeneratedOutputFile(badHtml)
         }
+    }
+
+    @Test
+    fun `validateGeneratedOutputFile appends footer to html outputs that omit one`() {
+        val htmlWithoutFooter = GeneratedOutputFile(
+            relativePath = "final-article.html",
+            mediaType = "text/html",
+            content = """
+                <!doctype html>
+                <html lang="en">
+                <body>
+                  <main><article><h1>Article</h1><p>Publication body.</p></article></main>
+                </body>
+                </html>
+            """.trimIndent()
+        )
+
+        val validated = validateGeneratedOutputFile(htmlWithoutFooter)
+
+        assertTrue(validated.content.contains("<footer"))
+        assertTrue(validated.content.contains("role=\"contentinfo\""))
+        assertTrue(validated.content.contains("Published artifact: final-article.html."))
+        assertTrue(validated.content.indexOf("<footer") < validated.content.indexOf("</body>"))
     }
 
     @Test

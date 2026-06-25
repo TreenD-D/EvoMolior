@@ -39,12 +39,18 @@ class RoleTest {
     fun `oversight roles are not civilisational`() {
         assertFalse(Role.Inspector.isCivilisationalRole)
         assertFalse(Role.Auditor.isCivilisationalRole)
+        assertFalse(Role.PerspectiveTaker.isCivilisationalRole)
         assertFalse(Role.MetaPlanner.isCivilisationalRole)
     }
 
     @Test
     fun `Outlier does not receive legacy protocol`() {
         assertFalse(Role.Outlier.receivesLegacyProtocol)
+    }
+
+    @Test
+    fun `PerspectiveTaker does not receive legacy protocol`() {
+        assertFalse(Role.PerspectiveTaker.receivesLegacyProtocol)
     }
 
     @Test

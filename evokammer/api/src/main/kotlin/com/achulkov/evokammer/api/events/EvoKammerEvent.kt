@@ -216,6 +216,33 @@ sealed class EvoKammerEvent {
         val consistencyReport: String = ""
     ) : EvoKammerEvent()
 
+    /** A deterministic objective-based expert bundle was selected for the run. */
+    @Serializable
+    data class ObjectiveExpertBundleSelected(
+        val runId: String,
+        val bundleName: String,
+        val objective: String
+    ) : EvoKammerEvent()
+
+    /** A run-node ancestry graph was prepared for a continuation launch. */
+    @Serializable
+    data class RunGraphPrepared(
+        val runId: String,
+        val sourceRunId: String,
+        val edgeCount: Int,
+        val ancestryDepth: Int,
+        val routedContextCount: Int
+    ) : EvoKammerEvent()
+
+    /** A continuation launch carried a non-empty graph ancestry payload. */
+    @Serializable
+    data class RunGraphExpanded(
+        val runId: String,
+        val sourceRunId: String,
+        val ancestryDepth: Int,
+        val edgeCount: Int
+    ) : EvoKammerEvent()
+
     // ── Grader Group events ────────────────────────────────────────────────────
 
     /**

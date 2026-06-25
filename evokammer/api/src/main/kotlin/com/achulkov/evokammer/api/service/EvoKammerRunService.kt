@@ -39,10 +39,13 @@ import com.achulkov.evokammer.competition.scoring.FailureTelemetry
 import com.achulkov.evokammer.competition.scoring.GroupRoundResult
 import com.achulkov.evokammer.competition.scoring.ScoringEngine
 import com.achulkov.evokammer.core.config.ModelSelectionConfig
+import com.achulkov.evokammer.core.config.ObjectiveExpertRouter
 import com.achulkov.evokammer.core.config.RunObjectiveHeuristics
 import com.achulkov.evokammer.core.contract.DeliverableSkeletonTree
 import com.achulkov.evokammer.core.contract.DeliverableSkeletonTreeSummary
+import com.achulkov.evokammer.core.contract.FeedforwardLayerSpec
 import com.achulkov.evokammer.core.contract.GroupCheckinResult
+import com.achulkov.evokammer.core.contract.RunGraphEdge
 import com.achulkov.evokammer.core.contract.StartingField
 import com.achulkov.evokammer.core.contract.RunInputArtifact
 import com.achulkov.evokammer.core.contract.RunInputArtifactKind
@@ -50,6 +53,7 @@ import com.achulkov.evokammer.core.model.DimensionScore
 import com.achulkov.evokammer.core.model.GroupProfile
 import com.achulkov.evokammer.core.model.GroupProfileType
 import com.achulkov.evokammer.core.model.Role
+import com.achulkov.evokammer.core.model.RoundScore
 import com.achulkov.evokammer.core.model.ScoringDimension
 import com.achulkov.evokammer.orchestration.epigenetic.FitnessScorer
 import com.achulkov.evokammer.orchestration.epigenetic.LegacyProtocolExtractor
@@ -70,8 +74,8 @@ import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
 import com.achulkov.evokammer.substrate.DeliverableSkeletonTreeRefiner
 import com.achulkov.evokammer.substrate.DeliverableSkeletonTreeStore
 import com.achulkov.evokammer.substrate.db.EvoKammerDatabase
-import com.achulkov.evokammer.substrate.db.entity.KnowledgeBaseEntryEntity
 import com.achulkov.evokammer.substrate.db.entity.MetaArchiveEntryEntity
+import com.achulkov.evokammer.substrate.db.entity.KnowledgeBaseEntryEntity
 import com.achulkov.evokammer.substrate.tools.ToolMaterializer
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
@@ -82,6 +86,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -95,11 +100,13 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.UUID
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.nio.file.Files
@@ -107,6 +114,7 @@ import java.nio.file.StandardCopyOption
 
 private const val META_ARCHIVE_GROUP_ID = "__meta_archive__"
 private const val MAX_RUN_ARTIFACT_PREVIEW_CHARS = 512
+private const val MAX_RUN_GRAPH_MESSAGE_SUMMARIES = 6
 private const val ROUND_SUMMARY_MAX_ATTEMPTS = 2
 private const val FINAL_DELIVERABLE_MAX_ATTEMPTS = 3
 private const val DEFAULT_MULTI_GRADER_GROUP_COUNT = 3
@@ -141,6 +149,7 @@ data class RunCompletionRecord(
     val requestedOutputSpec: FinalOutputSpec? = null,
     val judgeOutputsByGrader: Map<String, String> = emptyMap(),
     val submissionSummariesByGroup: Map<String, String?> = emptyMap(),
+    val graphMessage: RunGraphMessage? = null,
     val completedAtMs: Long = System.currentTimeMillis()
 )
 
@@ -448,12 +457,20 @@ class EvoKammerRunService(
     private val latestGroupSubstrateAssessments = ConcurrentHashMap<String, SubstrateRoundAssessment>()
     /** Latest deterministic sealed-suite assessment per group. */
     private val latestGroupRoundAssessments = ConcurrentHashMap<String, DeterministicRoundAssessment>()
+    /** Compact adversarial feedback brief carried into the next generator round. */
+    private val adversarialDiscriminatorBriefs = ConcurrentHashMap<String, String>()
+    /** Reward multiplier for the next discriminator cycle, keyed by run id. */
+    private val adversarialDiscriminatorBudgetMultipliers = ConcurrentHashMap<String, Double>()
+    /** Cache of archived discriminator briefs keyed by run/group so repeated disclosures stay cheap. */
+    private val archivedAdversarialDiscriminatorBriefs = ConcurrentHashMap<String, String>()
     /** Per-group stasis flags set by Watchdog signal collection. Reset each round. */
     private val stasisFlags = ConcurrentHashMap<String, Boolean>()
     /** WiP completions observed during the current round, grouped by owning group. */
     private val pendingWipCompletions = ConcurrentHashMap<String, ConcurrentLinkedQueue<String>>()
     /** Groups that have already spawned an Auditor during this run. */
     private val auditorSpawnedGroups = ConcurrentHashMap.newKeySet<String>()
+    /** Groups that have already spawned a PerspectiveTaker during this run. */
+    private val perspectiveTakerSpawnedGroups = ConcurrentHashMap.newKeySet<String>()
     /** Groups that already consumed the narrow nested-hierarchy trigger during this run. */
     private val nestedHierarchyTriggeredGroups = ConcurrentHashMap.newKeySet<String>()
     /** Testable planner for deriving the first production nested-hierarchy trigger. */
@@ -570,6 +587,14 @@ class EvoKammerRunService(
         }
 
         val coordinator = groupCoordinatorProviderWithKey(groupIds, config.scoringDimensions, config.openRouterApiKey)
+        coordinator.configureTopology(
+            startingField.topologyKind,
+            startingField.dispatchTopologyAdaptation
+        )
+        coordinator.configureDispatchTrustPersistence(
+            runId = config.runId,
+            trustScoreDaosByGroup = groupIds.associateWith { groupId -> substrateFactory.get(config.runId, groupId).trustScoreDao() }
+        )
         activeCoordinator = coordinator
         val graderGroupManager = graderGroupManagerProvider(config.scoringDimensions)
         activeGraderGroupManager = graderGroupManager
@@ -601,6 +626,7 @@ class EvoKammerRunService(
                 config.runId, groupId, config.openRouterApiKey, resolveAgentJarPath(),
                 GroupProfile.default(profileType)
             )
+            lm.configureStartingField(startingField)
             lm.configureRunArtifacts(
                 inputArtifacts = startingField.inputArtifacts,
                 artifactsMountPath = if (startingField.inputArtifacts.isNotEmpty()) resolveRunArtifactsRoot(config.runId).absolutePath else null,
@@ -863,10 +889,18 @@ class EvoKammerRunService(
         // `usedDefault = true` only when the council runner was absent, timed out, or threw.
         var councilProducedField = false
         val sourceGroupCount = continuationSourceStartingField?.groupCount ?: config.groupCount
+        val routedContextSummaries = continuationSourceStartingField?.let { source ->
+            routeContinuationContextSummaries(
+                sourceRunId = source.runId,
+                sourceStartingField = source,
+                objective = config.objective
+            )
+        }.orEmpty()
         var startingField: StartingField = when {
             continuationSourceStartingField != null -> buildContinuationStartingField(
                 source = continuationSourceStartingField,
-                config = config
+                config = config,
+                routedContextSummaries = routedContextSummaries
             )
             config.isTestRun -> {
                 Napier.i("EvoKammerRunService: TEST RUN — skipping Genesis Council, using minimal StartingField (budget=${config.budgetOverride ?: 200.0})")
@@ -911,7 +945,11 @@ class EvoKammerRunService(
                 StartingField.default(config.objective, config.runId)
             }
         }
-        startingField = applyModelOverrides(canonicalizeStartingField(startingField), config.modelOverrides)
+        startingField = applyModelOverrides(
+            applyObjectiveExpertRouting(canonicalizeStartingField(startingField)),
+            config.modelOverrides
+        )
+        startingField = seedFeedforwardLayerIfMissing(startingField)
         if (continuationSourceRunId != null) {
             copyContinuationArtifacts(
                 sourceRunId = continuationSourceRunId,
@@ -1026,6 +1064,17 @@ class EvoKammerRunService(
                 status = PersistedRunStatus.BOOTSTRAPPED
             )
         )
+
+        if (continuationSourceStartingField != null) {
+            emit(
+                EvoKammerEvent.RunGraphExpanded(
+                    runId = config.runId,
+                    sourceRunId = continuationSourceStartingField.runId,
+                    ancestryDepth = startingField.runGraphEdges.size,
+                    edgeCount = startingField.runGraphEdges.size
+                )
+            )
+        }
 
         // Launch run loop
         scope.launch {
@@ -1380,6 +1429,7 @@ class EvoKammerRunService(
                     )
                 }
                 coordinator.onRoundStart(round)
+                coordinator.flushPendingDispatches(round)
                 emit(EvoKammerEvent.RoundStarted(config.runId, round))
                 Napier.i("EvoKammerRunService: round $round started (duration=${config.roundDurationMinutes}m)")
                 emit(EvoKammerEvent.EngineProgress(config.runId, "round_start", "Round $round started — spawning agents for ${groupIds.size} group(s)"))
@@ -1577,6 +1627,29 @@ class EvoKammerRunService(
 
                 // 5. Seal and reveal the round scores through the blind scoring gate.
                 val blindResult = publishBlindRoundResult(config, groupIds, round)
+                updateAdversarialDiscriminatorBriefs(
+                    runId = config.runId,
+                    roundIndex = round,
+                    blindResult = blindResult,
+                    roundSubmissionSummaries = roundSubmissionSummaries
+                )
+                if (groupIds.isNotEmpty()) {
+                    val adversarialSummary = groupIds.joinToString(" | ") { groupId ->
+                        adversarialDiscriminatorBriefs[groupId]
+                            ?.lineSequence()
+                            ?.firstOrNull()
+                            ?.take(180)
+                            ?.let { "$groupId=$it" }
+                            ?: "$groupId=none"
+                    }
+                    emit(
+                        EvoKammerEvent.EngineProgress(
+                            config.runId,
+                            "discriminator_feedback",
+                            "Round $round discriminator feedback prepared: $adversarialSummary"
+                        )
+                    )
+                }
 
                 // Phase 7.5: Apply accepted DST structural refinements and rubric policies.
                 applyDstRefinementsFromRound(config.runId, groupIds, blindResult, round)
@@ -1698,6 +1771,17 @@ class EvoKammerRunService(
                 )
             }
 
+            val graphMessage = buildRunGraphMessage(
+                runId = config.runId,
+                winnerId = winnerId,
+                finalAnswerSummary = finalAnswerSummary,
+                finalDeliverableHtml = generatedOutputFile
+                    ?.takeIf { it.mediaType.startsWith("text/html", ignoreCase = true) }
+                    ?.content,
+                generatedOutputFiles = listOfNotNull(generatedOutputFile),
+                judgeOutputsByGrader = finalRoundJudgeOutputs,
+                submissionSummariesByGroup = finalRoundSubmissionSummaries
+            )
             val completionRecord = RunCompletionRecord(
                 runId = config.runId,
                 winnerId = winnerId,
@@ -1708,9 +1792,11 @@ class EvoKammerRunService(
                 generatedOutputFiles = listOfNotNull(generatedOutputFile),
                 requestedOutputSpec = config.finalOutputSpec,
                 judgeOutputsByGrader = finalRoundJudgeOutputs,
-                submissionSummariesByGroup = finalRoundSubmissionSummaries
+                submissionSummariesByGroup = finalRoundSubmissionSummaries,
+                graphMessage = graphMessage
             )
             persistRunCompletionMarker(completionRecord)
+            persistRunGraphMessage(completionRecord)
 
             // 4b. Phase 7.5: Synthesise final deliverables from the DST for each group.
             runFinalSynthesisers(config, groupIds)
@@ -1815,10 +1901,15 @@ class EvoKammerRunService(
                 val stageDisclosure = try {
                     activeDisclosureEngine?.currentStage(groupId)?.constraintFramedContent ?: ""
                 } catch (_: Exception) { "" }
+                val discriminatorAwareDisclosure = composeStageDisclosureWithDiscriminatorFeedback(
+                    runId = config.runId,
+                    groupId = groupId,
+                    baseDisclosure = stageDisclosure
+                )
 
                 lm.spawnGeneration(
                     allocation = allocation,
-                    stageDisclosure = stageDisclosure,
+                    stageDisclosure = discriminatorAwareDisclosure,
                     modelAssignments = activeModelAssignments, // Genesis Council assignments (empty = use LifecycleManager defaults)
                     modelPools = activeModelPools,
                     rolePrompts = activeRolePrompts,           // Genesis Council role prompts (empty = use defaults)
@@ -2613,12 +2704,15 @@ class EvoKammerRunService(
         val groupIndex = groupSummaries.indexOfFirst { it.groupId == groupId }
         val profileType = activeGroupProfiles.getOrNull(groupIndex) ?: GroupProfileType.Library
         val profile = GroupProfile.default(profileType)
-        val candidateModels = listOfNotNull(
-            activeModelAssignments[Role.Builder.name],
-            activeModelAssignments[Role.Researcher.name],
-            activeModelAssignments[Role.Archivist.name]
-        ).distinct()
+        val builderModel = config.modelOverrides[Role.Builder.name] ?: activeModelAssignments[Role.Builder.name]
+        val candidateModels = listOf(
+            builderModel,
+            builderModel,
+            config.modelOverrides[Role.Archivist.name] ?: activeModelAssignments[Role.Archivist.name],
+            config.modelOverrides[Role.Researcher.name] ?: activeModelAssignments[Role.Researcher.name]
+        ).filterNotNull()
         var finalFile: GeneratedOutputFile? = null
+        var retryReason: String? = null
         val maxAttempts = maxOf(FINAL_DELIVERABLE_MAX_ATTEMPTS, candidateModels.size.coerceAtLeast(1))
         for (attempt in 1..maxAttempts) {
             val selectedModel = candidateModels.getOrElse(attempt - 1) {
@@ -2641,8 +2735,9 @@ class EvoKammerRunService(
                     append("Generate the final standalone deliverable for the completed run.")
                     if (attempt > 1) {
                         append(
-                            " Retry attempt $attempt after no persisted final output file was recorded from the previous attempt."
+                            " Retry attempt $attempt after the previous attempt failed final output validation."
                         )
+                        retryReason?.let { reason -> append(" Previous rejection reason: $reason") }
                     }
                     if (selectedModel != null) {
                         append(" Use model assignment $selectedModel for this attempt.")
@@ -2669,7 +2764,8 @@ class EvoKammerRunService(
                         relativePath = outputSpec.relativePath,
                         mediaType = outputSpec.mediaType,
                         description = outputSpec.description,
-                        attempt = attempt
+                        attempt = attempt,
+                        retryReason = retryReason
                     )
                 },
                 scope = scope
@@ -2683,11 +2779,23 @@ class EvoKammerRunService(
                 outputSpec = outputSpec
             )
             if (finalFile != null) {
-                break
+                val rejectionReason = validateFinalOutputAgainstObjective(
+                    output = finalFile,
+                    runObjective = config.objective
+                )
+                if (rejectionReason == null) {
+                    break
+                }
+                Napier.w(
+                    "EvoKammerRunService: final deliverable file ${outputSpec.relativePath} " +
+                        "rejected for group=$groupId attempt=$attempt: $rejectionReason"
+                )
+                retryReason = rejectionReason
+                finalFile = null
             }
             if (attempt < maxAttempts) {
                 Napier.w(
-                    "EvoKammerRunService: no final deliverable file recorded for group=$groupId " +
+                    "EvoKammerRunService: no valid final deliverable file recorded for group=$groupId " +
                         "round=$finalRoundIndex on attempt=$attempt; retrying"
                 )
             }
@@ -2838,6 +2946,87 @@ class EvoKammerRunService(
             mediaType = outputSpec.mediaType,
             content = body
         )
+    }
+
+    private fun validateFinalOutputAgainstObjective(
+        output: GeneratedOutputFile,
+        runObjective: String
+    ): String? {
+        if (!output.mediaType.startsWith("text/html", ignoreCase = true)) return null
+        validateEvidenceTraceability(output.content, runObjective)?.let { return it }
+        val minimumWords = extractMinimumVisibleWords(runObjective) ?: return null
+        val visibleWords = countVisibleHtmlWords(output.content)
+        return if (visibleWords < minimumWords) {
+            "HTML body has $visibleWords visible words but the objective requires at least $minimumWords visible words."
+        } else {
+            null
+        }
+    }
+
+    private fun validateEvidenceTraceability(html: String, runObjective: String): String? {
+        if (!requiresEvidenceTraceability(runObjective)) return null
+
+        val visibleText = visibleHtmlText(html)
+        val hasEvidenceSection = Regex(
+            """(?i)\b(?:source-grounded\s+evidence\s+notes|evidence\s+traceability)\b"""
+        ).containsMatchIn(visibleText)
+        if (!hasEvidenceSection) {
+            return "HTML output must include a visible Source-grounded evidence notes or Evidence traceability section."
+        }
+
+        val placeholderEvidence = listOf(
+            Regex("""(?i)\(\s*source\s*\)"""),
+            Regex("""(?i)\bsource:\s*research_synthesis_source_pack\.md\b"""),
+            Regex("""(?i)\bsource:\s*source\s+pack\b""")
+        )
+        if (placeholderEvidence.any { it.containsMatchIn(visibleText) }) {
+            return "HTML output uses placeholder evidence markers; cite source-pack notes by specific short labels or label recommendations as inference."
+        }
+
+        return null
+    }
+
+    private fun requiresEvidenceTraceability(runObjective: String): Boolean {
+        val normalized = runObjective.lowercase()
+        return listOf(
+            "source-grounded evidence notes",
+            "evidence traceability",
+            "source fidelity",
+            "use only the source pack",
+            "do not invent citations",
+            "research-grounded",
+            "evidence-synthesis"
+        ).any { it in normalized }
+    }
+
+    private fun extractMinimumVisibleWords(runObjective: String): Int? {
+        val patterns = listOf(
+            Regex("""(?i)\bat\s+least\s+([0-9][0-9,]*)\s+(?:visible\s+)?(?:article\s+body\s+|body\s+)?words?\b"""),
+            Regex("""(?i)\bminimum(?:\s+of)?\s+([0-9][0-9,]*)\s+(?:visible\s+)?(?:article\s+body\s+|body\s+)?words?\b""")
+        )
+        return patterns
+            .firstNotNullOfOrNull { pattern ->
+                pattern.find(runObjective)
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    ?.replace(",", "")
+                    ?.toIntOrNull()
+            }
+    }
+
+    private fun countVisibleHtmlWords(html: String): Int {
+        val withoutTags = visibleHtmlText(html)
+        return Regex("""[A-Za-z][A-Za-z0-9'’:-]*""")
+            .findAll(withoutTags)
+            .count()
+    }
+
+    private fun visibleHtmlText(html: String): String {
+        val withoutScript = html.replace(Regex("(?is)<script\\b[^>]*>.*?</script>"), " ")
+        val withoutStyle = withoutScript.replace(Regex("(?is)<style\\b[^>]*>.*?</style>"), " ")
+        return withoutStyle
+            .replace(Regex("(?is)<[^>]+>"), " ")
+            .replace(Regex("&[a-zA-Z0-9#]+;"), " ")
     }
 
     /**
@@ -3033,6 +3222,122 @@ class EvoKammerRunService(
             Napier.w("EvoKammerRunService: failed to persist completion marker for run=${completionRecord.runId}: ${e.message}")
         }
     }
+
+    /**
+     * Persists the explicit graph-message envelope as a first-class archive entry.
+     *
+     * The envelope is stored separately from the completion record so continuation routing can
+     * consume a dedicated graph message without reinterpreting the rest of the completion payload.
+     */
+    internal suspend fun persistRunGraphMessage(completionRecord: RunCompletionRecord) {
+        val graphMessage = completionRecord.graphMessage ?: return
+        val archiveDb = substrateFactory.get(completionRecord.runId, META_ARCHIVE_GROUP_ID)
+        val markerExists = runCatching {
+            archiveDb.metaArchiveDao().getByType(RunArchiveService.ENTRY_RUN_GRAPH_MESSAGE)
+        }.getOrElse { emptyList() }.any { it.runId == completionRecord.runId }
+        if (markerExists) return
+
+        runCatching {
+            archiveDb.metaArchiveDao().insert(
+                MetaArchiveEntryEntity(
+                    id = "run-graph-message-${completionRecord.runId}",
+                    runId = completionRecord.runId,
+                    entryType = RunArchiveService.ENTRY_RUN_GRAPH_MESSAGE,
+                    groupId = null,
+                    label = "Run Graph Message — ${completionRecord.runId}",
+                    contentJson = runConfigJson.encodeToString(
+                        RunGraphMessage.serializer(),
+                        graphMessage
+                    ),
+                    runObjective = runCatching {
+                        archiveDb.metaArchiveDao().getByType(RunArchiveService.ENTRY_STARTING_FIELD)
+                    }.getOrElse { emptyList() }
+                        .firstOrNull { it.runId == completionRecord.runId }
+                        ?.runObjective.orEmpty(),
+                    finalScore = null,
+                    isFromWinner = false,
+                    generation = 0,
+                    archivedAtMs = System.currentTimeMillis()
+                )
+            )
+        }.onFailure { e ->
+            Napier.w("EvoKammerRunService: failed to persist graph message for run=${completionRecord.runId}: ${e.message}")
+        }
+    }
+
+    /**
+     * Builds the completion-time graph envelope used by continuation routing.
+     *
+     * The message is intentionally compact and route-ready so a later continuation can trust the
+     * archived envelope before touching file-system artefacts.
+     */
+    private fun buildRunGraphMessage(
+        runId: String,
+        winnerId: String?,
+        finalAnswerSummary: String,
+        finalDeliverableHtml: String?,
+        generatedOutputFiles: List<GeneratedOutputFile>,
+        judgeOutputsByGrader: Map<String, String>,
+        submissionSummariesByGroup: Map<String, String?>
+    ): RunGraphMessage {
+        val routedContextSummaries = buildList {
+            val highLevelRunLogSummary = buildString {
+                append("winner=")
+                append(winnerId ?: "none")
+                if (finalAnswerSummary.isNotBlank()) {
+                    append(" | finalAnswer=")
+                    append(summarizeRunGraphSnippet(finalAnswerSummary, 200))
+                }
+                if (generatedOutputFiles.isNotEmpty()) {
+                    append(" | outputs=")
+                    append(
+                        generatedOutputFiles.joinToString(", ") { output ->
+                            "${output.relativePath}=${summarizeRunGraphSnippet(output.content, 120)}"
+                        }
+                    )
+                }
+            }
+            add("high-level-run-log: ${highLevelRunLogSummary.ifBlank { "run completed" }}")
+            finalAnswerSummary.takeIf { it.isNotBlank() }?.let { summary ->
+                add("final-answer-summary: ${summarizeRunGraphSnippet(summary, 240)}")
+            }
+            finalDeliverableHtml?.takeIf { it.isNotBlank() }?.let { html ->
+                add("final-deliverable-html: ${summarizeRunGraphSnippet(stripHtmlMarkup(html), 240)}")
+            }
+            generatedOutputFiles.forEach { output ->
+                add("generated-output:${output.relativePath}: ${summarizeRunGraphSnippet(output.content, 180)}")
+            }
+            submissionSummariesByGroup.forEach { (groupId, summary) ->
+                summary?.takeIf { it.isNotBlank() }?.let {
+                    add("group-summary:$groupId: ${summarizeRunGraphSnippet(it, 180)}")
+                }
+            }
+            judgeOutputsByGrader.forEach { (graderId, output) ->
+                output.takeIf { it.isNotBlank() }?.let {
+                    add("judge-output:$graderId: ${summarizeRunGraphSnippet(it, 180)}")
+                }
+            }
+        }.distinct().take(MAX_RUN_GRAPH_MESSAGE_SUMMARIES)
+
+        return RunGraphMessage(
+            runId = runId,
+            headline = summarizeRunGraphSnippet(
+                finalAnswerSummary.ifBlank { "run $runId completed${winnerId?.let { " winner=$it" }.orEmpty()}" },
+                240
+            ),
+            routedContextSummaries = routedContextSummaries
+        )
+    }
+
+    private fun summarizeRunGraphSnippet(text: String, maxChars: Int): String = text
+        .replace(Regex("<[^>]+>"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .take(maxChars)
+
+    private fun stripHtmlMarkup(html: String): String = summarizeRunGraphSnippet(html, Int.MAX_VALUE)
+
+    private fun adversarialDiscriminatorBriefCacheKey(runId: String, groupId: String): String = "$runId::$groupId"
 
     /**
      * Persists one round summary per competing group so the end-of-round output is queryable
@@ -3366,6 +3671,29 @@ class EvoKammerRunService(
     }
 
     /**
+     * Fills in a small objective-driven expert bundle when the council did not author one.
+     *
+     * This keeps the MoE baseline additive: council-authored assignments still win, but
+     * test runs and fallback starts get a deterministic expert profile instead of a blank map.
+     */
+    internal suspend fun applyObjectiveExpertRouting(startingField: StartingField): StartingField {
+        if (startingField.modelAssignment.isNotEmpty() || startingField.modelPools.isNotEmpty()) return startingField
+        val bundle = ObjectiveExpertRouter.select(startingField.objective)
+        Napier.i("EvoKammerRunService: objective expert router selected ${bundle.name} for run ${startingField.runId}")
+        emit(
+            EvoKammerEvent.ObjectiveExpertBundleSelected(
+                runId = startingField.runId,
+                bundleName = bundle.name,
+                objective = startingField.objective
+            )
+        )
+        return startingField.copy(
+            modelAssignment = bundle.modelAssignment,
+            modelPools = bundle.modelPools
+        )
+    }
+
+    /**
      * Persists the sealed test suite once, in the first competing group's substrate DB.
      *
      * The suite is stored write-once and locked. If the first group is unavailable or the
@@ -3513,12 +3841,50 @@ class EvoKammerRunService(
      */
     private fun buildContinuationStartingField(
         source: StartingField,
-        config: RunConfig
+        config: RunConfig,
+        routedContextSummaries: List<String>
     ): StartingField = source.copy(
         runId = config.runId,
         objective = config.objective,
         generationCeiling = config.rounds,
-        continuedFromRunId = source.runId
+        continuedFromRunId = source.runId,
+        routedContextSummaries = routedContextSummaries,
+        feedforwardLayer = source.feedforwardLayer?.nextLayer(source.runId) ?: source.feedforwardLayer,
+        runGraphEdges = source.runGraphEdges + RunGraphEdge(
+            sourceRunId = source.runId,
+            targetRunId = config.runId,
+            edgeType = "continuation",
+            weight = 1.0
+        )
+    )
+
+    internal fun seedFeedforwardLayerIfMissing(startingField: StartingField): StartingField {
+        if (startingField.feedforwardLayer != null) return startingField
+        return startingField.copy(
+            feedforwardLayer = FeedforwardLayerSpec(
+                layerIndex = 0,
+                layerLabel = "L1",
+                upstreamRunIds = emptyList<String>(),
+                layerObjective = startingField.objective
+            )
+        )
+    }
+
+    internal suspend fun routeContinuationContextSummaries(
+        sourceRunId: String,
+        sourceStartingField: StartingField,
+        objective: String,
+        maxSummaries: Int = 3
+    ): List<String> = ContinuationContextGraphRouter(
+        substrateFactory = substrateFactory,
+        runConfigJson = runConfigJson,
+        resolveRunRoot = ::resolveRunRoot
+    ).routeContinuationContextSummaries(
+        sourceRunId = sourceRunId,
+        sourceStartingField = sourceStartingField,
+        objective = objective,
+        loadSealedStartingField = ::loadSealedStartingFieldSnapshot,
+        maxSummaries = maxSummaries
     )
 
     /**
@@ -4161,6 +4527,165 @@ class EvoKammerRunService(
      * @param config Current run configuration.
      * @param groupIds Competing group IDs.
      */
+    private suspend fun composeStageDisclosureWithDiscriminatorFeedback(
+        runId: String,
+        groupId: String,
+        baseDisclosure: String
+    ): String = buildString {
+        val discriminatorBrief = adversarialDiscriminatorBriefs[groupId]
+            ?.takeIf { it.isNotBlank() }
+            ?: readAdversarialDiscriminatorBrief(runId, groupId)
+        if (discriminatorBrief != null) {
+            appendLine("=== ADVERSARIAL DISCRIMINATOR FEEDBACK ===")
+            appendLine(discriminatorBrief)
+            appendLine()
+        }
+        if (baseDisclosure.isNotBlank()) {
+            appendLine(baseDisclosure)
+        }
+    }
+
+    private suspend fun updateAdversarialDiscriminatorBriefs(
+        runId: String,
+        roundIndex: Int,
+        blindResult: com.achulkov.evokammer.core.model.GradingResult,
+        roundSubmissionSummaries: Map<String, String?>
+    ) {
+        val briefs = buildAdversarialDiscriminatorBriefs(blindResult, roundSubmissionSummaries)
+        val rewardMultiplier = computeAdversarialDiscriminatorBudgetMultiplier(blindResult)
+        adversarialDiscriminatorBriefs.putAll(briefs)
+        adversarialDiscriminatorBudgetMultipliers[runId] = rewardMultiplier
+        persistAdversarialDiscriminatorBriefs(runId, roundIndex, briefs, rewardMultiplier)
+    }
+
+    /**
+     * Returns the current discriminator budget multiplier for the given run.
+     *
+     * The multiplier is derived from the latest blind grading spread and is used to reward
+     * stronger discriminator rounds with slightly more budget on the next cycle.
+     *
+     * @param runId Run identifier.
+     * @return Budget multiplier, clamped to a modest reward band.
+     */
+    fun adversarialDiscriminatorBudgetMultiplier(runId: String): Double =
+        adversarialDiscriminatorBudgetMultipliers[runId]
+            ?: readArchivedAdversarialDiscriminatorBudgetMultiplier(runId)
+            ?: 1.0
+
+    private fun computeAdversarialDiscriminatorBudgetMultiplier(
+        blindResult: com.achulkov.evokammer.core.model.GradingResult
+    ): Double {
+        val weightedTotals = blindResult.scores.map { it.weightedTotal }
+        if (weightedTotals.isEmpty()) return 1.0
+        val min = weightedTotals.minOrNull() ?: return 1.0
+        val max = weightedTotals.maxOrNull() ?: return 1.0
+        val spread = (max - min) / (max.takeIf { it > 0.0 } ?: 1.0)
+        return (1.0 + spread.coerceIn(0.0, 0.5)).coerceAtMost(1.5)
+    }
+
+    /**
+     * Persists per-group adversarial discriminator briefs so the critic signal survives restart.
+     */
+    internal suspend fun persistAdversarialDiscriminatorBriefs(
+        runId: String,
+        roundIndex: Int,
+        briefs: Map<String, String>,
+        rewardMultiplier: Double
+    ) = withContext(Dispatchers.IO) {
+        if (briefs.isEmpty()) return@withContext
+        val archiveDb = substrateFactory.get(runId, META_ARCHIVE_GROUP_ID)
+        val now = System.currentTimeMillis()
+        briefs.forEach { (groupId, brief) ->
+            if (brief.isBlank()) return@forEach
+            archiveDb.metaArchiveDao().insert(
+                MetaArchiveEntryEntity(
+                    id = "adversarial-discriminator-$runId-$groupId-r$roundIndex",
+                    runId = runId,
+                    entryType = RunArchiveService.ENTRY_ADVERSARIAL_DISCRIMINATOR_FEEDBACK,
+                    groupId = groupId,
+                    label = "Adversarial Discriminator Feedback — $groupId — run $runId",
+                    contentJson = runConfigJson.encodeToString(String.serializer(), brief),
+                    runObjective = runCatching {
+                        archiveDb.metaArchiveDao().getByType(RunArchiveService.ENTRY_STARTING_FIELD)
+                    }.getOrElse { emptyList() }
+                        .firstOrNull { it.runId == runId }
+                        ?.runObjective.orEmpty(),
+                    finalScore = null,
+                    isFromWinner = false,
+                    generation = roundIndex,
+                    archivedAtMs = now
+                )
+            )
+            archivedAdversarialDiscriminatorBriefs[adversarialDiscriminatorBriefCacheKey(runId, groupId)] = brief
+        }
+        archiveDb.metaArchiveDao().insert(
+            MetaArchiveEntryEntity(
+                id = "adversarial-discriminator-reward-$runId-r$roundIndex",
+                runId = runId,
+                entryType = RunArchiveService.ENTRY_ADVERSARIAL_DISCRIMINATOR_REWARD,
+                groupId = null,
+                label = "Adversarial Discriminator Reward — run $runId",
+                contentJson = runConfigJson.encodeToString(Double.serializer(), rewardMultiplier),
+                runObjective = runCatching {
+                    archiveDb.metaArchiveDao().getByType(RunArchiveService.ENTRY_STARTING_FIELD)
+                }.getOrElse { emptyList() }
+                    .firstOrNull { it.runId == runId }
+                    ?.runObjective.orEmpty(),
+                finalScore = null,
+                isFromWinner = false,
+                generation = roundIndex,
+                archivedAtMs = now
+            )
+        )
+    }
+
+    /**
+     * Reads a persisted adversarial discriminator brief from the run archive, if present.
+     */
+    internal suspend fun readAdversarialDiscriminatorBrief(
+        runId: String,
+        groupId: String
+    ): String? = withContext(Dispatchers.IO) {
+        archivedAdversarialDiscriminatorBriefs[adversarialDiscriminatorBriefCacheKey(runId, groupId)]
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return@withContext it }
+        val archiveDb = runCatching { substrateFactory.get(runId, META_ARCHIVE_GROUP_ID) }
+            .getOrNull()
+            ?: return@withContext null
+        val entry = runCatching {
+            archiveDb.metaArchiveDao().getByType(RunArchiveService.ENTRY_ADVERSARIAL_DISCRIMINATOR_FEEDBACK)
+        }.getOrElse { emptyList() }
+            .filter { it.runId == runId && it.groupId == groupId }
+            .maxWithOrNull(compareBy<com.achulkov.evokammer.substrate.db.entity.MetaArchiveEntryEntity> { it.generation }
+                .thenBy { it.archivedAtMs })
+            ?: return@withContext null
+        runCatching {
+            runConfigJson.decodeFromString(String.serializer(), entry.contentJson)
+        }.getOrNull()?.also { brief ->
+            archivedAdversarialDiscriminatorBriefs[adversarialDiscriminatorBriefCacheKey(runId, groupId)] = brief
+        }
+    }
+
+    internal fun readArchivedAdversarialDiscriminatorBudgetMultiplier(
+        runId: String
+    ): Double? = runBlocking(Dispatchers.IO) {
+        val archiveDb = runCatching { substrateFactory.get(runId, META_ARCHIVE_GROUP_ID) }
+            .getOrNull()
+            ?: return@runBlocking null
+        val entry = runCatching {
+            archiveDb.metaArchiveDao().getByType(RunArchiveService.ENTRY_ADVERSARIAL_DISCRIMINATOR_REWARD)
+        }.getOrElse { emptyList() }
+            .filter { it.runId == runId }
+            .maxWithOrNull(compareBy<MetaArchiveEntryEntity> { it.generation }
+                .thenBy { it.archivedAtMs })
+            ?: return@runBlocking null
+        runCatching {
+            runConfigJson.decodeFromString(Double.serializer(), entry.contentJson)
+        }.getOrNull()?.also { multiplier ->
+            adversarialDiscriminatorBudgetMultipliers[runId] = multiplier
+        }
+    }
+
     private suspend fun runFinalSynthesisers(config: RunConfig, groupIds: List<String>) {
         for (groupId in groupIds) {
             try {
@@ -4215,9 +4740,13 @@ class EvoKammerRunService(
         checkInGateOpenRound = null
         latestGroupDimensionScores.clear()
         latestGroupRoundAssessments.clear()
+        adversarialDiscriminatorBriefs.clear()
+        adversarialDiscriminatorBudgetMultipliers.clear()
         pendingWipCompletions.clear()
         auditorSpawnedGroups.clear()
+        perspectiveTakerSpawnedGroups.clear()
         nestedHierarchyTriggeredGroups.clear()
+        archivedAdversarialDiscriminatorBriefs.clear()
         runFinalOutputSpecs.remove(runId)
         Napier.i("EvoKammerRunService: cleanup complete for run $runId")
     }
@@ -4334,6 +4863,12 @@ class EvoKammerRunService(
         signal: WatchdogSignal.InspectorFlag,
         groupIds: List<String>
     ) {
+        if (signal.suggestedRole == Role.PerspectiveTaker || signal.description.contains("turn-taking", ignoreCase = true)) {
+            if (!perspectiveTakerSpawnedGroups.add(signal.groupId)) return
+            spawnPerspectiveTakerForGroup(config, groupIds, signal.groupId, signal.description)
+            return
+        }
+
         if (signal.severity != WatchdogSeverity.HIGH && signal.severity != WatchdogSeverity.CRITICAL) return
         if (signal.suggestedRole != null && signal.suggestedRole != Role.Auditor) return
         if (!auditorSpawnedGroups.add(signal.groupId)) return
@@ -4385,6 +4920,64 @@ class EvoKammerRunService(
                 config.runId,
                 "auditor_spawn_failed",
                 "[$targetGroupId] Auditor spawn failed: ${e.message ?: "unknown error"}"
+            ))
+        }
+    }
+
+    /**
+     * Spawns a PerspectiveTaker when the Inspector detects a coordination blind spot.
+     */
+    private suspend fun spawnPerspectiveTakerForGroup(
+        config: RunConfig,
+        groupIds: List<String>,
+        targetGroupId: String,
+        description: String
+    ) {
+        val lm = liveLifecycleManagers[targetGroupId]
+        if (lm == null) {
+            Napier.w("EvoKammerRunService: cannot spawn PerspectiveTaker for $targetGroupId — no LifecycleManager")
+            perspectiveTakerSpawnedGroups.remove(targetGroupId)
+            return
+        }
+
+        val profileType = activeGroupProfiles.getOrElse(groupIds.indexOf(targetGroupId)) {
+            activeGroupProfiles.firstOrNull() ?: GroupProfileType.Library
+        }
+        val profile = GroupProfile.default(profileType)
+        val budgetPerAgent = (profile.spawnBudget * 0.5).coerceAtLeast(1.0)
+        val rolePrompt = activeRolePrompts[Role.PerspectiveTaker.name]
+            ?: "You are a PerspectiveTaker. Read other agents' Death Notes, staging updates, and recent signals. Surface missing viewpoints, stakeholder blind spots, and coordination gaps."
+        val stageDisclosure = buildString {
+            appendLine("Coordination blind spot detected")
+            appendLine("Group: $targetGroupId")
+            appendLine("Description: $description")
+            appendLine("Action: inspect recent activity for missing perspectives and underrepresented viewpoints.")
+        }
+
+        emit(EvoKammerEvent.EngineProgress(
+            config.runId,
+            "perspective_taker_spawn",
+            "[$targetGroupId] Spawning PerspectiveTaker: $description"
+        ))
+
+        try {
+            lm.spawnSpecialAgent(
+                role = Role.PerspectiveTaker,
+                generation = currentRound ?: 0,
+                budgetPerAgent = budgetPerAgent,
+                stageDisclosure = stageDisclosure,
+                modelAssignments = activeModelAssignments,
+                modelPools = activeModelPools,
+                rolePrompt = rolePrompt,
+                scope = scope
+            )
+        } catch (e: Exception) {
+            perspectiveTakerSpawnedGroups.remove(targetGroupId)
+            Napier.w("EvoKammerRunService: PerspectiveTaker spawn failed for $targetGroupId: ${e.message}")
+            emit(EvoKammerEvent.EngineProgress(
+                config.runId,
+                "perspective_taker_spawn_failed",
+                "[$targetGroupId] PerspectiveTaker spawn failed: ${e.message ?: "unknown error"}"
             ))
         }
     }

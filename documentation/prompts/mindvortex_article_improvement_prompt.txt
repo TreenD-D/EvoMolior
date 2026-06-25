@@ -1,0 +1,56 @@
+Improve the uploaded HTML article for publication on mindvortex.app.
+
+Input artifact:
+- First call the artifact-reading tool in list mode and inspect the exact staged artifact names.
+- Read the uploaded source HTML article, `Productivity Apps for ADHD in 2026.html`.
+- If the exact filename is not present, use the artifact list to find the HTML article and read that file instead.
+- Treat it as the baseline draft to improve, not as disposable background.
+- Read enough of the source HTML to understand its structure, metadata, sections, calls to action, and weaknesses before writing.
+
+Primary objective:
+- Produce a complete, standalone, browser-renderable HTML5 article that is a stronger version of the source article for the MindVortex website.
+- The output should be suitable for a polished editorial/marketing page on `https://mindvortex.app/`.
+
+Audience:
+- Adults, students, founders, and knowledge workers with ADHD or attention-management challenges.
+- Readers who are tired of generic productivity advice and want practical, emotionally intelligent guidance.
+
+Content requirements:
+- Preserve the article's core topic: productivity apps and systems for ADHD in 2026.
+- Strengthen the MindVortex positioning without turning the article into a shallow advertisement.
+- Explain why ordinary to-do lists, calendars, and habit trackers often fail ADHD brains.
+- Compare categories of tools: task managers, visual timers, body doubling, focus apps, capture systems, AI planning assistants, and MindVortex-style externalized cognition.
+- Add sharper decision criteria so readers can choose tools based on their actual friction points: task initiation, time blindness, overwhelm, prioritization, working memory, context switching, and follow-through.
+- Include practical examples, mini-frameworks, and concrete usage scenarios.
+- Include balanced caveats: no app cures ADHD, medical advice belongs to clinicians, and tool choice should support rather than shame the user.
+
+MindVortex-specific requirements:
+- Position MindVortex as a supportive cognition layer for turning messy thoughts into prioritized action, reducing re-planning fatigue, and helping users restart after derailment.
+- Mention `mindvortex.app` naturally in the article and metadata.
+- Replace placeholder URLs such as `example.com` with MindVortex-appropriate URLs.
+- Include tasteful calls to action that fit an ADHD-friendly tone: low-pressure, clear, and specific.
+- Avoid overclaiming clinical outcomes.
+
+HTML and design requirements:
+- Output exactly one complete HTML5 document, starting with `<!DOCTYPE html>`.
+- Include all CSS in a single embedded `<style>` block.
+- Do not rely on external JavaScript, external CSS, external fonts, images, or frameworks.
+- Use semantic HTML: `header`, `main`, `article`, `section`, `aside`, `nav`, and `footer` where appropriate.
+- Keep the page responsive and readable on mobile.
+- Include accessible color contrast, clear focus states, skip link, descriptive headings, and useful ARIA only where it adds clarity.
+- Include SEO metadata, Open Graph metadata, Twitter metadata, canonical URL, and JSON-LD Article schema.
+- Use clean visual hierarchy with callout cards, comparison tables, checklists, and practical summary boxes.
+
+Quality bar:
+- Improve structure, clarity, specificity, persuasiveness, SEO readiness, and visual polish over the source article.
+- The final HTML should be substantial and publication-ready, not a short summary or partial rewrite.
+- The visible article body must be at least 2,800 words, excluding CSS, metadata, JSON-LD, and navigation chrome.
+- The result should be strong enough to hand to a designer or marketer as a credible starting page for MindVortex.
+
+Final output:
+- Publish the improved article as `final-article.html` using the available write/publish tool action.
+- Do not publish markdown as the final deliverable.
+- When passing HTML into a tool argument, keep the payload JSON-safe: avoid unnecessary backslash escape sequences in CSS/HTML, escape literal backslashes and quotes correctly, and retry with simpler CSS if the tool reports malformed JSON.
+- Keep the published file under the staging tool payload limit; if needed, simplify CSS before cutting article substance.
+- Do not end with intent-only text such as "I will create the article" or "Now I will write it"; actually write and publish the HTML artifact.
+- The final answer text may be brief, but only after the HTML artifact has been written through a tool action.

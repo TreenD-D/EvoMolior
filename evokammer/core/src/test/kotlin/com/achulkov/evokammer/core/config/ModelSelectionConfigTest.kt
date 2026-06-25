@@ -44,6 +44,7 @@ class ModelSelectionConfigTest {
         assertTrue(defaults[Role.Critic.name] in pools[Role.Critic.name]!!)
         assertTrue(defaults[Role.Archivist.name] in pools[Role.Archivist.name]!!)
         assertTrue(defaults[Role.Outlier.name] in pools[Role.Outlier.name]!!)
+        assertTrue(defaults[Role.PerspectiveTaker.name] in pools[Role.PerspectiveTaker.name]!!)
         assertTrue(defaults[Role.MetaPlanner.name] in pools[Role.MetaPlanner.name]!!)
     }
 
@@ -64,6 +65,7 @@ class ModelSelectionConfigTest {
         assertEquals("deepseek/deepseek-v4-flash", ModelSelectionConfig.DEFAULT_RUNTIME_CRITIC_MODEL)
         assertTrue(ModelSelectionConfig.runtimeModelPoolFor(Role.Researcher).contains("deepseek/deepseek-v4-flash"))
         assertTrue(ModelSelectionConfig.runtimeModelPoolFor(Role.Planner).contains("deepseek/deepseek-v3.2"))
+        assertTrue(ModelSelectionConfig.runtimeModelPoolFor(Role.PerspectiveTaker).contains("deepseek/deepseek-v3.2"))
         assertTrue(ModelSelectionConfig.runtimeModelPoolFor(Role.MetaPlanner).contains("deepseek/deepseek-v4-flash"))
         assertTrue(ModelSelectionConfig.defaultRuntimeModelPools().values.none { pool ->
             pool.contains("anthropic/claude-sonnet-4.6") ||
@@ -71,5 +73,23 @@ class ModelSelectionConfigTest {
                 pool.contains("nvidia/nemotron-3-nano-30b-a3b") ||
                 pool.contains("mistralai/mistral-small-creative")
         })
+    }
+
+    @Test
+    fun `fast runtime defaults avoid live-run tool-call incompatible models`() {
+        val assignments = FastModelSelectionConfig.fastRuntimeAssignments()
+
+        assertEquals("openai/gpt-oss-120b", assignments[Role.Builder.name])
+        assertEquals("deepseek/deepseek-v4-flash", assignments[Role.Researcher.name])
+        assertEquals("deepseek/deepseek-v4-flash", assignments[Role.Planner.name])
+        assertEquals("deepseek/deepseek-v4-flash", assignments[Role.Connector.name])
+        assertEquals("deepseek/deepseek-v4-flash", assignments[Role.PerspectiveTaker.name])
+        assertFalse(
+            "qwen/qwen3.5-flash-02-23" in FastModelSelectionConfig.approvedModelIds,
+            "Live fast runs showed qwen/qwen3.5-flash-02-23 produces invalid tool-call arguments through OpenRouter."
+        )
+        assertTrue(assignments.values.all { it in FastModelSelectionConfig.approvedModelIds })
+        assertTrue(FastModelSelectionConfig.approvedModelIds.contains("openai/gpt-oss-120b"))
+        assertTrue(FastModelSelectionConfig.approvedModelIds.contains("deepseek/deepseek-v4-flash"))
     }
 }

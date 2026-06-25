@@ -85,7 +85,8 @@ class GraderAgentFactory(
         canonSnapshot: String,
         modelOverride: String? = null,
         deathNoteProtocol: DeathNoteProtocol? = null,
-        previousFindings: String? = null
+        previousFindings: String? = null,
+        foundingBrief: String? = null
     ): GraderAgentContext {
         require(role.isGraderRole) { "GraderAgentFactory: role must be a grader role, got $role" }
 
@@ -115,7 +116,8 @@ class GraderAgentFactory(
             targetGroupId = targetGroupId,
             graderGroupId = graderGroupId,
             roundIndex = roundIndex,
-            previousGraderFindings = previousFindings
+            previousGraderFindings = previousFindings,
+            foundingBrief = foundingBrief
         )
 
         val toolRegistry = ToolRegistry {
@@ -262,7 +264,8 @@ class GraderAgentFactory(
         scoringDimensions: List<ScoringDimension>,
         modelOverride: String? = null,
         deathNoteProtocol: DeathNoteProtocol? = null,
-        previousCriteria: String? = null
+        previousCriteria: String? = null,
+        foundingBrief: String? = null
     ): GraderAgentContext {
         require(role == Role.GraderResearcher || role == Role.GraderBuilder) {
             "createCriteria: expected GraderResearcher or GraderBuilder, got $role"
@@ -291,7 +294,8 @@ class GraderAgentFactory(
             runObjective = runObjective,
             dimensionDescriptions = dimensionDescriptions,
             roundIndex = roundIndex,
-            previousCriteria = previousCriteria
+            previousCriteria = previousCriteria,
+            foundingBrief = foundingBrief
         )
 
         val toolRegistry = ToolRegistry {
@@ -394,7 +398,8 @@ class GraderAgentFactory(
         criteriaContext: String,
         allGroupSnapshots: Map<String, String>,
         modelOverride: String? = null,
-        deathNoteProtocol: DeathNoteProtocol? = null
+        deathNoteProtocol: DeathNoteProtocol? = null,
+        foundingBrief: String? = null
     ): GraderAgentContext {
         val agentId = "round-judge-${UUID.randomUUID().toString().take(8)}"
         val generation = roundIndex + 1
@@ -419,7 +424,8 @@ class GraderAgentFactory(
             dimensionDescriptions = dimensionDescriptions,
             criteriaContext = criteriaContext,
             allGroupSnapshots = allGroupSnapshots,
-            roundIndex = roundIndex
+            roundIndex = roundIndex,
+            foundingBrief = foundingBrief
         )
 
         val toolRegistry = ToolRegistry {

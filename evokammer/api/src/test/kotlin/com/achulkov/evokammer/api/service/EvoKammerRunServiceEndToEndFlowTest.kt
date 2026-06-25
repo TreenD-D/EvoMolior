@@ -612,8 +612,271 @@ class EvoKammerRunServiceEndToEndFlowTest {
         assertTrue(finalWriterAttempts.get() in 2..3)
         assertTrue(finalWriterModels.size >= 2)
         assertEquals("test-builder-model", finalWriterModels.elementAt(0))
-        assertEquals("test-archivist-model", finalWriterModels.elementAt(1))
+        assertEquals("test-builder-model", finalWriterModels.elementAt(1))
         assertTrue(sawRetryPrompt.get() >= 1)
+    }
+
+    @Test
+    fun `browser final writer retries html that violates objective minimum word count`() = runBlocking {
+        val tmpDir = createTempDirectory("svc-final-deliverable-min-words-test-").toFile()
+        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+        val runId = "run-final-deliverable-min-words"
+        val finalWriterAttempts = AtomicInteger(0)
+        val finalWriterModels = ConcurrentLinkedQueue<String>()
+
+        val service = EvoKammerRunService(
+            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
+                LifecycleManager(
+                    runId = runIdValue,
+                    groupId = groupIdValue,
+                    shuruVmManager = ShuruVmManager(),
+                    substrateDatabaseFactory = substrateFactory,
+                    agentJarPath = "/fake/agent.jar",
+                    openRouterApiKey = "sk-test",
+                    groupProfile = groupProfile,
+                    localAgentRunner = { bootContext: AgentBootContext, _ ->
+                        val db = substrateFactory.get(bootContext.runId, bootContext.groupId)
+                        val now = System.currentTimeMillis()
+                        when {
+                            bootContext.role == Role.Archivist &&
+                                bootContext.rolePrompt.contains("Round Submission Summariser") -> {
+                                db.stagingDao().insert(
+                                    StagingSubmissionEntity(
+                                        id = "summary-${bootContext.groupId}-$now",
+                                        agentId = bootContext.agentId,
+                                        role = bootContext.role.name,
+                                        type = "PLAN_UPDATE",
+                                        content = "ROUND SUBMISSION SUMMARY\n- Minimal summary for final writer.",
+                                        budgetSignature = "test-summary",
+                                        status = "pending",
+                                        generation = bootContext.generation,
+                                        groupId = bootContext.groupId,
+                                        runId = bootContext.runId,
+                                        submittedAtMs = now,
+                                        reviewedAtMs = null
+                                    )
+                                )
+                            }
+                            bootContext.role == Role.Builder &&
+                                bootContext.rolePrompt.contains("Final Deliverable Writer") -> {
+                                finalWriterModels += bootContext.modelAssignment
+                                val attempt = finalWriterAttempts.incrementAndGet()
+                                val body = if (attempt == 1) {
+                                    "one two"
+                                } else {
+                                    "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo"
+                                }
+                                db.stagingDao().insert(
+                                    StagingSubmissionEntity(
+                                        id = "final-${bootContext.groupId}-$now",
+                                        agentId = bootContext.agentId,
+                                        role = bootContext.role.name,
+                                        type = "DOC",
+                                        content = """
+                                            <!doctype html>
+                                            <html lang="en">
+                                            <head><meta charset="utf-8"><title>Minimum Words Article</title></head>
+                                            <body><main><article><h1>Minimum Words Article</h1><p>$body</p></article></main></body>
+                                            </html>
+                                        """.trimIndent(),
+                                        budgetSignature = "test-final",
+                                        status = "pending",
+                                        generation = bootContext.generation,
+                                        groupId = bootContext.groupId,
+                                        runId = bootContext.runId,
+                                        submittedAtMs = now,
+                                        reviewedAtMs = null
+                                    )
+                                )
+                            }
+                        }
+                    }
+                )
+            },
+            groupCoordinatorProvider = { groupIds, dimensions ->
+                GroupCoordinator(groupIds, dimensions)
+            },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = substrateFactory,
+            metaPlannerRunner = MetaPlannerRunner(),
+            roundHeartbeatIntervalMs = 1L,
+            inspectorCheckIntervalMs = 1L
+        )
+
+        service.startRun(
+            RunConfig(
+                runId = runId,
+                objective = "Create a standalone HTML article. The visible article body must be at least 20 words.",
+                groupCount = 2,
+                groupProfiles = listOf(
+                    GroupProfileType.Library,
+                    GroupProfileType.Factory
+                ),
+                rounds = 1,
+                roundDurationMinutes = 0,
+                maxAgentsPerGroup = 1,
+                scoringDimensions = listOf(
+                    ScoringDimension(
+                        id = "content_depth",
+                        name = "Content Depth",
+                        description = "Reward substantial content quality.",
+                        weight = 1.0
+                    )
+                ),
+                openRouterApiKey = "sk-test",
+                modelOverrides = mapOf(
+                    Role.Builder.name to "test-builder-model",
+                    Role.Archivist.name to "test-archivist-model"
+                ),
+                isTestRun = true
+            )
+        )
+
+        withTimeout(10_000) {
+            service.events.first { event ->
+                event is EvoKammerEvent.RunCompleted && event.runId == runId
+            }
+        }
+
+        val bundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
+        val finalArticle = assertNotNull(bundleEntries["outputs/final-article.html"])
+        assertTrue(finalArticle.contains("twentytwo"))
+        assertFalse(finalArticle.contains("<p>one two</p>"))
+        assertTrue(finalWriterAttempts.get() in 2..3)
+        assertEquals("test-builder-model", finalWriterModels.elementAt(0))
+        assertEquals("test-builder-model", finalWriterModels.elementAt(1))
+    }
+
+    @Test
+    fun `browser final writer retries source grounded html without evidence notes`() = runBlocking {
+        val tmpDir = createTempDirectory("svc-final-deliverable-evidence-test-").toFile()
+        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+        val runId = "run-final-deliverable-evidence"
+        val finalWriterAttempts = AtomicInteger(0)
+
+        val service = EvoKammerRunService(
+            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
+                LifecycleManager(
+                    runId = runIdValue,
+                    groupId = groupIdValue,
+                    shuruVmManager = ShuruVmManager(),
+                    substrateDatabaseFactory = substrateFactory,
+                    agentJarPath = "/fake/agent.jar",
+                    openRouterApiKey = "sk-test",
+                    groupProfile = groupProfile,
+                    localAgentRunner = { bootContext: AgentBootContext, _ ->
+                        val db = substrateFactory.get(bootContext.runId, bootContext.groupId)
+                        val now = System.currentTimeMillis()
+                        when {
+                            bootContext.role == Role.Archivist &&
+                                bootContext.rolePrompt.contains("Round Submission Summariser") -> {
+                                db.stagingDao().insert(
+                                    StagingSubmissionEntity(
+                                        id = "summary-${bootContext.groupId}-$now",
+                                        agentId = bootContext.agentId,
+                                        role = bootContext.role.name,
+                                        type = "PLAN_UPDATE",
+                                        content = "ROUND SUBMISSION SUMMARY\n- Evidence strategy summary.",
+                                        budgetSignature = "test-summary",
+                                        status = "pending",
+                                        generation = bootContext.generation,
+                                        groupId = bootContext.groupId,
+                                        runId = bootContext.runId,
+                                        submittedAtMs = now,
+                                        reviewedAtMs = null
+                                    )
+                                )
+                            }
+                            bootContext.role == Role.Builder &&
+                                bootContext.rolePrompt.contains("Final Deliverable Writer") -> {
+                                val attempt = finalWriterAttempts.incrementAndGet()
+                                val evidenceSection = if (attempt == 1) {
+                                    "<section><h2>Strategy</h2><p>Capture external cognition safely.</p></section>"
+                                } else {
+                                    """
+                                        <section>
+                                          <h2>Source-grounded evidence notes</h2>
+                                          <p>Digital interventions review: frame claims as productivity support, not treatment.</p>
+                                          <p>Inference: confidence labels should be tested in MVP experiments.</p>
+                                        </section>
+                                    """.trimIndent()
+                                }
+                                db.stagingDao().insert(
+                                    StagingSubmissionEntity(
+                                        id = "final-${bootContext.groupId}-$now",
+                                        agentId = bootContext.agentId,
+                                        role = bootContext.role.name,
+                                        type = "DOC",
+                                        content = """
+                                            <!doctype html>
+                                            <html lang="en">
+                                            <head><meta charset="utf-8"><title>Evidence Strategy</title></head>
+                                            <body><main><article><h1>Evidence Strategy</h1>$evidenceSection</article></main></body>
+                                            </html>
+                                        """.trimIndent(),
+                                        budgetSignature = "test-final",
+                                        status = "pending",
+                                        generation = bootContext.generation,
+                                        groupId = bootContext.groupId,
+                                        runId = bootContext.runId,
+                                        submittedAtMs = now,
+                                        reviewedAtMs = null
+                                    )
+                                )
+                            }
+                        }
+                    }
+                )
+            },
+            groupCoordinatorProvider = { groupIds, dimensions ->
+                GroupCoordinator(groupIds, dimensions)
+            },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = substrateFactory,
+            metaPlannerRunner = MetaPlannerRunner(),
+            roundHeartbeatIntervalMs = 1L,
+            inspectorCheckIntervalMs = 1L
+        )
+
+        service.startRun(
+            RunConfig(
+                runId = runId,
+                objective = "Create a research-grounded HTML strategy report with Source-grounded evidence notes. Do not invent citations.",
+                groupCount = 2,
+                groupProfiles = listOf(
+                    GroupProfileType.Library,
+                    GroupProfileType.Factory
+                ),
+                rounds = 1,
+                roundDurationMinutes = 0,
+                maxAgentsPerGroup = 1,
+                scoringDimensions = listOf(
+                    ScoringDimension(
+                        id = "evidence_fidelity",
+                        name = "Evidence Fidelity",
+                        description = "Reward source-grounded claims.",
+                        weight = 1.0
+                    )
+                ),
+                openRouterApiKey = "sk-test",
+                modelOverrides = mapOf(
+                    Role.Builder.name to "test-builder-model",
+                    Role.Archivist.name to "test-archivist-model"
+                ),
+                isTestRun = true
+            )
+        )
+
+        withTimeout(10_000) {
+            service.events.first { event ->
+                event is EvoKammerEvent.RunCompleted && event.runId == runId
+            }
+        }
+
+        val bundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
+        val finalArticle = assertNotNull(bundleEntries["outputs/final-article.html"])
+        assertTrue(finalArticle.contains("Source-grounded evidence notes"))
+        assertEquals(2, finalWriterAttempts.get())
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.achulkov.evokammer.api.service
 
 import com.achulkov.evokammer.core.contract.StartingField
+import com.achulkov.evokammer.core.contract.RunGraphEdge
 import com.achulkov.evokammer.api.model.RunConfig
 import com.achulkov.evokammer.competition.coordinator.GroupCoordinator
 import com.achulkov.evokammer.competition.grader.GraderGroupManager
@@ -66,6 +67,48 @@ class EvoKammerRunServiceStartingFieldSealTest {
         assertEquals(startingField.stageContents, decoded.stageContents)
         assertEquals(startingField.modelPools, decoded.modelPools)
         assertEquals(startingField.objective, decoded.objective)
+    }
+
+    @Test
+    fun `persistSealedStartingField preserves populated run graph edges`() = runTest {
+        val dataRoot = createTempDirectory("svc-starting-field-graph-seal-test-").toFile()
+        val factory = SubstrateDatabaseFactory(dataRoot)
+        val service = EvoKammerRunService(
+            lifecycleManagerProvider = { _, _, _, _, _ ->
+                throw IllegalStateException("LifecycleManager should not be constructed in this graph seal test")
+            },
+            groupCoordinatorProvider = { groupIds, dimensions -> GroupCoordinator(groupIds, dimensions) },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = factory,
+            metaPlannerRunner = MetaPlannerRunner()
+        )
+
+        val startingField = StartingField.default("seal graph content", runId = "run-graph-seal")
+            .copy(
+                runGraphEdges = listOf(
+                    RunGraphEdge(
+                        sourceRunId = "ancestor-run",
+                        targetRunId = "run-graph-seal",
+                        edgeType = "continuation",
+                        weight = 0.75
+                    )
+                ),
+                routedContextSummaries = listOf("high-level-run-log: ancestor headline")
+            )
+
+        val sealFn = service::class.declaredFunctions.first { it.name == "persistSealedStartingField" }.apply {
+            isAccessible = true
+        }
+        sealFn.callSuspend(service, "run-graph-seal", startingField)
+
+        val archiveDb = factory.get("run-graph-seal", "__meta_archive__")
+        val stored = archiveDb.metaArchiveDao().getByType("STARTING_FIELD")
+            .first { it.runId == "run-graph-seal" }
+        val decoded = Json { ignoreUnknownKeys = true }
+            .decodeFromString(StartingField.serializer(), stored.contentJson)
+
+        assertEquals(startingField.runGraphEdges, decoded.runGraphEdges)
+        assertEquals(startingField.routedContextSummaries, decoded.routedContextSummaries)
     }
 
     @Test

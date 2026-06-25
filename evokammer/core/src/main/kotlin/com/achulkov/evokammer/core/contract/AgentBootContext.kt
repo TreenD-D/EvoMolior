@@ -19,6 +19,7 @@ import kotlinx.serialization.Serializable
  * @param stagingMountPath Path to the write-only /staging mount inside the VM.
  * @param artifactsMountPath Path to the read-only run-artifacts mount inside the VM.
  * @param inputArtifacts Metadata for uploaded run-start context artifacts.
+ * @param startingField Original run seed for this civilisation, if available.
  * @param wipTaskClaim The WiP task claimed for this agent; null for Outliers.
  * @param legacyProtocol The Legacy Protocol injected as privileged context; null if not available.
  * @param stageDisclosure The current stage disclosure content (constraint-framed task description).
@@ -42,6 +43,7 @@ data class AgentBootContext(
     val stagingMountPath: String,
     val artifactsMountPath: String? = null,
     val inputArtifacts: List<RunInputArtifact> = emptyList(),
+    val startingField: StartingField? = null,
     val wipTaskClaim: WipTaskClaim?,
     val legacyProtocol: LegacyProtocolContext?,
     val stageDisclosure: String,

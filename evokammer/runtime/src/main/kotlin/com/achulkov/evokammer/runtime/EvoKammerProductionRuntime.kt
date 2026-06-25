@@ -61,8 +61,9 @@ fun createProductionRuntime(
     val substrateFactory = SubstrateDatabaseFactory(dataRootDir)
     val shuruVmManager = ShuruVmManager()
     val archiveService = RunArchiveService(substrateFactory)
+    lateinit var engineService: EvoKammerRunService
 
-    val engineService = EvoKammerRunService(
+    engineService = EvoKammerRunService(
         lifecycleManagerProvider = { runId, groupId, openRouterApiKey, agentJarPath, groupProfile ->
             Napier.i("EvoKammerRuntime: creating LifecycleManager for runId=$runId groupId=$groupId profile=${groupProfile.profileType}")
 
@@ -228,6 +229,7 @@ fun createProductionRuntime(
                 openRouterApiKey = openRouterApiKey,
                 substrateFactory = substrateFactory,
                 localAgentRunner = ::runGraderCriteriaAgent,
+                graderBudgetMultiplier = engineService.adversarialDiscriminatorBudgetMultiplier(runId),
                 graderModelOverride = graderModelId
             )
             criteriaRunner.runCriteriaPhase(
@@ -248,6 +250,7 @@ fun createProductionRuntime(
                 openRouterApiKey = openRouterApiKey,
                 substrateFactory = substrateFactory,
                 localAgentRunner = ::runGraderJudgeAgent,
+                graderBudgetMultiplier = engineService.adversarialDiscriminatorBudgetMultiplier(runId),
                 graderModelOverride = graderModelId
             )
             judgingRunner.runJudgingPhase(

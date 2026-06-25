@@ -1,7 +1,10 @@
 package com.achulkov.evokammer.agents.factory
 
 import com.achulkov.evokammer.core.contract.AgentBootContext
+import com.achulkov.evokammer.core.contract.DeliverableSkeletonTree
+import com.achulkov.evokammer.core.contract.StartingField
 import com.achulkov.evokammer.core.model.Role
+import kotlinx.serialization.json.Json
 
 /**
  * Assembles the system prompt for an agent based on its role, boot context, and Legacy Protocol.
@@ -14,6 +17,7 @@ import com.achulkov.evokammer.core.model.Role
  * 5. General EvoKammer instructions (norms, tool usage, death note reminder)
  */
 object RolePromptBuilder {
+    private val json = Json { ignoreUnknownKeys = true }
 
     /**
      * Builds the full system prompt for an agent.
@@ -31,7 +35,39 @@ object RolePromptBuilder {
         appendLine(bootContext.stageDisclosure)
         appendLine()
 
-        // 3. WiP task assignment
+        // 3. Original run seed (shared across all agent spawns in the run)
+        bootContext.startingField?.let { startingField ->
+            appendLine(renderStartingFieldContext(startingField))
+            appendLine()
+        }
+
+        // 4. Routed context from prior runs (attention-selected top-k artifacts)
+        bootContext.startingField?.routedContextSummaries
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { routedContextSummaries ->
+                appendLine("=== ROUTED CONTEXT ===")
+                routedContextSummaries.forEachIndexed { index, summary ->
+                    appendLine("[${index + 1}] ${summary}")
+                }
+                appendLine()
+            }
+
+        // 5. Run graph ancestry (graph/GNN-style run-node relationships)
+        bootContext.startingField?.runGraphEdges
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { runGraphEdges ->
+                appendLine("=== RUN GRAPH ===")
+                runGraphEdges.takeLast(12).forEach { edge ->
+                    val formattedWeight = String.format(java.util.Locale.ROOT, "%.2f", edge.weight)
+                    appendLine("${edge.sourceRunId} -[${edge.edgeType}, w=$formattedWeight]-> ${edge.targetRunId}")
+                }
+                if (runGraphEdges.size > 12) {
+                    appendLine("...[truncated]")
+                }
+                appendLine()
+            }
+
+        // 6. WiP task assignment
         val claim = bootContext.wipTaskClaim
         if (claim != null) {
             appendLine("=== YOUR ASSIGNED TASK ===")
@@ -48,9 +84,16 @@ object RolePromptBuilder {
             appendLine("Explore unconventional directions. Question assumptions. Propose heterodox ideas.")
             appendLine("Do not follow established patterns — you exist to find what others miss.")
             appendLine()
+        } else if (bootContext.role == Role.PerspectiveTaker) {
+            appendLine("=== YOUR ROLE: PERSPECTIVE TAKER ===")
+            appendLine("You are a Perspective Taker. You have no assigned task.")
+            appendLine("Read other agents' Death Notes, recent staging output, and coordination signals.")
+            appendLine("Surface missing viewpoints, stakeholder blind spots, and perspective mismatches.")
+            appendLine("Summarise what the group is not noticing, not just what it is doing.")
+            appendLine()
         }
 
-        // 4. Legacy Protocol (privileged context from previous generation's elite agents)
+        // 7. Legacy Protocol (privileged context from previous generation's elite agents)
         bootContext.legacyProtocol?.let { protocol ->
             appendLine("=== INHERITED WISDOM (Legacy Protocol — Generation ${protocol.extractedFromGeneration}) ===")
             appendLine("This is distilled knowledge from elite ${protocol.role.name} agents of previous generations.")
@@ -72,13 +115,93 @@ object RolePromptBuilder {
             }
         }
 
-        // 5. Operating norms — prefer dynamically-evolved norms from KB, fall back to universal defaults
+        // 8. Operating norms — prefer dynamically-evolved norms from KB, fall back to universal defaults
         appendLine("=== OPERATING NORMS ===")
         val norms = bootContext.dynamicNorms?.takeIf { it.isNotBlank() } ?: UNIVERSAL_NORMS
         appendLine(norms)
         appendLine()
         appendLine("=== TOOLS REMINDER ===")
         appendLine(TOOLS_REMINDER)
+    }
+
+    private fun renderStartingFieldContext(startingField: StartingField): String = buildString {
+        appendLine("=== ORIGINAL RUN SEED ===")
+        appendLine("Run ID: ${startingField.runId}")
+        appendLine("Objective: ${startingField.objective}")
+        appendLine("Group count: ${startingField.groupCount}")
+        appendLine("Topology: ${startingField.topologyKind.name} (${startingField.ringTopology.joinToString(" -> ")})")
+        appendLine("Generation ceiling: ${startingField.generationCeiling}")
+        appendLine("Budget ceiling: ${startingField.globalBudgetCeiling}")
+        appendLine("Check-in milestones: ${startingField.checkinMilestones.joinToString(", ")}")
+        appendLine("Leak interval: every ${startingField.leakIntervalGenerations} generations")
+        appendLine("Dispatch lag: ${startingField.dispatchLagGenerations} generations")
+        appendLine("Grader groups: ${startingField.graderGroupCount}")
+        appendLine(
+            "Seed artefacts: ${startingField.primordialKb.size} KB docs, " +
+                "${startingField.primordialKgFacts.size} KG facts, " +
+                "${startingField.primordialTools.size} tools, " +
+                "${startingField.inputArtifacts.size} input artifacts"
+        )
+        appendLine(
+            "Council outputs: ${startingField.rolePrompts.size} role prompts, " +
+                "${startingField.modelAssignment.size} model assignments, " +
+                "${startingField.modelPools.size} model pools"
+        )
+        if (startingField.continuedFromRunId != null) {
+            appendLine("Continues from run: ${startingField.continuedFromRunId}")
+        }
+        if (startingField.stageContents.isNotEmpty()) {
+            appendLine("Seeded stage disclosures: ${startingField.stageContents.size}")
+        }
+        if (startingField.consistencyReport.isNotBlank()) {
+            appendLine("Consistency report:")
+            appendLine(startingField.consistencyReport.take(1_000))
+            if (startingField.consistencyReport.length > 1_000) {
+                appendLine("...[truncated]")
+            }
+        }
+        renderTaskOwnershipMap(startingField)?.let { ownershipBlock ->
+            appendLine(ownershipBlock)
+            appendLine()
+        }
+        startingField.feedforwardLayer?.let { feedforwardLayer ->
+            appendLine("Feedforward layer: ${feedforwardLayer.layerLabel} (index=${feedforwardLayer.layerIndex})")
+            if (feedforwardLayer.upstreamRunIds.isNotEmpty()) {
+                appendLine("Layer upstream runs: ${feedforwardLayer.upstreamRunIds.joinToString(" -> ")}")
+            }
+            if (feedforwardLayer.layerObjective.isNotBlank()) {
+                appendLine("Layer objective: ${feedforwardLayer.layerObjective}")
+            }
+        }
+    }
+
+    private fun renderTaskOwnershipMap(startingField: StartingField): String? {
+        val raw = startingField.deliverableSkeletonTreeJson.trim()
+        if (raw.isBlank() || raw == "{}") return null
+
+        val tree = runCatching { json.decodeFromString(DeliverableSkeletonTree.serializer(), raw) }.getOrNull()
+            ?: return null
+        val summary = tree.summarize()
+        return buildString {
+            appendLine("=== TASK OWNERSHIP MAP ===")
+            appendLine(
+                "Ownership clarity: ${"%.2f".format(java.util.Locale.ROOT, summary.ownershipClarityScore)} " +
+                    "(unowned=${summary.unownedNodeCount}/${summary.totalNodes})"
+            )
+            if (summary.owningRoleCounts.isNotEmpty()) {
+                appendLine(
+                    "Role ownership counts: " +
+                        summary.owningRoleCounts.entries.joinToString(", ") { (role, count) -> "$role=$count" }
+                )
+            }
+            tree.nodes.take(8).forEach { node ->
+                val owner = node.owningRole ?: DeliverableSkeletonTree.defaultOwningRoleForNodeType(node.nodeType)
+                appendLine("- ${node.nodeId}: ${node.title} -> ${owner?.name ?: "UNOWNED"}")
+            }
+            if (tree.nodes.size > 8) {
+                appendLine("...[truncated]")
+            }
+        }
     }
 
     /**
@@ -107,16 +230,36 @@ object RolePromptBuilder {
         targetGroupId: String,
         @Suppress("UNUSED_PARAMETER") graderGroupId: String,
         roundIndex: Int,
-        previousGraderFindings: String? = null
+        previousGraderFindings: String? = null,
+        foundingBrief: String? = null
     ): String = buildString {
         appendLine(GRADER_ROLE_PROMPTS[graderRole] ?: GRADER_RESEARCHER_PROMPT)
         appendLine()
         appendLine("=== RUN OBJECTIVE ===")
         appendLine(runObjective)
         appendLine()
+        foundingBrief?.takeIf { it.isNotBlank() }?.let {
+            appendLine("=== GRADER FOUNDING BRIEF ===")
+            appendLine(it.take(2_000))
+            appendLine()
+        }
         appendLine("=== SCORING DIMENSIONS ===")
         appendLine("You must evaluate group '$targetGroupId' on all of these dimensions:")
         appendLine(dimensionDescriptions)
+        appendLine()
+        appendLine("=== PERSPECTIVE COVERAGE RUBRIC ===")
+        appendLine("""
+            Score how well the group's work models the relevant stakeholder perspectives.
+            Look for explicit acknowledgement of users, operators, maintainers, reviewers,
+            and any other objective-relevant parties. Penalise deliverables that overfit a
+            single viewpoint or omit obvious blind spots.
+
+            Perspective coverage signals:
+            - Does the work distinguish at least 2-3 materially different stakeholder views?
+            - Does it explain trade-offs from each important perspective?
+            - Does it call out missing viewpoints, constraints, or likely objections?
+            - Does it reconcile conflicts instead of flattening them?
+        """.trimIndent())
         appendLine()
         if (previousGraderFindings != null) {
             appendLine("=== PRIOR GRADER FINDINGS (build on these, don't repeat) ===")
@@ -214,8 +357,8 @@ object RolePromptBuilder {
     /**
      * Builds the system prompt for the final standalone deliverable writer.
      *
-     * The agent must synthesise a polished HTML5 document that can be persisted directly as the
-     * run's final downloadable article artifact.
+     * The agent must synthesise a polished HTML5 document from the winning group's shared work product,
+     * not from a single agent's freehand narrative, and persist it directly as the run's final downloadable article artifact.
      *
      * @param runObjective The run objective that defines the deliverable.
      * @param roundCount Number of completed rounds in the run.
@@ -229,7 +372,8 @@ object RolePromptBuilder {
         relativePath: String,
         mediaType: String,
         description: String,
-        attempt: Int = 1
+        attempt: Int = 1,
+        retryReason: String? = null
     ): String = buildString {
         val normalizedMediaType = mediaType.lowercase()
         if (normalizedMediaType.startsWith("text/html")) {
@@ -247,15 +391,22 @@ object RolePromptBuilder {
                 Required output:
                 - This agent must not finish with a chat-only answer.
                 - Your job is only complete if you persist the final file with write_staging(type="DOC", ...).
-                - First, optionally inspect the run via exactly one quick read tool call if needed.
+                - First, optionally inspect the run via at most two quick read tool calls if needed:
+                  one read_kb/read_kg call for the strongest group evidence and one read_run_artifact
+                  call for source-pack or uploaded context verification.
                 - Then write a staging entry with type="DOC".
                 - The content must begin with the exact text: <!doctype html>
+                - Tool arguments must remain valid JSON: avoid unnecessary backslash escape
+                  sequences in CSS/HTML, escape literal backslashes and quotes correctly, and
+                  retry with simpler CSS if the tool reports malformed JSON.
+                - Keep the single write_staging DOC content below 256KB. If needed, simplify CSS,
+                  metadata, and decorative copy before reducing the article's substantive body.
                 - Produce a complete HTML document with:
                   1. a strong title,
                   2. a meta description,
                   3. a viewport meta tag,
                   4. embedded <style> rules for polished visual presentation,
-                  5. semantic, accessible article markup,
+                  5. semantic, accessible article markup including a real <footer>,
                   6. a navigable structure with a clear header/hero plus at least 6 substantive sections,
                   7. polished body copy that fulfils the run objective,
                   8. no markdown fences, no commentary outside the HTML.
@@ -263,10 +414,20 @@ object RolePromptBuilder {
                 - Synthesize the strongest ideas that survived across the completed run. Reconcile
                   contradictions, remove filler, and publish the most compelling final version.
                 - Make the article feel substantial and publication-ready:
-                  - aim for roughly 1,200-2,000 words unless the objective explicitly demands brevity,
+                  - preserve and obey any explicit length, word-count, section-count, or completeness
+                    requirement from the run objective; those requirements override this prompt,
+                  - for long-form article objectives with no explicit word-count target, aim for
+                    roughly 2,500-4,000 visible body words,
                   - include a clear narrative arc, scannable subsections, and at least one callout,
                   - include a concrete CTA or next-step section when appropriate for the objective.
-                - Ground the deliverable in the group's available knowledge and the run objective.
+                - Ground the deliverable in the winning group's KB/KG/staging artefacts, the judge outputs, and the run objective.
+                - For research, benchmark, strategy, policy, medical-adjacent, legal-adjacent, or
+                  evidence-synthesis objectives, enforce source fidelity:
+                  1. include a visible "Evidence traceability" or "Source-grounded evidence notes" section,
+                  2. tie important claims to source-pack notes, uploaded artifacts, KB facts, or clearly label them as inference,
+                  3. do not invent citations, source names, URLs, statistics, or "proven" claims,
+                  4. downgrade unsupported implementation ideas to hypotheses or experiment candidates,
+                  5. preserve uncertainty and caveats from the source material.
                 - After write_staging succeeds, immediately call write_death_note.
                 - Do not end the run before write_staging succeeds.
                 - Then finish with write_death_note as your final action.
@@ -286,7 +447,9 @@ object RolePromptBuilder {
                 Required output:
                 - This agent must not finish with a chat-only answer.
                 - Your job is only complete if you persist the final file with write_staging(type="DOC", ...).
-                - First, optionally inspect the run via exactly one quick read tool call if needed.
+                - First, optionally inspect the run via at most two quick read tool calls if needed:
+                  one read_kb/read_kg call for the strongest group evidence and one read_run_artifact
+                  call for source-pack or uploaded context verification.
                 - Then write a staging entry with type="DOC".
                 - The DOC content must be the FULL file body only.
                 - Do not prepend wrappers, labels, or metadata headers.
@@ -295,7 +458,14 @@ object RolePromptBuilder {
                 - If the media type is JSON, the body must be valid JSON and should begin with `{` or `[`.
                 - If the media type is Markdown or plain text, write production-quality body copy.
                 - This is the FINAL publication artifact, not a terse summary.
-                - Ground the file in the group's available knowledge and the run objective.
+                - Ground the file in the winning group's KB/KG/staging artefacts, the judge outputs, and the run objective.
+                - For research, benchmark, strategy, policy, medical-adjacent, legal-adjacent, or
+                  evidence-synthesis objectives, enforce source fidelity:
+                  1. include an "Evidence traceability" or "Source-grounded evidence notes" section when the format allows,
+                  2. tie important claims to source-pack notes, uploaded artifacts, KB facts, or clearly label them as inference,
+                  3. do not invent citations, source names, URLs, statistics, or "proven" claims,
+                  4. downgrade unsupported implementation ideas to hypotheses or experiment candidates,
+                  5. preserve uncertainty and caveats from the source material.
                 - After write_staging succeeds, immediately call write_death_note.
                 - Do not end the run before write_staging succeeds.
                 - Then finish with write_death_note as your final action.
@@ -308,10 +478,13 @@ object RolePromptBuilder {
                 "This is retry attempt $attempt because a previous final-deliverable writer finished " +
                     "without persisting the required final output file."
             )
+            retryReason?.takeIf { it.isNotBlank() }?.let { reason ->
+                appendLine("Previous attempt rejection reason: $reason")
+            }
             appendLine(
-                "On this retry, prefer acting over exploration: perform at most one quick read, then " +
-                    "immediately call write_staging with the full final file content. Do not end with " +
-                    "analysis or a plain-text answer."
+                "On this retry, do not perform more exploratory reads. Immediately call write_staging " +
+                    "with the full final file content using your current context. Do not end with " +
+                    "analysis, intent text, or a plain-text answer."
             )
             appendLine()
         }
@@ -510,7 +683,8 @@ object RolePromptBuilder {
         runObjective: String,
         dimensionDescriptions: String,
         roundIndex: Int,
-        previousCriteria: String? = null
+        previousCriteria: String? = null,
+        foundingBrief: String? = null
     ): String = buildString {
         when (graderRole) {
             "GraderResearcher" -> appendLine(CRITERIA_RESEARCHER_PROMPT)
@@ -521,8 +695,28 @@ object RolePromptBuilder {
         appendLine("=== RUN OBJECTIVE ===")
         appendLine(runObjective)
         appendLine()
+        foundingBrief?.takeIf { it.isNotBlank() }?.let {
+            appendLine("=== GRADER FOUNDING BRIEF ===")
+            appendLine(it.take(2_000))
+            appendLine()
+        }
         appendLine("=== SCORING DIMENSIONS (develop criteria for ALL of these) ===")
         appendLine(dimensionDescriptions)
+        appendLine()
+        appendLine("=== PERSPECTIVE COVERAGE RUBRIC ===")
+        appendLine("""
+            Score how well the eventual judge will be able to model stakeholder perspectives.
+            The criteria you write should help the judge distinguish whether a group has
+            actually reasoned about users, operators, maintainers, reviewers, and other
+            objective-relevant parties or merely mentioned them superficially.
+
+            Perspective coverage signals:
+            - Does the rubric require at least 2-3 materially different stakeholder views?
+            - Does it reward explicit trade-offs from each important perspective and force
+              trade-off reconciliation where perspectives conflict?
+            - Does it penalise missing blind spots or one-sided narratives?
+            - Does it distinguish concrete stakeholder modeling from generic "consider users" prose?
+        """.trimIndent())
         appendLine()
         if (previousCriteria != null) {
             appendLine("=== PRIOR CRITERIA AGENT OUTPUT (refine and extend, do not repeat) ===")
@@ -568,13 +762,19 @@ object RolePromptBuilder {
         dimensionDescriptions: String,
         criteriaContext: String,
         allGroupSnapshots: Map<String, String>,
-        roundIndex: Int
+        roundIndex: Int,
+        foundingBrief: String? = null
     ): String = buildString {
         appendLine(ROUND_JUDGE_PROMPT)
         appendLine()
         appendLine("=== RUN OBJECTIVE ===")
         appendLine(runObjective)
         appendLine()
+        foundingBrief?.takeIf { it.isNotBlank() }?.let {
+            appendLine("=== GRADER FOUNDING BRIEF ===")
+            appendLine(it.take(2_000))
+            appendLine()
+        }
         appendLine("=== SCORING DIMENSIONS ===")
         appendLine(dimensionDescriptions)
         appendLine()
@@ -694,6 +894,8 @@ object RolePromptBuilder {
           NOTE: use "obj" not "object". Domain is required. Example: domain="science".
         - write_staging(type, content, wipTaskRef?, speculative?): Submit work for Critic review — costs 1
           Submission types: DOC, TOOL, FACT, PLAN_UPDATE, DISPATCH
+          DOC payloads must be valid JSON tool arguments. Escape literal backslashes and quotes;
+          avoid CSS/HTML escape tricks that create invalid JSON strings; keep content below 256KB.
         - emit_constraint(constraintId, description, appliesToType, condition, violationPenalty?, rationale?): Propose KG constraint — costs 2
           If you are working on an assigned task, include the task ID as wipTaskRef via the staging write path.
         - execute_tool(toolName, argsJson, toolVersion?): Execute a registered tool — costs 2-8

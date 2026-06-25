@@ -24,6 +24,7 @@ import com.achulkov.evokammer.competition.scoring.BlindSubmissionGate
 import com.achulkov.evokammer.competition.scoring.GroupRoundResult
 import com.achulkov.evokammer.competition.scoring.ScoringEngine
 import com.achulkov.evokammer.competition.scoring.FailureTelemetry
+import com.achulkov.evokammer.core.contract.GroupTopologyKind
 import com.achulkov.evokammer.sandbox.shuru.ShuruCheckResult
 import com.achulkov.evokammer.sandbox.shuru.ShuruVmManager
 import com.achulkov.evokammer.substrate.db.entity.EventLogEntryEntity
@@ -309,6 +310,67 @@ class EvoKammerRunServiceModeGatingTest {
     }
 
     @Test
+    fun `star topology from council field configures dispatch neighbours`() = runTest {
+        val tmpDir = createTempDirectory("svc-star-topology-test-").toFile()
+        val substrateFactory = com.achulkov.evokammer.substrate.SubstrateDatabaseFactory(tmpDir)
+        var capturedCoordinator: GroupCoordinator? = null
+        val service = EvoKammerRunService(
+            lifecycleManagerProvider = { _, _, _, _, _ ->
+                throw IllegalStateException("LifecycleManager should not be constructed after topology capture")
+            },
+            groupCoordinatorProvider = { groupIds, dimensions ->
+                GroupCoordinator(groupIds, dimensions).also { capturedCoordinator = it }
+            },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = substrateFactory,
+            metaPlannerRunner = MetaPlannerRunner(),
+            genesisCouncilRunner = { runId, objective, _, _ ->
+                com.achulkov.evokammer.core.contract.StartingField.default(
+                    objective = objective,
+                    runId = runId,
+                    groupCount = 2,
+                    groupProfilesMap = mapOf(
+                        "north" to com.achulkov.evokammer.core.model.GroupProfileType.Library,
+                        "south" to com.achulkov.evokammer.core.model.GroupProfileType.Factory
+                    )
+                ).copy(
+                    ringTopology = listOf("south", "north"),
+                    topologyKind = GroupTopologyKind.STAR
+                )
+            }
+        )
+
+        val config = com.achulkov.evokammer.api.model.RunConfig(
+            runId = "run-star-topology-test",
+            objective = "star topology test",
+            groupCount = 2,
+            groupProfiles = listOf(
+                com.achulkov.evokammer.core.model.GroupProfileType.Library,
+                com.achulkov.evokammer.core.model.GroupProfileType.Factory
+            ),
+            rounds = 1,
+            roundDurationMinutes = 1,
+            maxAgentsPerGroup = 1,
+            scoringDimensions = listOf(
+                ScoringDimension(
+                    id = "accuracy",
+                    name = "Accuracy",
+                    description = "Council topology should drive dispatch topology.",
+                    weight = 1.0
+                )
+            ),
+            openRouterApiKey = "sk-test"
+        )
+
+        runCatching { service.startRun(config) }
+
+        val coordinator = requireNotNull(capturedCoordinator) { "Coordinator should be created during startRun" }
+        assertEquals(listOf("south", "north"), coordinator.groupIds)
+        assertEquals(listOf("north"), coordinator.neighboursOf("south"))
+        assertEquals(listOf("south"), coordinator.neighboursOf("north"))
+    }
+
+    @Test
     fun `high severity inspector flag spawns a single auditor per group`() = runTest {
         val tmpDir = createTempDirectory("svc-auditor-test-").toFile()
         val substrateFactory = com.achulkov.evokammer.substrate.SubstrateDatabaseFactory(tmpDir)
@@ -471,6 +533,93 @@ class EvoKammerRunServiceModeGatingTest {
         )
 
         runCatching { service.abortRun(runId, "cleanup after live auditor regression") }
+    }
+
+    @Test
+    fun `turn-taking inspector flag spawns a perspective taker`() = runBlocking {
+        val tmpDir = createTempDirectory("svc-perspective-taker-test-").toFile()
+        val substrateFactory = com.achulkov.evokammer.substrate.SubstrateDatabaseFactory(tmpDir)
+        val service = EvoKammerRunService(
+            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
+                LifecycleManager(
+                    runId = runIdValue,
+                    groupId = groupIdValue,
+                    shuruVmManager = ShuruVmManager(),
+                    substrateDatabaseFactory = substrateFactory,
+                    agentJarPath = "/fake/agent.jar",
+                    openRouterApiKey = "sk-test",
+                    groupProfile = groupProfile,
+                    localAgentRunner = { _, _ -> }
+                )
+            },
+            groupCoordinatorProvider = { groupIds, dimensions ->
+                GroupCoordinator(groupIds, dimensions)
+            },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = substrateFactory,
+            metaPlannerRunner = MetaPlannerRunner(),
+            roundHeartbeatIntervalMs = 1_000L,
+            inspectorCheckIntervalMs = 1L
+        )
+
+        val spawnedRoles = mutableListOf<Role>()
+
+        val liveManagersField = service.javaClass.getDeclaredField("liveLifecycleManagers").apply {
+            isAccessible = true
+        }
+        @Suppress("UNCHECKED_CAST")
+        val liveManagers = liveManagersField.get(service) as MutableMap<String, LifecycleManager>
+        val manager = LifecycleManager(
+            runId = "run-perspective-taker",
+            groupId = "group-0",
+            shuruVmManager = ShuruVmManager(),
+            substrateDatabaseFactory = substrateFactory,
+            agentJarPath = "/fake/agent.jar",
+            openRouterApiKey = "sk-test",
+            groupProfile = GroupProfile.default(com.achulkov.evokammer.core.model.GroupProfileType.Library),
+            localAgentRunner = { _, _ -> }
+        )
+        manager.onAgentSpawned = { _, role, _ -> spawnedRoles += role }
+        liveManagers["group-0"] = manager
+
+        val config = com.achulkov.evokammer.api.model.RunConfig(
+            runId = "run-perspective-taker",
+            objective = "perspective taker spawn",
+            groupCount = 2,
+            groupProfiles = listOf(
+                com.achulkov.evokammer.core.model.GroupProfileType.Library,
+                com.achulkov.evokammer.core.model.GroupProfileType.Factory
+            ),
+            rounds = 1,
+            roundDurationMinutes = 1,
+            maxAgentsPerGroup = 1,
+            scoringDimensions = listOf(ScoringDimension(id = "d1", name = "d1", description = "d1", weight = 1.0)),
+            openRouterApiKey = "sk-test"
+        )
+
+        service.handleInspectorFlag(
+            config,
+            WatchdogSignal.InspectorFlag(
+                groupId = "group-0",
+                severity = WatchdogSeverity.MEDIUM,
+                description = "turn-taking imbalance detected in 1 recent flag(s)",
+                suggestedRole = Role.PerspectiveTaker
+            ),
+            listOf("group-0")
+        )
+        service.handleInspectorFlag(
+            config,
+            WatchdogSignal.InspectorFlag(
+                groupId = "group-0",
+                severity = WatchdogSeverity.MEDIUM,
+                description = "turn-taking imbalance detected in 1 recent flag(s)",
+                suggestedRole = Role.PerspectiveTaker
+            ),
+            listOf("group-0")
+        )
+
+        assertTrue(spawnedRoles.contains(Role.PerspectiveTaker))
+        assertEquals(1, spawnedRoles.count { it == Role.PerspectiveTaker })
     }
 
     @Test

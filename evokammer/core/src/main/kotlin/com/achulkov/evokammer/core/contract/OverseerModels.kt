@@ -303,3 +303,18 @@ data class OverseerKernelState(
     val experimentPlanHistory: Map<String, List<OverseerExperimentPlanHistoryEntry>> = emptyMap(),
     val deadEndHistory: Map<String, List<OverseerDeadEndHistoryEntry>> = emptyMap()
 )
+
+/**
+ * Forget-gate policy for the recursive self-improvement loop.
+ *
+ * Terminal entries that have stayed stale beyond [terminalRetentionMs] are removed from the
+ * active kernel snapshot, while their history remains archived in the audit trail.
+ *
+ * @param terminalRetentionMs How long terminal hypotheses may stay active before culling.
+ * @param maxRetainedTerminalHypotheses Hard cap for the number of terminal hypotheses to keep.
+ */
+@Serializable
+data class OverseerKernelRetentionPolicy(
+    val terminalRetentionMs: Long = 7L * 24L * 60L * 60L * 1000L,
+    val maxRetainedTerminalHypotheses: Int = 12
+)

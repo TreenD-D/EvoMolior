@@ -51,13 +51,16 @@ class EvolutionarySelector(
         Napier.d { "[$groupId] Signals for gen $generation: $signals" }
 
         val entries = buildAllocationEntries(generation, signals, stasisDetected, globalBudgetCeiling)
-        val rationale = buildRationale(signals, entries, stasisDetected)
+        val boundedEntries = enforceBoundedHeterogeneity(entries, globalBudgetCeiling)
+        val turnTakingBalancedEntries = enforceTurnTakingBalance(boundedEntries, globalBudgetCeiling)
+        val rationale = buildRationale(signals, turnTakingBalancedEntries, stasisDetected)
+        val diversityMetrics = roleDiversityMetrics(turnTakingBalancedEntries)
 
         val allocation = RoleAllocation(
             runId = runId,
             groupId = groupId,
             generation = generation,
-            entries = entries,
+            entries = turnTakingBalancedEntries,
             totalBudgetCeiling = globalBudgetCeiling,
             rationale = rationale
         )
@@ -65,7 +68,7 @@ class EvolutionarySelector(
         // A-2: Write a structured SELECTOR_DECISION event so post-mortem analysis can query
         // allocation history without relying solely on Napier log strings.
         runCatching {
-            val roleCountsJson = entries.joinToString(",") {
+            val roleCountsJson = turnTakingBalancedEntries.joinToString(",") {
                 """{"role":"${it.role.name}","count":${it.count},"budget":${it.budgetPerAgent}}"""
             }
             db.eventLogDao().insert(
@@ -83,6 +86,8 @@ class EvolutionarySelector(
                         append(""""stagingBacklog":${signals.stagingBacklog},"toolFailureRate":${signals.toolFailureRate},""")
                         append(""""unclaimedTasks":${signals.unclaimedTasks},"noRecentPromotions":${signals.noRecentPromotions},""")
                         append(""""deliverableOpenGaps":${signals.deliverableOpenGaps},"deliverableContested":${signals.deliverableContested},""")
+                        append(""""roleDiversityEntropy":${diversityMetrics?.entropy ?: 0.0},"roleDiversityNormalized":${diversityMetrics?.normalizedEntropy ?: 0.0},""")
+                        append(""""distinctRoleCount":${diversityMetrics?.distinctRoleCount ?: 0},"outlierShare":${diversityMetrics?.outlierShare ?: 0.0},""")
                         append(""""roleCounts":[$roleCountsJson],"rationale":"$escapedRationale"}""")
                     }
                 )
@@ -209,6 +214,33 @@ class EvolutionarySelector(
         return mutable
     }
 
+    internal fun enforceBoundedHeterogeneity(
+        entries: List<RoleAllocationEntry>,
+        budgetCeiling: Double,
+        maxOutliers: Int = 1,
+        minDistinctRoles: Int = 3
+    ): List<RoleAllocationEntry> {
+        val normalized = entries.toMutableList()
+
+        val outlierIndexes = normalized.withIndex()
+            .filter { it.value.role == Role.Outlier }
+            .map { it.index }
+        if (outlierIndexes.size > maxOutliers) {
+            outlierIndexes.drop(maxOutliers).reversed().forEach { normalized.removeAt(it) }
+        }
+
+        val distinctRoles = normalized.map { it.role }.toSet()
+        if (distinctRoles.size < minDistinctRoles && normalized.sumOf { it.count * it.budgetPerAgent } + profile.spawnBudget <= budgetCeiling) {
+            if (Role.Planner !in distinctRoles) {
+                normalized.add(RoleAllocationEntry(Role.Planner, 1, profile.spawnBudget * 1.5))
+            } else if (Role.Archivist !in distinctRoles) {
+                normalized.add(RoleAllocationEntry(Role.Archivist, 1, profile.spawnBudget))
+            }
+        }
+
+        return normalized
+    }
+
     private fun buildRationale(
         signals: SelectionSignals,
         entries: List<RoleAllocationEntry>,
@@ -225,6 +257,82 @@ class EvolutionarySelector(
         if (stasisDetected) append(", STASIS_DETECTED")
         append(" → allocating: ")
         append(entries.joinToString(", ") { "${it.count}x${it.role.name}" })
+    }
+
+    internal data class RoleDiversityMetrics(
+        val entropy: Double,
+        val normalizedEntropy: Double,
+        val distinctRoleCount: Int,
+        val outlierShare: Double
+    )
+
+    internal fun roleDiversityMetrics(entries: List<RoleAllocationEntry>): RoleDiversityMetrics? {
+        if (entries.isEmpty()) return null
+        val countsByRole = entries
+            .groupBy { it.role }
+            .mapValues { (_, roleEntries) -> roleEntries.sumOf { it.count } }
+            .filterValues { it > 0 }
+        val total = countsByRole.values.sum().toDouble()
+        if (total <= 0.0) return null
+
+        val shares = countsByRole.values.map { it / total }
+        val entropy = -shares.sumOf { share -> share * (kotlin.math.ln(share) / kotlin.math.ln(2.0)) }
+        val maxEntropy = kotlin.math.ln(shares.size.toDouble()) / kotlin.math.ln(2.0)
+        val normalizedEntropy = if (maxEntropy > 0.0) entropy / maxEntropy else 1.0
+        val outlierShare = countsByRole[Role.Outlier]?.div(total) ?: 0.0
+
+        return RoleDiversityMetrics(
+            entropy = entropy,
+            normalizedEntropy = normalizedEntropy,
+            distinctRoleCount = countsByRole.size,
+            outlierShare = outlierShare
+        )
+    }
+
+    internal fun enforceTurnTakingBalance(
+        entries: List<RoleAllocationEntry>,
+        budgetCeiling: Double,
+        maxDominantShare: Double = 0.55
+    ): List<RoleAllocationEntry> {
+        val mutable = entries.toMutableList()
+        if (mutable.size < 2) return mutable
+
+        while (true) {
+            val budgetsByRole = mutable
+                .groupBy { it.role }
+                .mapValues { (_, roleEntries) -> roleEntries.sumOf { entry -> entry.count * entry.budgetPerAgent } }
+                .filterValues { it > 0.0 }
+            val totalBudget = budgetsByRole.values.sum()
+            if (totalBudget <= 0.0) return mutable
+
+            val dominantEntry = budgetsByRole.maxBy { it.value }
+            val dominantShare = dominantEntry.value / totalBudget
+            if (dominantShare <= maxDominantShare) return mutable
+
+            val dominantIndex = mutable.indexOfLast { it.role == dominantEntry.key && it.count > 0 }
+            if (dominantIndex < 0) return mutable
+
+            val replacementRole = listOf(Role.Planner, Role.Archivist, Role.Connector, Role.Educator)
+                .firstOrNull { candidate -> candidate != dominantEntry.key }
+                ?: return mutable
+
+            val source = mutable[dominantIndex]
+            val replacement = RoleAllocationEntry(
+                role = replacementRole,
+                count = 1,
+                budgetPerAgent = source.budgetPerAgent
+            )
+            if (source.count <= 1) {
+                mutable.removeAt(dominantIndex)
+            } else {
+                mutable[dominantIndex] = source.copy(count = source.count - 1)
+            }
+            mutable.add(replacement)
+
+            if (mutable.sumOf { it.count * it.budgetPerAgent } > budgetCeiling) {
+                return mutable
+            }
+        }
     }
 
     private data class SelectionSignals(

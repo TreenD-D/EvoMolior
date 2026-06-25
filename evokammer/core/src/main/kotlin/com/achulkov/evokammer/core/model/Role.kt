@@ -47,6 +47,9 @@ enum class Role {
     /** Mortal LLM agent spawned on high-severity Inspector flags; can quarantine docs. */
     Auditor,
 
+    /** Mortal LLM agent spawned on coordination gaps; synthesises missing viewpoints. */
+    PerspectiveTaker,
+
     /** Mortal LLM agent with elevated group-wide read; rewrites Plan Registry on stasis. */
     MetaPlanner,
 
@@ -97,7 +100,8 @@ enum class Role {
 
     /** True if this is a standard civilisational role (Researcher, Builder, Planner, etc.). */
     val isCivilisationalRole: Boolean
-        get() = !isCouncilRole && !isGraderRole && this != Inspector && this != Auditor && this != MetaPlanner
+        get() = !isCouncilRole && !isGraderRole &&
+            this != Inspector && this != Auditor && this != PerspectiveTaker && this != MetaPlanner
 
     /** True if this role should never receive Legacy Protocols (per spec). */
     val receivesLegacyProtocol: Boolean
@@ -123,6 +127,7 @@ enum class Role {
             Archivist   -> setOf(Researcher)
             Educator    -> setOf(Researcher, Archivist)
             Connector   -> setOf(Researcher)
+            PerspectiveTaker -> setOf(Researcher, Archivist, Critic)
             MetaPlanner -> setOf(Planner, Researcher, Archivist)
             else        -> emptySet()
         }

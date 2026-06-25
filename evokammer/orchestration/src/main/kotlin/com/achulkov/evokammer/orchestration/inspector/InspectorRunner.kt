@@ -2,6 +2,7 @@ package com.achulkov.evokammer.orchestration.inspector
 
 import com.achulkov.evokammer.orchestration.watchdog.Watchdog
 import com.achulkov.evokammer.orchestration.watchdog.WatchdogSeverity
+import com.achulkov.evokammer.core.model.Role
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -96,6 +97,16 @@ class InspectorRunner(
                 severity = WatchdogSeverity.MEDIUM,
                 description = "Inspector: high spending rate ($expensiveCount/${events.size} expensive actions)",
                 suggestedRole = null
+            )
+        }
+
+        val turnTakingEvents = events.count { it.contains("turn_taking", ignoreCase = true) }
+        if (turnTakingEvents > 0) {
+            watchdog.raiseFlag(
+                groupId = groupId,
+                severity = WatchdogSeverity.MEDIUM,
+                description = "Inspector: turn-taking imbalance detected in $turnTakingEvents recent flag(s)",
+                suggestedRole = Role.PerspectiveTaker
             )
         }
     }

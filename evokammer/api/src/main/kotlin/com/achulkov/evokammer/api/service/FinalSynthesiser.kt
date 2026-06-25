@@ -105,6 +105,8 @@ class FinalSynthesiser(
             appendLine("- **Open gaps**: ${summary.openGapCount}")
             appendLine("- **Contested nodes**: ${summary.contestedNodeCount}")
             appendLine("- **Dead ends**: ${summary.deadEndCount}")
+            appendLine("- **Unowned nodes**: ${summary.unownedNodeCount}")
+            appendLine("- **Ownership clarity**: ${"%.2f".format(summary.ownershipClarityScore)}")
             appendLine("- **Max complexity**: ${summary.maxComplexityLevel}")
         }
 
@@ -128,6 +130,7 @@ class FinalSynthesiser(
             appendLine("=" .repeat(objective.length))
             appendLine()
             appendLine("Provenance: run=$runId group=$groupId version=${tree.version} nodes=${summary.totalNodes}")
+            appendLine("Ownership clarity: ${"%.2f".format(summary.ownershipClarityScore)} (unowned=${summary.unownedNodeCount})")
             appendLine()
 
             children.forEach { child ->
@@ -168,6 +171,8 @@ class FinalSynthesiser(
             appendLine("    \"openGapCount\": ${summary.openGapCount},")
             appendLine("    \"contestedNodes\": ${summary.contestedNodeCount},")
             appendLine("    \"deadEnds\": ${summary.deadEndCount},")
+            appendLine("    \"unownedNodes\": ${summary.unownedNodeCount},")
+            appendLine("    \"ownershipClarity\": ${summary.ownershipClarityScore},")
             appendLine("    \"maxComplexity\": ${summary.maxComplexityLevel}")
             appendLine("  },")
             appendLine("  \"nodes\": [")
@@ -205,6 +210,9 @@ class FinalSynthesiser(
             }
         }
 
+        builder.appendLine("> **Ownership**: ${node.owningRole?.name ?: "UNOWNED"}")
+        builder.appendLine()
+
         // Open gaps
         if (node.openGaps.isNotEmpty()) {
             builder.appendLine("**Open gaps:**")
@@ -213,6 +221,9 @@ class FinalSynthesiser(
             }
             builder.appendLine()
         }
+
+        builder.appendLine("> **Ownership**: ${node.owningRole?.name ?: "UNOWNED"}")
+        builder.appendLine()
 
         // Grading history (compact)
         val recentHistory = node.gradingHistory.takeLast(2)
@@ -258,6 +269,8 @@ class FinalSynthesiser(
             builder.appendLine("$indent  artefact: ${node.currentArtifactRef} trust=${"%.2f".format(node.trustScore)}")
         }
 
+        builder.appendLine("$indent  owner: ${node.owningRole?.name ?: "UNOWNED"}")
+
         node.children.forEach { childRef ->
             tree.nodes.firstOrNull { it.nodeId == childRef }?.let { child ->
                 renderPlaintextNode(tree, child, depth + 1, builder)
@@ -274,6 +287,7 @@ class FinalSynthesiser(
         append("\"trustScore\": ${node.trustScore},")
         append("\"artifactVersion\": ${node.artifactVersion},")
         append("\"artifactRef\": ${escapeJson(node.currentArtifactRef ?: "")},")
+        append("\"owningRole\": ${escapeJson(node.owningRole?.name ?: "")},")
         append("\"openGaps\": [${node.openGaps.joinToString(",") { escapeJson(it) }}],")
         append("\"graderComplexityLevel\": ${node.graderComplexityLevel},")
         append("\"gradingHistoryCount\": ${node.gradingHistory.size},")

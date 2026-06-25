@@ -15,6 +15,7 @@ import com.achulkov.evokammer.core.contract.OverseerHypothesisStatus
 import com.achulkov.evokammer.core.contract.OverseerKernelEligibility
 import com.achulkov.evokammer.core.contract.OverseerKernelAuditActionType
 import com.achulkov.evokammer.core.contract.OverseerKernelState
+import com.achulkov.evokammer.core.contract.OverseerKernelRetentionPolicy
 import com.achulkov.evokammer.core.contract.OverseerMutabilityLevel
 
 /**
@@ -183,6 +184,106 @@ class OverseerKernel(
             )
         )
     }
+
+    /**
+     * Applies the recurrent-loop forget gate to terminal hypotheses.
+     *
+     * The kernel keeps the learning signal in the history tables, but removes stale terminal
+     * hypotheses, their plans, schedules, and results from the active snapshot so the recurrent
+     * loop does not keep re-reading dead state forever.
+     *
+     * @param state Current kernel snapshot.
+     * @param nowMs Wall-clock time used for age comparisons.
+     * @param retentionPolicy Forget-gate policy.
+     * @return Updated kernel snapshot and the ids that were pruned.
+     */
+    fun compactTerminalState(
+        state: OverseerKernelState,
+        nowMs: Long = System.currentTimeMillis(),
+        retentionPolicy: OverseerKernelRetentionPolicy = OverseerKernelRetentionPolicy()
+    ): TerminalStateCompactionResult {
+        val terminalEntries = state.hypotheses.values
+            .filter { it.status in setOf(OverseerHypothesisStatus.REJECTED, OverseerHypothesisStatus.DEAD_END) }
+            .associateWith { hypothesis -> terminalAgeMs(state, hypothesis.id, nowMs) }
+
+        if (terminalEntries.isEmpty()) {
+            return TerminalStateCompactionResult(state = state)
+        }
+
+        val orderedTerminalHypotheses = terminalEntries.entries
+            .sortedWith(compareBy<Map.Entry<OverseerHypothesis, Long>> { it.value }.thenBy { it.key.id })
+
+        val staleByAge = orderedTerminalHypotheses
+            .filter { (_, ageMs) -> ageMs >= retentionPolicy.terminalRetentionMs }
+            .map { (hypothesis, _) -> hypothesis.id }
+            .toSet()
+
+        val overflowCount = (orderedTerminalHypotheses.size - retentionPolicy.maxRetainedTerminalHypotheses).coerceAtLeast(0)
+        val overflowIds = orderedTerminalHypotheses
+            .takeLast(overflowCount)
+            .map { (hypothesis, _) -> hypothesis.id }
+            .toSet()
+
+        val prunedHypothesisIds = (staleByAge + overflowIds).toSet()
+        if (prunedHypothesisIds.isEmpty()) {
+            return TerminalStateCompactionResult(state = state)
+        }
+
+        val retainedHypotheses = state.hypotheses - prunedHypothesisIds
+        val retainedPlans = state.experimentPlans.filterValues { plan -> plan.hypothesisId !in prunedHypothesisIds }
+        val retainedPlanIds = retainedPlans.keys
+        val retainedResults = state.experimentResults.filterKeys { planId -> planId in retainedPlanIds }
+        val retainedSchedules = state.experimentSchedules.filterKeys { planId -> planId in retainedPlanIds }
+        val retainedDeadEnds = state.deadEnds - prunedHypothesisIds
+
+        return TerminalStateCompactionResult(
+            state = state.copy(
+                hypotheses = retainedHypotheses,
+                experimentPlans = retainedPlans,
+                experimentResults = retainedResults,
+                experimentSchedules = retainedSchedules,
+                deadEnds = retainedDeadEnds
+            ),
+            prunedHypothesisIds = prunedHypothesisIds,
+            prunedExperimentPlanIds = state.experimentPlans.values
+                .filter { it.hypothesisId in prunedHypothesisIds }
+                .mapTo(linkedSetOf()) { it.id }
+        )
+    }
+
+    private fun terminalAgeMs(
+        state: OverseerKernelState,
+        hypothesisId: String,
+        nowMs: Long
+    ): Long {
+        val planIds = state.experimentPlans.values
+            .filter { it.hypothesisId == hypothesisId }
+            .mapTo(linkedSetOf()) { it.id }
+        val historyTimestamps = buildList {
+            state.deadEnds[hypothesisId]?.recordedAtMs?.let(::add)
+            state.deadEndHistory[hypothesisId].orEmpty().forEach { add(it.recordedAtMs) }
+            planIds.forEach { planId ->
+                state.experimentPlanHistory[planId].orEmpty().forEach { add(it.recordedAtMs) }
+                state.experimentResults[planId]?.recordedAtMs?.let(::add)
+                state.experimentSchedules[planId]?.launchedAtMs?.let(::add)
+            }
+        }
+        val latestTouchedAtMs = historyTimestamps.maxOrNull() ?: 0L
+        return (nowMs - latestTouchedAtMs).coerceAtLeast(0L)
+    }
+
+    /**
+     * Result of compacting terminal state.
+     *
+     * @param state Updated kernel snapshot.
+     * @param prunedHypothesisIds Terminal hypotheses removed from the active snapshot.
+     * @param prunedExperimentPlanIds Experiment plans removed along with those hypotheses.
+     */
+    data class TerminalStateCompactionResult(
+        val state: OverseerKernelState,
+        val prunedHypothesisIds: Set<String> = emptySet(),
+        val prunedExperimentPlanIds: Set<String> = emptySet()
+    )
 
     /**
      * Records the deterministic outcome of an experiment and updates the hypothesis lifecycle.

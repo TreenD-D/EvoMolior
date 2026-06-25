@@ -58,6 +58,7 @@ class GraderRunner(
     private val substrateFactory: SubstrateDatabaseFactory,
     private val localAgentRunner: suspend (context: GraderAgentContext) -> String,
     private val graderAgentTimeoutMs: Long = 4 * 60_000L,
+    private val graderBudgetMultiplier: Double = 1.0,
     private val graderModelOverride: String? = null
 ) {
     /**
@@ -103,7 +104,7 @@ class GraderRunner(
             val factory = GraderAgentFactory(
                 openRouterApiKey = openRouterApiKey,
                 graderDb = graderDb,
-                graderBudgetConfig = GRADER_BUDGET_CONFIG.copy(groupId = graderGroupId),
+                graderBudgetConfig = graderBudgetConfigFor(graderGroupId),
                 graderGroupId = graderGroupId,
                 onScoreSubmitted = { targetGroupId, score ->
                     collectedScores.getOrPut(targetGroupId) { mutableListOf() }.add(score)
@@ -199,7 +200,7 @@ class GraderRunner(
                         val factory = GraderAgentFactory(
                             openRouterApiKey = openRouterApiKey,
                             graderDb = graderDb,
-                            graderBudgetConfig = GRADER_BUDGET_CONFIG.copy(groupId = graderGroupId),
+                            graderBudgetConfig = graderBudgetConfigFor(graderGroupId),
                             graderGroupId = graderGroupId,
                             onScoreSubmitted = { _, _ -> /* Criteria agents never submit scores */ }
                         )
@@ -241,7 +242,8 @@ class GraderRunner(
                                 runObjective = runObjective,
                                 scoringDimensions = scoringDimensions,
                                 modelOverride = graderModelOverride,
-                                previousCriteria = previousCriteria
+                                previousCriteria = previousCriteria,
+                                foundingBrief = seedContext
                             )
                             val output = try {
                                 withProgressHeartbeat(
@@ -333,7 +335,7 @@ class GraderRunner(
                         val factory = GraderAgentFactory(
                             openRouterApiKey = openRouterApiKey,
                             graderDb = graderDb,
-                            graderBudgetConfig = GRADER_BUDGET_CONFIG.copy(groupId = graderGroupId),
+                            graderBudgetConfig = graderBudgetConfigFor(graderGroupId),
                             graderGroupId = graderGroupId,
                             onScoreSubmitted = { targetGroupId, score ->
                                 collectedScores.getOrPut(targetGroupId) { mutableListOf() }.add(score)
@@ -354,6 +356,7 @@ class GraderRunner(
                             emptyList()
                         }
                         val failureTelemetryContext = readFailureTelemetryContext(graderDb, runId, graderGroupId)
+                        val seedContext = readGraderSeedContext(graderDb, runId, graderGroupId)
                         val criteriaContext = buildJudgeCriteriaContext(
                             graderGroupId = graderGroupId,
                             roundIndex = roundIndex,
@@ -387,35 +390,22 @@ class GraderRunner(
                             onProgress?.invoke("[$graderGroupId] RoundJudge spawning for round $roundIndex — scoring $targetGroupId")
                             Napier.i("GraderRunner: spawning RoundJudge for $graderGroupId round=$roundIndex target=$targetGroupId")
 
-                            val judgeContext = factory.createRoundJudge(
+                            val judgeOutput = runRoundJudgeWithRetry(
+                                factory = factory,
                                 runId = runId,
                                 roundIndex = roundIndex,
                                 runObjective = runObjective,
                                 scoringDimensions = scoringDimensions,
                                 criteriaContext = criteriaContext,
-                                allGroupSnapshots = mapOf(targetGroupId to allGroupSnapshots.getValue(targetGroupId)),
-                                modelOverride = graderModelOverride
+                                targetGroupId = targetGroupId,
+                                targetSnapshot = allGroupSnapshots.getValue(targetGroupId),
+                                collectedScores = collectedScores,
+                                modelOverride = graderModelOverride,
+                                foundingBrief = seedContext,
+                                graderGroupId = graderGroupId,
+                                onProgress = onProgress
                             )
-
-                            val judgeOutput = try {
-                                withProgressHeartbeat(
-                                    onProgress = onProgress,
-                                    heartbeatMessage = "[$graderGroupId] RoundJudge still scoring round $roundIndex — $targetGroupId"
-                                ) {
-                                    withTimeout(graderAgentTimeoutMs) {
-                                        localAgentRunner(judgeContext)
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                Napier.w(
-                                    "GraderRunner: RoundJudge failed for $graderGroupId round=$roundIndex target=$targetGroupId: ${e.message}"
-                                )
-                                ""
-                            }
-                            judgeOutputs += buildString {
-                                append("[$targetGroupId] ")
-                                append(judgeOutput.ifBlank { "no judge narrative returned" })
-                            }
+                            judgeOutputs += "[$targetGroupId] ${judgeOutput.ifBlank { "no judge narrative returned" }}"
                         }
 
                         // Submit whatever scores were collected (even if judge partially failed)
@@ -423,7 +413,10 @@ class GraderRunner(
                         Napier.i("GraderRunner.judge [$graderGroupId] collected $totalScores scores from RoundJudge")
 
                         for (targetGroupId in competingGroupIds) {
-                            val scoresForGroup = collectedScores[targetGroupId] ?: emptyList()
+                            val scoresForGroup = deduplicateScoresByDimension(
+                                dimensions = scoringDimensions,
+                                scores = collectedScores[targetGroupId] ?: emptyList()
+                            )
                             if (scoresForGroup.isNotEmpty()) {
                                 graderGroupManager.submitScores(
                                     graderGroupId = graderGroupId,
@@ -448,6 +441,109 @@ class GraderRunner(
 
         Napier.i("GraderRunner: judging phase complete round=$roundIndex")
         return judgeOutputs
+    }
+
+    private suspend fun runRoundJudgeWithRetry(
+        factory: GraderAgentFactory,
+        runId: String,
+        roundIndex: Int,
+        runObjective: String,
+        scoringDimensions: List<ScoringDimension>,
+        criteriaContext: String,
+        targetGroupId: String,
+        targetSnapshot: String,
+        collectedScores: MutableMap<String, MutableList<DimensionScore>>,
+        modelOverride: String?,
+        foundingBrief: String?,
+        graderGroupId: String,
+        onProgress: ((String) -> Unit)?
+    ): String {
+        val outputs = mutableListOf<String>()
+        var attempt = 1
+        var dimensionsToScore = scoringDimensions
+
+        while (attempt <= 2 && dimensionsToScore.isNotEmpty()) {
+            val retryContext = if (attempt == 1) {
+                criteriaContext
+            } else {
+                buildString {
+                    appendLine(criteriaContext)
+                    appendLine()
+                    appendLine("=== RETRY REQUIRED: MISSING GRADING SCORES ===")
+                    appendLine("A previous RoundJudge attempt completed without submitting all required scores.")
+                    appendLine("Score only these missing dimensions for group `$targetGroupId`:")
+                    appendLine(dimensionsToScore.joinToString(", ") { it.id })
+                    appendLine("Call submit_grading_score once for each listed dimension before any final text.")
+                }
+            }
+
+            val judgeContext = factory.createRoundJudge(
+                runId = runId,
+                roundIndex = roundIndex,
+                runObjective = runObjective,
+                scoringDimensions = dimensionsToScore,
+                criteriaContext = retryContext,
+                allGroupSnapshots = mapOf(targetGroupId to targetSnapshot),
+                modelOverride = modelOverride,
+                foundingBrief = foundingBrief
+            )
+
+            val judgeOutput = try {
+                withProgressHeartbeat(
+                    onProgress = onProgress,
+                    heartbeatMessage = "[$graderGroupId] RoundJudge still scoring round $roundIndex — $targetGroupId"
+                ) {
+                    withTimeout(graderAgentTimeoutMs) {
+                        localAgentRunner(judgeContext)
+                    }
+                }
+            } catch (e: Exception) {
+                Napier.w(
+                    "GraderRunner: RoundJudge failed for $graderGroupId round=$roundIndex " +
+                        "target=$targetGroupId attempt=$attempt: ${e.message}"
+                )
+                ""
+            }
+            outputs += judgeOutput
+
+            val collectedDimensionIds = collectedScores[targetGroupId]
+                ?.map { it.dimensionId }
+                ?.toSet()
+                .orEmpty()
+            dimensionsToScore = scoringDimensions.filterNot { it.id in collectedDimensionIds }
+            if (dimensionsToScore.isNotEmpty() && attempt == 1) {
+                Napier.w(
+                    "GraderRunner.judge [$graderGroupId] missing scores for $targetGroupId " +
+                        "dimensions=${dimensionsToScore.joinToString(", ") { it.id }}; retrying once"
+                )
+            }
+            attempt += 1
+        }
+
+        if (dimensionsToScore.isNotEmpty()) {
+            val fallbackScores = dimensionsToScore.map { dimension ->
+                DimensionScore(
+                    dimensionId = dimension.id,
+                    rawScore = 50.0,
+                    justification = "Neutral fallback: RoundJudge did not submit a score for ${dimension.id} after retry."
+                )
+            }
+            collectedScores.getOrPut(targetGroupId) { mutableListOf() }.addAll(fallbackScores)
+            Napier.w(
+                "GraderRunner.judge [$graderGroupId] generated neutral fallback scores for " +
+                    "$targetGroupId dimensions=${dimensionsToScore.joinToString(", ") { it.id }}"
+            )
+        }
+
+        return outputs.filter { it.isNotBlank() }.joinToString(" | ")
+    }
+
+    private fun deduplicateScoresByDimension(
+        dimensions: List<ScoringDimension>,
+        scores: List<DimensionScore>
+    ): List<DimensionScore> {
+        val latestByDimension = scores.associateBy { it.dimensionId }
+        return dimensions.mapNotNull { latestByDimension[it.id] }
     }
 
     internal fun buildRoundJudgePrompt(
@@ -553,6 +649,16 @@ class GraderRunner(
                 appendLine("... $omittedCount older criteria entries omitted")
             }
         }
+    }
+
+    private fun graderBudgetConfigFor(graderGroupId: String): BudgetConfig {
+        val scaledProfile = GRADER_BUDGET_CONFIG.profile.copy(
+            spawnBudget = (GRADER_BUDGET_CONFIG.profile.spawnBudget * graderBudgetMultiplier).coerceAtLeast(1.0)
+        )
+        return GRADER_BUDGET_CONFIG.copy(
+            groupId = graderGroupId,
+            profile = scaledProfile
+        )
     }
 
     private fun formatCriteriaEntry(entry: StagingSubmissionEntity): String = buildString {

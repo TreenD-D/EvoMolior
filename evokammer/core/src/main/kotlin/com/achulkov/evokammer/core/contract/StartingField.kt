@@ -17,9 +17,12 @@ import kotlinx.serialization.Serializable
  * @param groupCount Number of competing groups.
  * @param groupProfiles Profile assignment per group (groupId → profile type).
  * @param ringTopology Ring topology of group IDs (ordered list defining the ring).
+ * @param topologyKind The inter-group message topology used by the competition layer.
  * @param checkinMilestones Generation numbers at which check-in gates open.
  * @param leakIntervalGenerations How many generations between automatic leak deliveries.
  * @param dispatchLagGenerations How many generations a dispatch sits in the relay before delivery.
+ * @param dispatchTopologyAdaptation Optional trust-aware graph rewiring policy for dispatch
+ *   routing. When present, the competition layer may prune low-trust edges at round boundaries.
  * @param graderGroupCount Number of Grader Group civilisations.
  * @param rolePrompts Role-specific system prompt templates keyed by [Role].
  * @param modelAssignment LLM model assignment keyed by [Role] (OpenRouter model strings).
@@ -44,6 +47,10 @@ import kotlinx.serialization.Serializable
  * @param sealedTestSuiteHash SHA-256 hash of the sealed test suite (for integrity verification).
  * @param norms Founding norms and coordination conventions injected into all role prompts.
  * @param stageContents Constraint-framed stage disclosure content per stage index.
+ * @param routedContextSummaries Top-k summaries routed from a prior completed run, if any.
+ * @param feedforwardLayer Optional explicit feedforward layer descriptor for layered run stacks.
+ * @param runGraphEdges Explicit ancestry edges between run-nodes. These let continuation runs
+ *   treat prior launches as a small graph rather than a single linear predecessor chain.
  * @param consistencyReport Human-readable report from the CouncilSynthesis describing the
  *   consistency check performed on all role outputs. Empty if the council was not invoked
  *   or if the synthesis did not produce one.
@@ -57,6 +64,8 @@ data class StartingField(
     val groupCount: Int,
     val groupProfiles: Map<String, GroupProfileType>,
     val ringTopology: List<String>,
+    val topologyKind: GroupTopologyKind = GroupTopologyKind.RING,
+    val dispatchTopologyAdaptation: DispatchTopologyAdaptationSpec? = null,
     val checkinMilestones: List<Int>,
     val leakIntervalGenerations: Int,
     val dispatchLagGenerations: Int,
@@ -80,6 +89,9 @@ data class StartingField(
     val sealedTestSuiteHash: String,
     val norms: String,
     val stageContents: List<String>,
+    val routedContextSummaries: List<String> = emptyList(),
+    val feedforwardLayer: FeedforwardLayerSpec? = null,
+    val runGraphEdges: List<RunGraphEdge> = emptyList(),
     /** Consistency report from CouncilSynthesis (B-3). Empty string for default/fallback fields. */
     val consistencyReport: String = ""
 ) {
@@ -119,6 +131,8 @@ data class StartingField(
                 groupCount = resolvedGroupCount,
                 groupProfiles = resolvedProfiles,
                 ringTopology = resolvedRing,
+                topologyKind = GroupTopologyKind.RING,
+                dispatchTopologyAdaptation = null,
                 checkinMilestones = listOf(10, 25, 50, 75, 100),
                 leakIntervalGenerations = 20,
                 dispatchLagGenerations = 5,
@@ -142,11 +156,78 @@ data class StartingField(
                 sealedTestSuiteHash = "",
                 norms = "",
                 stageContents = emptyList(),
+                routedContextSummaries = emptyList(),
+                feedforwardLayer = null,
+                runGraphEdges = emptyList(),
                 consistencyReport = ""
             )
         }
     }
 }
+
+/**
+ * Explicit descriptor for a feedforward layer in a layered run stack.
+ *
+ * @param layerIndex Zero-based depth in the feedforward stack.
+ * @param layerLabel Human-readable layer label such as `L1` or `L2`.
+ * @param upstreamRunIds Run IDs whose outputs are required for this layer.
+ * @param layerObjective Short description of the role of this layer in the stack.
+ */
+@Serializable
+data class FeedforwardLayerSpec(
+    val layerIndex: Int,
+    val layerLabel: String,
+    val upstreamRunIds: List<String> = emptyList(),
+    val layerObjective: String = ""
+) {
+    /**
+     * Returns the next feedforward layer descriptor in the stack.
+     *
+     * @param upstreamRunId Run that feeds this next layer.
+     * @return A descriptor for the next layer with the upstream chain extended.
+     */
+    fun nextLayer(upstreamRunId: String): FeedforwardLayerSpec = copy(
+        layerIndex = layerIndex + 1,
+        layerLabel = "L${layerIndex + 2}",
+        upstreamRunIds = (upstreamRunIds + upstreamRunId).distinct()
+    )
+}
+
+/**
+ * Trust-aware adaptation policy for dispatch graph rewiring.
+ *
+ * @param minimumTrustToRetain Minimum trust score required to keep an existing edge.
+ * @param maxRewiredNeighbours Maximum number of new non-base neighbours added when pruning.
+ */
+@Serializable
+data class DispatchTopologyAdaptationSpec(
+    val minimumTrustToRetain: Double = 0.45,
+    val maxRewiredNeighbours: Int = 1
+) {
+    init {
+        require(minimumTrustToRetain in 0.0..1.0) { "minimumTrustToRetain must be between 0.0 and 1.0" }
+        require(maxRewiredNeighbours >= 0) { "maxRewiredNeighbours must be >= 0" }
+    }
+}
+
+/**
+ * Directed edge in the run graph.
+ *
+ * Each edge captures a structural relationship between two run-nodes so continuation runs can
+ * reconstruct a small ancestry graph and route context through it.
+ *
+ * @param sourceRunId Upstream run-node.
+ * @param targetRunId Downstream run-node.
+ * @param edgeType Relationship label, such as `continuation`.
+ * @param weight Relative importance of the edge when traversing the graph.
+ */
+@Serializable
+data class RunGraphEdge(
+    val sourceRunId: String,
+    val targetRunId: String,
+    val edgeType: String = "continuation",
+    val weight: Double = 1.0
+)
 
 /** A seed KB document for primordial substrate population. */
 @Serializable

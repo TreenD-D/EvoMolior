@@ -64,9 +64,9 @@ class CliArgumentsTest {
                 "5",
                 "-debug",
                 "-model",
-                "RESEARCHER=qwen/qwen3.5-flash-02-23",
+                "RESEARCHER=deepseek/deepseek-v4-flash",
                 "-model",
-                "CRITIC=deepseek/deepseek-v4-flash"
+                "BUILDER=z-ai/glm-4.7-flash"
             )
         )
 
@@ -78,8 +78,8 @@ class CliArgumentsTest {
         assertTrue(options.debug)
         assertTrue(options.fast)
         assertEquals(5, options.rounds)
-        assertEquals("qwen/qwen3.5-flash-02-23", options.modelOverrides["RESEARCHER"])
-        assertEquals("deepseek/deepseek-v4-flash", options.modelOverrides["CRITIC"])
+        assertEquals("deepseek/deepseek-v4-flash", options.modelOverrides["RESEARCHER"])
+        assertEquals("z-ai/glm-4.7-flash", options.modelOverrides["BUILDER"])
     }
 
     @Test
@@ -294,6 +294,8 @@ class CliArgumentsTest {
         val followUpConfig = assertNotNull(fakeEngine.capturedConfigs.getOrNull(1))
         assertEquals("final-article.html", primaryConfig.finalOutputSpec?.relativePath)
         assertEquals("refined/final-article-refined.html", followUpConfig.finalOutputSpec?.relativePath)
+        assertTrue(followUpConfig.objective.contains("do not compress, summarize, or shorten"))
+        assertTrue(followUpConfig.objective.contains("source-grounded evidence notes"))
 
         val followUpArtifacts = followUpConfig.contextArtifacts.map { it.relativePath }.toSet()
         assertTrue("previous-stage/results.zip" in followUpArtifacts)
@@ -718,6 +720,50 @@ class CliArgumentsTest {
         assertNotNull(options)
         assertTrue(options.fast)
         assertTrue(options.modelOverrides.values.all { it in FastModelSelectionConfig.approvedModelIds })
+    }
+
+    @Test
+    fun `fast mode parser accepts updated builder default and rejects failed qwen worker model`() {
+        val inputDir = createTempDirectory("cli-input-").toFile()
+        val outputDir = createTempDirectory("cli-output-").toFile()
+
+        val accepted = CliArguments.parse(
+            arrayOf(
+                "-prompt",
+                "Fast mode model test",
+                "-input",
+                inputDir.absolutePath,
+                "-output",
+                outputDir.absolutePath,
+                "-openrouter-api-key",
+                "sk-test",
+                "-fast",
+                "-model",
+                "Builder=${FastModelSelectionConfig.FAST_RUNTIME_BUILDER_MODEL}"
+            )
+        )
+
+        assertNotNull(accepted)
+        assertEquals("openai/gpt-oss-120b", accepted.modelOverrides["Builder"])
+
+        val error = assertFailsWith<CliUsageException> {
+            CliArguments.parse(
+                arrayOf(
+                    "-prompt",
+                    "Fast mode model test",
+                    "-input",
+                    inputDir.absolutePath,
+                    "-output",
+                    outputDir.absolutePath,
+                    "-openrouter-api-key",
+                    "sk-test",
+                    "-fast",
+                    "-model",
+                    "Researcher=qwen/qwen3.5-flash-02-23"
+                )
+            )
+        }
+        assertTrue(error.message.orEmpty().contains("Fast mode only allows"))
     }
 
     @Test

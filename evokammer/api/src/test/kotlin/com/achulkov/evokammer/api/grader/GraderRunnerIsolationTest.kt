@@ -37,7 +37,7 @@ class GraderRunnerIsolationTest {
                         content = "grader criteria for ${context.targetGroupId}",
                         budgetSignature = "system:grader-criteria",
                         status = "promoted",
-                        generation = context.roundIndex,
+                        generation = context.roundIndex + 1,
                         groupId = graderGroupId,
                         runId = runId,
                         submittedAtMs = 1_000L,
@@ -68,6 +68,7 @@ class GraderRunnerIsolationTest {
         val competingRows = competingDb.stagingDao().getAll(runId, competingGroupId)
 
         assertEquals(2, graderRows.count { it.type == "PLAN_UPDATE" })
+        assertTrue(graderRows.all { it.generation == 1 })
         assertTrue(
             competingRows.none { it.type == "PLAN_UPDATE" },
             "Criteria-phase writes must not leak into the competing group's substrate"

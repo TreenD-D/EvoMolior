@@ -8,6 +8,7 @@ import com.achulkov.evokammer.core.contract.DeliverableSkeletonNodeUpdate
 import com.achulkov.evokammer.core.contract.DeliverableSkeletonTree
 import com.achulkov.evokammer.core.contract.StartingField
 import com.achulkov.evokammer.core.model.GroupProfileType
+import com.achulkov.evokammer.core.model.Role
 import com.achulkov.evokammer.substrate.DeliverableSkeletonTreeStore
 import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
 import kotlinx.serialization.json.Json
@@ -42,7 +43,8 @@ class DeliverableSkeletonTreeStoreTest {
                     nodeId = "dst:doc:intro",
                     parentId = DeliverableSkeletonTree.DEFAULT_ROOT_NODE_ID,
                     title = "Introduction",
-                    nodeType = DeliverableSkeletonNodeType.DOCUMENT_SECTION
+                    nodeType = DeliverableSkeletonNodeType.DOCUMENT_SECTION,
+                    owningRole = Role.Researcher
                 )
             )
         )
@@ -70,7 +72,8 @@ class DeliverableSkeletonTreeStoreTest {
                 artifactType = DeliverableArtifactType.KB_DOC,
                 trustScore = 0.9,
                 owningGeneration = 2,
-                owningAgentId = "agent-1"
+                owningAgentId = "agent-1",
+                owningRole = Role.Researcher
             )
         )
 
@@ -80,6 +83,7 @@ class DeliverableSkeletonTreeStoreTest {
         assertEquals("kb:123", updatedNode.currentArtifactRef)
         assertTrue(updatedNode.openGaps.contains("Add a closing summary"))
         assertEquals(1, updatedNode.gradingHistory.size)
+        assertEquals(Role.Researcher, updatedNode.owningRole)
         assertEquals(2, updated.version)
     }
 }

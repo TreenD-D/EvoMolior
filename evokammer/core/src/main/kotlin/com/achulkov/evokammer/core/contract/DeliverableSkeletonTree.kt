@@ -1,5 +1,6 @@
 package com.achulkov.evokammer.core.contract
 
+import com.achulkov.evokammer.core.model.Role
 import kotlinx.serialization.Serializable
 
 /**
@@ -35,7 +36,10 @@ data class DeliverableSkeletonTree(
         }
         val openGaps = nodes.sumOf { it.openGaps.size }
         val trustValues = nodes.map { it.trustScore }
+        val owningRoles = nodes.mapNotNull { it.owningRole }
+        val owningRoleCounts = owningRoles.groupingBy { it }.eachCount()
         val averageTrust = if (trustValues.isEmpty()) 0.0 else trustValues.average()
+        val ownershipClarityScore = if (nodes.isEmpty()) 0.0 else owningRoles.size.toDouble() / nodes.size.toDouble()
         return DeliverableSkeletonTreeSummary(
             runId = runId,
             groupId = groupId,
@@ -44,6 +48,9 @@ data class DeliverableSkeletonTree(
             openGapCount = openGaps,
             contestedNodeCount = nodes.count { it.status == DeliverableSkeletonNodeStatus.CONTESTED },
             deadEndCount = nodes.count { it.status == DeliverableSkeletonNodeStatus.DEAD_END },
+            unownedNodeCount = nodes.count { it.owningRole == null },
+            owningRoleCounts = owningRoleCounts,
+            ownershipClarityScore = ownershipClarityScore,
             averageTrustScore = averageTrust,
             maxComplexityLevel = nodes.maxOfOrNull { it.graderComplexityLevel } ?: 0
         )
@@ -89,6 +96,7 @@ data class DeliverableSkeletonTree(
                 artifactType = DeliverableArtifactType.OTHER,
                 owningGeneration = 0,
                 owningAgentId = null,
+                owningRole = defaultOwningRoleForNodeType(DeliverableSkeletonNodeType.ROOT),
                 trustScore = 0.0,
                 graderComplexityLevel = 1,
                 gradingHistory = emptyList(),
@@ -102,12 +110,13 @@ data class DeliverableSkeletonTree(
             val nodes = buildList {
                 add(root)
                 entries.forEachIndexed { index, entry ->
+                    val nodeType = DeliverableSkeletonTreeJson.parseNodeType(entry.nodeType)
                     add(
                         DeliverableSkeletonNode(
                             nodeId = entry.nodeId,
                             parentId = DEFAULT_ROOT_NODE_ID,
                             children = emptyList(),
-                            nodeType = DeliverableSkeletonTreeJson.parseNodeType(entry.nodeType),
+                            nodeType = nodeType,
                             title = entry.title.ifBlank { entry.nodeId },
                             pathHint = entry.pathHint,
                             status = DeliverableSkeletonNodeStatus.STUB,
@@ -116,6 +125,7 @@ data class DeliverableSkeletonTree(
                             artifactType = DeliverableArtifactType.OTHER,
                             owningGeneration = 0,
                             owningAgentId = null,
+                            owningRole = defaultOwningRoleForNodeType(nodeType),
                             trustScore = 0.0,
                             graderComplexityLevel = entry.expectedComplexityLevel ?: (index % 3) + 1,
                             gradingHistory = emptyList(),
@@ -135,6 +145,24 @@ data class DeliverableSkeletonTree(
                 nodes = nodes
             )
         }
+
+        /**
+         * Returns the default owner role for a given node type.
+         *
+         * This keeps the deliverable skeleton explicitly owned even before agents start
+         * claiming work, which improves role clarity for decomposition-heavy tasks.
+         */
+        fun defaultOwningRoleForNodeType(nodeType: DeliverableSkeletonNodeType): Role? = when (nodeType) {
+            DeliverableSkeletonNodeType.ROOT -> Role.Planner
+            DeliverableSkeletonNodeType.DOCUMENT_SECTION -> Role.Researcher
+            DeliverableSkeletonNodeType.SOURCE_FILE -> Role.Builder
+            DeliverableSkeletonNodeType.TOOL -> Role.Builder
+            DeliverableSkeletonNodeType.TEST_SUITE -> Role.Critic
+            DeliverableSkeletonNodeType.API_SPEC -> Role.Builder
+            DeliverableSkeletonNodeType.ARTIFACT_BUNDLE -> Role.Planner
+            DeliverableSkeletonNodeType.DATASET -> Role.Researcher
+            DeliverableSkeletonNodeType.OTHER -> Role.Planner
+        }
     }
 }
 
@@ -148,6 +176,9 @@ data class DeliverableSkeletonTree(
  * @param openGapCount Total open gaps across all nodes.
  * @param contestedNodeCount Number of contested nodes.
  * @param deadEndCount Number of dead-end nodes.
+ * @param unownedNodeCount Number of nodes without an explicit owning role.
+ * @param owningRoleCounts Count of nodes by owning role.
+ * @param ownershipClarityScore Fraction of nodes with an explicit owning role.
  * @param averageTrustScore Average trust score across nodes.
  * @param maxComplexityLevel Highest rubric complexity seen in the tree.
  */
@@ -160,6 +191,9 @@ data class DeliverableSkeletonTreeSummary(
     val openGapCount: Int,
     val contestedNodeCount: Int,
     val deadEndCount: Int,
+    val unownedNodeCount: Int,
+    val owningRoleCounts: Map<Role, Int>,
+    val ownershipClarityScore: Double,
     val averageTrustScore: Double,
     val maxComplexityLevel: Int
 )
@@ -179,6 +213,7 @@ data class DeliverableSkeletonTreeSummary(
  * @param artifactType Type of the current artefact.
  * @param owningGeneration Generation that most recently claimed this node.
  * @param owningAgentId Agent that most recently claimed this node.
+ * @param owningRole Role primarily responsible for this node.
  * @param trustScore Current trust score.
  * @param graderComplexityLevel Current rubric complexity level.
  * @param gradingHistory Recent grading history, newest last.
@@ -202,6 +237,7 @@ data class DeliverableSkeletonNode(
     val artifactType: DeliverableArtifactType = DeliverableArtifactType.OTHER,
     val owningGeneration: Int = 0,
     val owningAgentId: String? = null,
+    val owningRole: Role? = null,
     val trustScore: Double = 0.0,
     val graderComplexityLevel: Int = 1,
     val gradingHistory: List<DeliverableNodeGradeHistoryEntry> = emptyList(),
@@ -250,6 +286,7 @@ data class DeliverableNodeGradeHistoryEntry(
  * @param trustScore Optional updated trust score.
  * @param owningGeneration Optional updated generation.
  * @param owningAgentId Optional updated agent.
+ * @param owningRole Optional updated owning role.
  */
 @Serializable
 data class DeliverableSkeletonNodeUpdate(
@@ -265,7 +302,8 @@ data class DeliverableSkeletonNodeUpdate(
     val artifactType: DeliverableArtifactType? = null,
     val trustScore: Double? = null,
     val owningGeneration: Int? = null,
-    val owningAgentId: String? = null
+    val owningAgentId: String? = null,
+    val owningRole: Role? = null
 )
 
 /** Compact node type used in the skeleton tree. */

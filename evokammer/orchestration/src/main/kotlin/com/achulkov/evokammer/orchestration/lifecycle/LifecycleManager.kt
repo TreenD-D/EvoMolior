@@ -5,6 +5,7 @@ import com.achulkov.evokammer.core.contract.BlockingAgentAbortException
 import com.achulkov.evokammer.core.contract.AgentBootContext
 import com.achulkov.evokammer.core.contract.RunInputArtifact
 import com.achulkov.evokammer.core.contract.RoleAllocation
+import com.achulkov.evokammer.core.contract.StartingField
 import com.achulkov.evokammer.core.contract.WipTaskClaim
 import com.achulkov.evokammer.core.config.ModelSelectionConfig
 import com.achulkov.evokammer.core.model.AgentStatus
@@ -119,6 +120,8 @@ class LifecycleManager(
     private val activeNestedGroupJobs = ConcurrentHashMap<String, Job>()
     private val refundedBudgetByAgent = ConcurrentHashMap<String, Double>()
     private val ipcPortCounter = AtomicInteger(ipcPortBase)
+    private var lastTurnTakingImbalanceSignature: String? = null
+    private var startingField: StartingField? = null
 
     private val _agentStates = MutableStateFlow<Map<String, AgentState>>(emptyMap())
     @Suppress("unused") // consumed by UI / Watchdog via the public StateFlow
@@ -134,6 +137,15 @@ class LifecycleManager(
      * When true, Shuru VMs are not required.
      */
     val usesInProcessMode: Boolean get() = localAgentRunner != null
+
+    /**
+     * Configures the original run seed that should be propagated into every agent boot context.
+     *
+     * @param startingField The canonical run seed, or null to clear the current value.
+     */
+    fun configureStartingField(startingField: StartingField?) {
+        this.startingField = startingField
+    }
 
     /**
      * Called when a Shuru VM spawn fails.
@@ -225,6 +237,8 @@ class LifecycleManager(
                 }
             }
         }
+
+        maybeEmitTurnTakingImbalanceSignal(allocation)
 
         // Start budget monitoring loop if not already running
         if (budgetMonitorJob?.isActive != true) {
@@ -358,7 +372,9 @@ class LifecycleManager(
                     gracePeriodSeconds = gracePeriodSeconds,
                     budgetPollingIntervalMs = budgetPollingIntervalMs,
                     ipcPortBase = ipcPortCounter.getAndAdd(100)
-                )
+                ).also { nestedLifecycleManager ->
+                    nestedLifecycleManager.configureStartingField(startingField)
+                }
             }
         )
 
@@ -604,6 +620,7 @@ class LifecycleManager(
             generation = generation,
             gracePeriodSeconds = gracePeriodSeconds,
             dynamicNorms = dynamicNorms,
+            startingField = startingField,
             // Carry the exact per-agent allocation so both in-process and Shuru runners
             // initialise BudgetLedger with the amount the selector intended.
             allocatedBudget = budgetPerAgent,
@@ -664,11 +681,14 @@ class LifecycleManager(
                 job = agentJob,
                 status = AgentStatus.Active,
                 generation = generation,
+                role = role,
+                allocatedBudget = budgetPerAgent,
                 budgetRemaining = budgetPerAgent,
                 budgetLedger = null,  // will be set by the runner callback above
                 wipTaskClaim = wipClaim
             )
             updateAgentStates()
+            maybeEmitTurnTakingImbalanceSignal()
             emitEvent(EventTypes.AGENT_SPAWN, agentId, generation, buildSpawnPayload(agentId, role, generation))
             onAgentSpawned(agentId, role, modelAssignment)
             Napier.i { "[$groupId] Launched in-process agent: $agentId (${role.name}) model=$modelAssignment" }
@@ -713,11 +733,14 @@ class LifecycleManager(
                 job = null,
                 status = AgentStatus.Active,
                 generation = generation,
+                role = role,
+                allocatedBudget = budgetPerAgent,
                 budgetRemaining = budgetPerAgent,
                 budgetLedger = null,  // Shuru VM agents manage their own ledger internally
                 wipTaskClaim = wipClaim
             )
             updateAgentStates()
+            maybeEmitTurnTakingImbalanceSignal()
             emitEvent(EventTypes.AGENT_SPAWN, agentId, generation, buildSpawnPayload(agentId, role, generation))
             onAgentSpawned(agentId, role, modelAssignment)
             Napier.i { "[$groupId] Spawned Shuru VM agent: $agentId (${role.name}) model=$modelAssignment" }
@@ -772,6 +795,7 @@ class LifecycleManager(
             if (totalBudgetChanged) {
                 val totalRemaining = liveAgents.values.sumOf { it.budgetLedger?.balance ?: it.budgetRemaining }
                 onBudgetChanged(totalRemaining)
+                maybeEmitTurnTakingImbalanceSignal()
                 updateAgentStates()
             }
         }
@@ -894,6 +918,7 @@ class LifecycleManager(
             // Emit updated group budget after agent exit
             val totalRemaining = totalRemainingBudget()
             onBudgetChanged(totalRemaining)
+            maybeEmitTurnTakingImbalanceSignal()
 
             Napier.i { "[$groupId] Agent $agentId exited (wasKilled=$wasKilled, inProcess=${entry.job != null})" }
         }
@@ -926,6 +951,146 @@ class LifecycleManager(
         }
     }
 
+    /**
+     * Emits an inspector flag when one role dominates the live spent budget.
+     *
+     * This operationalises the roadmap's equal turn-taking constraint with a concrete signal:
+     * if one role accounts for most of the active budget allocation or consumption while at
+     * least two roles are making progress, the run is probably over-concentrated.
+     */
+    private suspend fun maybeEmitTurnTakingImbalanceSignal(allocation: RoleAllocation? = null) {
+        val allocationSignal = allocation?.let {
+            val budgetByRole = it.entries
+                .groupBy { entry -> entry.role }
+                .mapValues { (_, entries) -> entries.sumOf { entry -> entry.count * entry.budgetPerAgent } }
+                .filterValues { value -> value > 0.0 }
+            val entropyMetrics = participationEntropyMetrics(budgetByRole)
+
+            dominantTurnTakingSignal(
+                valuesByRole = budgetByRole,
+                signalKind = "allocated",
+                minimumDistinctRoles = 2
+            )?.copy(
+                generation = it.generation,
+                activeRoleCount = budgetByRole.size,
+                conversationEntropy = entropyMetrics?.entropy ?: 0.0,
+                normalizedConversationEntropy = entropyMetrics?.normalizedEntropy ?: 0.0
+            )
+        }
+
+        val activeAgents = liveAgents.values
+            .filter { it.status == AgentStatus.Active || it.status == AgentStatus.DyingGracefully }
+        val liveSpentSignal = if (activeAgents.size >= 3) {
+            val spentByRole = activeAgents
+                .groupBy { it.role }
+                .mapValues { (_, entries) ->
+                    entries.sumOf { entry ->
+                        val currentBalance = entry.budgetLedger?.balance ?: entry.budgetRemaining
+                        (entry.allocatedBudget - currentBalance).coerceAtLeast(0.0)
+                    }
+                }
+                .filterValues { value -> value > 0.0 }
+            val entropyMetrics = participationEntropyMetrics(spentByRole)
+
+            dominantTurnTakingSignal(
+                valuesByRole = spentByRole,
+                signalKind = "spent",
+                minimumDistinctRoles = 2
+            )?.copy(
+                generation = activeAgents.maxOf { it.generation },
+                activeRoleCount = spentByRole.size,
+                conversationEntropy = entropyMetrics?.entropy ?: 0.0,
+                normalizedConversationEntropy = entropyMetrics?.normalizedEntropy ?: 0.0
+            )
+        } else null
+
+        val dominantSignal = liveSpentSignal ?: allocationSignal
+        if (dominantSignal == null) {
+            lastTurnTakingImbalanceSignature = null
+            return
+        }
+
+        val signature = "${dominantSignal.signalKind}:${dominantSignal.dominantRole.name}:${dominantSignal.generation}:${dominantSignal.activeRoleCount}:${dominantSignal.dominantShare.toString().take(4)}"
+        if (signature == lastTurnTakingImbalanceSignature) {
+            return
+        }
+        lastTurnTakingImbalanceSignature = signature
+
+        val description = buildString {
+            append("Role budget dominance detected: ")
+            append(dominantSignal.dominantRole.name)
+            append(" consumed ")
+            append((dominantSignal.dominantShare * 100).toInt())
+            append("% of active ")
+            append(dominantSignal.signalKind)
+            append(" budget across ")
+            append(dominantSignal.activeRoleCount)
+            append(" roles in generation ")
+            append(dominantSignal.generation)
+            append(". conversationEntropy=")
+            append(String.format(java.util.Locale.ROOT, "%.3f", dominantSignal.conversationEntropy))
+            append(" normalizedConversationEntropy=")
+            append(String.format(java.util.Locale.ROOT, "%.3f", dominantSignal.normalizedConversationEntropy))
+        }
+
+        Napier.w { "[$groupId] $description" }
+        emitEvent(
+            EventTypes.INSPECTOR_FLAG,
+            null,
+            dominantSignal.generation,
+            """{"severity":"warning","category":"turn_taking","signalKind":"${dominantSignal.signalKind}","description":"$description","dominantRole":"${dominantSignal.dominantRole}","dominantShare":${dominantSignal.dominantShare},"activeRoleCount":${dominantSignal.activeRoleCount},"conversationEntropy":${dominantSignal.conversationEntropy},"normalizedConversationEntropy":${dominantSignal.normalizedConversationEntropy}}"""
+        )
+    }
+
+    internal data class TurnTakingDominanceSignal(
+        val dominantRole: Role,
+        val dominantShare: Double,
+        val signalKind: String,
+        val activeRoleCount: Int,
+        val generation: Int,
+        val conversationEntropy: Double = 0.0,
+        val normalizedConversationEntropy: Double = 0.0
+    )
+
+    internal fun dominantTurnTakingSignal(
+        valuesByRole: Map<Role, Double>,
+        signalKind: String,
+        minimumDistinctRoles: Int
+    ): TurnTakingDominanceSignal? {
+        if (valuesByRole.size < minimumDistinctRoles) return null
+        val total = valuesByRole.values.sum()
+        if (total <= 0.0) return null
+        val dominantEntry = valuesByRole.maxBy { it.value }
+        val share = dominantEntry.value / total
+        if (share < 0.65) return null
+        return TurnTakingDominanceSignal(
+            dominantRole = dominantEntry.key,
+            dominantShare = share,
+            signalKind = signalKind,
+            activeRoleCount = valuesByRole.size,
+            generation = 0
+        )
+    }
+
+    internal data class ParticipationEntropyMetrics(
+        val entropy: Double,
+        val normalizedEntropy: Double
+    )
+
+    internal fun participationEntropyMetrics(valuesByRole: Map<Role, Double>): ParticipationEntropyMetrics? {
+        val total = valuesByRole.values.sum()
+        if (total <= 0.0) return null
+        val shares = valuesByRole.values
+            .filter { it > 0.0 }
+            .map { it / total }
+        if (shares.isEmpty()) return null
+
+        val entropy = -shares.sumOf { share -> share * (kotlin.math.ln(share) / kotlin.math.ln(2.0)) }
+        val maxEntropy = kotlin.math.ln(shares.size.toDouble()) / kotlin.math.ln(2.0)
+        val normalizedEntropy = if (maxEntropy > 0.0) entropy / maxEntropy else 1.0
+        return ParticipationEntropyMetrics(entropy = entropy, normalizedEntropy = normalizedEntropy)
+    }
+
     private fun totalRemainingBudget(): Double =
         liveAgents.values.sumOf { it.budgetLedger?.balance ?: it.budgetRemaining } +
             refundedBudgetByAgent.values.sum()
@@ -943,6 +1108,8 @@ private data class LiveAgentEntry(
     val job: Job?,                  // non-null in in-process mode
     val status: AgentStatus,
     val generation: Int,
+    val role: Role,
+    val allocatedBudget: Double,
     val budgetRemaining: Double,
     val budgetLedger: BudgetLedger?, // non-null once the in-process runner registers it
     val wipTaskClaim: WipTaskClaim?

@@ -148,6 +148,7 @@ class DeliverableSkeletonTreeStore(
             artifactType = update.artifactType ?: node.artifactType,
             owningGeneration = update.owningGeneration ?: node.owningGeneration,
             owningAgentId = update.owningAgentId ?: node.owningAgentId,
+            owningRole = update.owningRole ?: node.owningRole,
             trustScore = updatedTrust ?: node.trustScore,
             graderComplexityLevel = nextComplexity,
             gradingHistory = nextHistory,

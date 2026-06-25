@@ -11,16 +11,17 @@ import kotlin.random.Random
  */
 object FastModelSelectionConfig {
     const val FAST_COUNCIL_MODEL = "openai/gpt-oss-120b"
-    const val FAST_RUNTIME_RESEARCHER_MODEL = "qwen/qwen3.5-flash-02-23"
-    const val FAST_RUNTIME_BUILDER_MODEL = "z-ai/glm-4.7-flash"
-    const val FAST_RUNTIME_PLANNER_MODEL = "qwen/qwen3.5-flash-02-23"
+    const val FAST_RUNTIME_RESEARCHER_MODEL = "deepseek/deepseek-v4-flash"
+    const val FAST_RUNTIME_BUILDER_MODEL = "openai/gpt-oss-120b"
+    const val FAST_RUNTIME_PLANNER_MODEL = "deepseek/deepseek-v4-flash"
     const val FAST_RUNTIME_CRITIC_MODEL = "deepseek/deepseek-v4-flash"
     const val FAST_RUNTIME_ARCHIVIST_MODEL = "openai/gpt-oss-120b"
-    const val FAST_RUNTIME_EDUCATOR_MODEL = "qwen/qwen3.5-flash-02-23"
-    const val FAST_RUNTIME_CONNECTOR_MODEL = "qwen/qwen3.5-flash-02-23"
+    const val FAST_RUNTIME_EDUCATOR_MODEL = "deepseek/deepseek-v4-flash"
+    const val FAST_RUNTIME_CONNECTOR_MODEL = "deepseek/deepseek-v4-flash"
     const val FAST_RUNTIME_OUTLIER_MODEL = "z-ai/glm-4.7-flash"
     const val FAST_RUNTIME_INSPECTOR_MODEL = "deepseek/deepseek-v4-flash"
     const val FAST_RUNTIME_AUDITOR_MODEL = "deepseek/deepseek-v4-flash"
+    const val FAST_RUNTIME_PERSPECTIVE_TAKER_MODEL = FAST_RUNTIME_PLANNER_MODEL
     const val FAST_RUNTIME_METAPLANNER_MODEL = "openai/gpt-oss-120b"
     const val FAST_GRADER_MODEL = "deepseek/deepseek-v4-flash"
     const val FAST_CRITIC_PIPELINE_MODEL = "deepseek/deepseek-v4-flash"
@@ -38,6 +39,7 @@ object FastModelSelectionConfig {
         FAST_RUNTIME_OUTLIER_MODEL,
         FAST_RUNTIME_INSPECTOR_MODEL,
         FAST_RUNTIME_AUDITOR_MODEL,
+        FAST_RUNTIME_PERSPECTIVE_TAKER_MODEL,
         FAST_RUNTIME_METAPLANNER_MODEL,
         FAST_GRADER_MODEL,
         FAST_CRITIC_PIPELINE_MODEL,
@@ -60,6 +62,7 @@ object FastModelSelectionConfig {
         Role.Outlier.name to FAST_RUNTIME_OUTLIER_MODEL,
         Role.Inspector.name to FAST_RUNTIME_INSPECTOR_MODEL,
         Role.Auditor.name to FAST_RUNTIME_AUDITOR_MODEL,
+        Role.PerspectiveTaker.name to FAST_RUNTIME_PERSPECTIVE_TAKER_MODEL,
         Role.MetaPlanner.name to FAST_RUNTIME_METAPLANNER_MODEL
     )
 }

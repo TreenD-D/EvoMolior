@@ -11,6 +11,8 @@ import com.achulkov.evokammer.substrate.db.entity.StagingSubmissionEntity
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
+private const val MAX_STAGING_CONTENT_CHARS = 256_000
+
 /**
  * Koog tool: submit content to the Staging Area.
  *
@@ -63,8 +65,8 @@ class WriteStagingTool(
             return "Error: Invalid submission type '${args.type}'. Valid: $validTypes"
         }
 
-        if (args.content.length > 50_000) {
-            return "Error: Content exceeds 50KB limit (${args.content.length} chars)."
+        if (args.content.length > MAX_STAGING_CONTENT_CHARS) {
+            return "Error: Content exceeds 256KB limit (${args.content.length} chars)."
         }
 
         val deductResult = budgetLedger.deduct(ActionType.WRITE_STAGING)

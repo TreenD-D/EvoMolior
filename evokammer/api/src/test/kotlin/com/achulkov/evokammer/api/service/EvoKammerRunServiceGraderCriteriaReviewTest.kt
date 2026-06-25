@@ -123,7 +123,8 @@ class EvoKammerRunServiceGraderCriteriaReviewTest {
             GroupCoordinator(listOf("group-0", "group-1"), config.scoringDimensions),
             listOf(graderGroupId),
             GraderGroupManager(config.scoringDimensions),
-            mutableSetOf<Int>()
+            mutableSetOf<Int>(),
+            0
         )
 
         eventCollector.cancel()
@@ -218,7 +219,8 @@ class EvoKammerRunServiceGraderCriteriaReviewTest {
             GroupCoordinator(listOf("group-0", "group-1"), config.scoringDimensions),
             listOf("grader-0"),
             GraderGroupManager(config.scoringDimensions),
-            mutableSetOf<Int>()
+            mutableSetOf<Int>(),
+            0
         )
 
         eventCollector.cancel()

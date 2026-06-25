@@ -85,6 +85,63 @@ class WipTaskReferencePropagationTest {
     }
 
     @Test
+    fun `write staging tool accepts article sized doc payloads below raised cap`() = runTest {
+        val dataRoot = createTempDirectory("write-staging-large-doc-test").toFile()
+        val db = SubstrateDatabaseFactory(dataRoot).get("run-large-doc", "group-0")
+        val tool = WriteStagingTool(
+            stagingDao = db.stagingDao(),
+            budgetLedger = ledger(),
+            runId = "run-large-doc",
+            groupId = "group-0",
+            agentId = "agent-1",
+            role = "Builder",
+            generation = 1,
+            defaultWipTaskRef = null,
+            isOutlier = false
+        )
+        val articleSizedContent = "x".repeat(53_000)
+
+        val result = tool.execute(
+            WriteStagingTool.Args(
+                type = "DOC",
+                content = articleSizedContent,
+                speculative = false
+            )
+        )
+
+        assertTrue(result.contains("Submission accepted"))
+        val stored = db.stagingDao().getByAgent("run-large-doc", "group-0", "agent-1").single()
+        assertEquals(articleSizedContent.length, stored.content.length)
+    }
+
+    @Test
+    fun `write staging tool rejects runaway doc payloads above raised cap`() = runTest {
+        val dataRoot = createTempDirectory("write-staging-too-large-doc-test").toFile()
+        val db = SubstrateDatabaseFactory(dataRoot).get("run-too-large-doc", "group-0")
+        val tool = WriteStagingTool(
+            stagingDao = db.stagingDao(),
+            budgetLedger = ledger(),
+            runId = "run-too-large-doc",
+            groupId = "group-0",
+            agentId = "agent-1",
+            role = "Builder",
+            generation = 1,
+            defaultWipTaskRef = null,
+            isOutlier = false
+        )
+
+        val result = tool.execute(
+            WriteStagingTool.Args(
+                type = "DOC",
+                content = "x".repeat(256_001),
+                speculative = false
+            )
+        )
+
+        assertTrue(result.contains("Content exceeds 256KB limit"))
+    }
+
+    @Test
     fun `emit fact tool defaults wipTaskRef from the assigned task`() = runTest {
         val dataRoot = createTempDirectory("emit-fact-wip-ref-test").toFile()
         val db = SubstrateDatabaseFactory(dataRoot).get("run-2", "group-0")

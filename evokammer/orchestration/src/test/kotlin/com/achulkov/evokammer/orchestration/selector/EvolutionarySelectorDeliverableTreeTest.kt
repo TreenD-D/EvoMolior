@@ -63,6 +63,9 @@ class EvolutionarySelectorDeliverableTreeTest {
             openGapCount = 3,
             contestedNodeCount = 1,
             deadEndCount = 1,
+            unownedNodeCount = 1,
+            owningRoleCounts = mapOf(Role.Planner to 1),
+            ownershipClarityScore = 0.75,
             averageTrustScore = 0.2,
             maxComplexityLevel = 4
         )

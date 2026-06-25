@@ -14,6 +14,7 @@ import com.achulkov.evokammer.core.contract.OverseerOrigin
 import com.achulkov.evokammer.core.contract.OverseerOriginType
 import com.achulkov.evokammer.core.contract.OverseerTargetScope
 import com.achulkov.evokammer.core.contract.OverseerVariationSpec
+import com.achulkov.evokammer.cli.selfimprovement.RepoWorkspaceManager
 import com.achulkov.evokammer.runtime.createProductionRuntime
 import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
 import io.github.aakira.napier.DebugAntilog
@@ -176,11 +177,14 @@ class SelfImprovementLoopRunner(
                 metaArchiveSummary = ""
             )
             val effectiveProposal = if (proposal.proposedHypotheses.isEmpty() &&
-                proposal.proposedExperimentPlans.isEmpty() &&
-                stateBefore.hypotheses.isEmpty()
+                proposal.proposedExperimentPlans.isEmpty()
             ) {
-                Napier.w("SelfImprovementLoopRunner: agent returned no proposals for an empty kernel; seeding bootstrap hypothesis.")
-                bootstrapProposal(includeExperimentPlan = executeScheduledExperiments)
+                Napier.w("SelfImprovementLoopRunner: agent returned no proposals; seeding bootstrap hypothesis from the architecture plan.")
+                bootstrapProposal(
+                    cycleIndex = cycleIndex,
+                    kernelState = stateBefore,
+                    includeExperimentPlan = executeScheduledExperiments
+                )
             } else {
                 proposal
             }
@@ -253,6 +257,18 @@ class SelfImprovementLoopRunner(
             }
         }
 
+        runCatching {
+            val compacted = kernelService.compactTerminalState()
+            if (compacted != null) {
+                Napier.i(
+                    "SelfImprovementLoopRunner: forget gate pruned ${compacted.state.hypotheses.size} active hypotheses remaining"
+                )
+            }
+        }.onFailure { e ->
+            errors += "Forget gate compaction failed: ${e.message}"
+            Napier.e("SelfImprovementLoopRunner: compaction failed", e)
+        }
+
         val stateAfter = kernelService.currentState()
 
         return CycleReport(
@@ -265,54 +281,186 @@ class SelfImprovementLoopRunner(
         )
     }
 
-    private fun bootstrapProposal(includeExperimentPlan: Boolean = false): OverseerAgentRunner.OverseerProposal {
-        val bootstrapHypothesis = OverseerHypothesis(
-            id = "HYP-self-improve-bootstrap-001",
-            title = "Add CLI-level overseer-cycle integration coverage",
-            origin = OverseerOrigin(
-                type = OverseerOriginType.INTERNAL_LOGS,
-                sources = listOf(
-                    "documentation/EvoKammer_Current_Session_Handoff.md",
-                    "documentation/EvoKammer_Self_Improvement_Operator_Guide.md"
-                )
-            ),
-            targetScope = OverseerTargetScope(
-                paths = listOf(
-                    "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/SelfImprovementCli.kt",
+    private fun bootstrapProposal(
+        cycleIndex: Int,
+        kernelState: OverseerKernelState,
+        includeExperimentPlan: Boolean = false
+    ): OverseerAgentRunner.OverseerProposal {
+        val bootstrapSourceRefs = listOf(
+            "documentation/EvoKammer_Architecture_Improvements_Plan.md",
+            "documentation/EvoKammer_Current_Session_Handoff.md",
+            "documentation/EvoKammer_Self_Improvement_Operator_Guide.md"
+        )
+        val currentSessionContext = loadBootstrapContext("documentation/EvoKammer_Current_Session_Handoff.md")
+        val operatorGuideContext = loadBootstrapContext("documentation/EvoKammer_Self_Improvement_Operator_Guide.md")
+        val bootstrapItems = listOf(
+            BootstrapBlueprint(
+                idSuffix = "001",
+                title = "Seed a feedforward bootstrap catalog from the architecture plan",
+                sectionHeading = "## 1. Feedforward Layers of Evo Runs (MLP-equivalent)",
+                targetPaths = listOf(
                     "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/selfimprovement/SelfImprovementLoopRunner.kt",
                     "evokammer/cli/src/test/kotlin/com/achulkov/evokammer/cli/SelfImprovementLoopRunnerTest.kt",
-                    "documentation/EvoKammer_Self_Improvement_Operator_Guide.md"
+                    "documentation/EvoKammer_Architecture_Improvements_Plan.md"
                 ),
+                metricsUp = listOf("bootstrap_diversity", "first_cycle_progress"),
+                metricsDown = listOf("single_hypothesis_fallbacks"),
+                notes = "Seed multiple concrete bootstrap hypotheses instead of a single CLI-only fallback."
+            ),
+            BootstrapBlueprint(
+                idSuffix = "002",
+                title = "Preserve recurrent self-improvement context across cold starts",
+                sectionHeading = "## 2. Recurrent Self-Improvement Loop (RNN/LSTM-equivalent)",
+                targetPaths = listOf(
+                    "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/selfimprovement/SelfImprovementLoopRunner.kt",
+                    "evokammer/cli/src/test/kotlin/com/achulkov/evokammer/cli/SelfImprovementLoopRunnerTest.kt",
+                    "documentation/EvoKammer_Current_Session_Handoff.md"
+                ),
+                metricsUp = listOf("recovered_bootstrap_context", "cycle_continuity"),
+                metricsDown = listOf("empty_kernel_stalls"),
+                notes = "Keep the loop aligned to its prior-cycle state instead of discarding it after the first proposal."
+            ),
+            BootstrapBlueprint(
+                idSuffix = "003",
+                title = "Route bootstrap evidence with architecture-plan attention",
+                sectionHeading = "## 3. Attention-Style Routing Between Runs (Transformer-equivalent)",
+                targetPaths = listOf(
+                    "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/selfimprovement/SelfImprovementLoopRunner.kt",
+                    "evokammer/cli/src/test/kotlin/com/achulkov/evokammer/cli/SelfImprovementLoopRunnerTest.kt",
+                    "documentation/EvoKammer_Architecture_Improvements_Plan.md"
+                ),
+                metricsUp = listOf("context_routing_precision", "bootstrap_relevance"),
+                metricsDown = listOf("irrelevant_bootstrap_context"),
+                notes = "Prefer the plan sections that match the current kernel gap instead of one generic context blob."
+            ),
+            BootstrapBlueprint(
+                idSuffix = "004",
+                title = "Add critique-oriented bootstrap coverage for silent failure modes",
+                sectionHeading = "## 6. Adversarial Generative / Discriminative Runs (GAN-equivalent)",
+                targetPaths = listOf(
+                    "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/selfimprovement/SelfImprovementLoopRunner.kt",
+                    "evokammer/cli/src/test/kotlin/com/achulkov/evokammer/cli/SelfImprovementLoopRunnerTest.kt",
+                    "documentation/EvoKammer_Architecture_Improvements_Plan.md"
+                ),
+                metricsUp = listOf("failure_mode_coverage", "bootstrap_sanity_checks"),
+                metricsDown = listOf("silent_noop_cycles"),
+                notes = "Keep the bootstrap honest by seeding a failure-seeking code path alongside the positive proposals."
+            ),
+            BootstrapBlueprint(
+                idSuffix = "005",
+                title = "Explore graph-shaped bootstrap messaging across runs",
+                sectionHeading = "## 5. Graph of Evo Runs (GNN-equivalent)",
+                targetPaths = listOf(
+                    "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/selfimprovement/SelfImprovementLoopRunner.kt",
+                    "evokammer/cli/src/test/kotlin/com/achulkov/evokammer/cli/SelfImprovementLoopRunnerTest.kt",
+                    "documentation/EvoKammer_Architecture_Improvements_Plan.md"
+                ),
+                metricsUp = listOf("graph_routing_coverage", "message_flow_balance"),
+                metricsDown = listOf("isolated_bootstrap_runs"),
+                notes = "Test whether message passing between runs can be made more useful than a single frontier bootstrap."
+            ),
+            BootstrapBlueprint(
+                idSuffix = "006",
+                title = "Add discriminator-style bootstrap coverage for hallucination control",
+                sectionHeading = "## 6. Adversarial Generative / Discriminative Runs (GAN-equivalent)",
+                targetPaths = listOf(
+                    "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/selfimprovement/SelfImprovementLoopRunner.kt",
+                    "evokammer/cli/src/test/kotlin/com/achulkov/evokammer/cli/SelfImprovementLoopRunnerTest.kt",
+                    "documentation/EvoKammer_Architecture_Improvements_Plan.md"
+                ),
+                metricsUp = listOf("hallucination_rate", "discriminator_calibration"),
+                metricsDown = listOf("unchecked_generator_claims"),
+                notes = "Create a bootstrap line that is allowed to fail on purpose if the plan evidence is weak."
+            ),
+            BootstrapBlueprint(
+                idSuffix = "007",
+                title = "Translate human collective intelligence constraints into bootstrap metrics",
+                sectionHeading = "## 7. Human Collective Intelligence Patterns as Constraints",
+                targetPaths = listOf(
+                    "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/selfimprovement/SelfImprovementLoopRunner.kt",
+                    "evokammer/cli/src/test/kotlin/com/achulkov/evokammer/cli/SelfImprovementLoopRunnerTest.kt",
+                    "documentation/EvoKammer_Architecture_Improvements_Plan.md"
+                ),
+                metricsUp = listOf("conversation_entropy", "role_balance"),
+                metricsDown = listOf("dominated_bootstrap_turns"),
+                notes = "Keep the bootstrap from collapsing into one dominant role or one dominant hypothesis."
+            ),
+            BootstrapBlueprint(
+                idSuffix = "008",
+                title = "Bind the bootstrap to the recommended roadmap",
+                sectionHeading = "## 8. Recommended Experimental Roadmap",
+                targetPaths = listOf(
+                    "evokammer/cli/src/main/kotlin/com/achulkov/evokammer/cli/selfimprovement/SelfImprovementLoopRunner.kt",
+                    "evokammer/cli/src/test/kotlin/com/achulkov/evokammer/cli/SelfImprovementLoopRunnerTest.kt",
+                    "documentation/EvoKammer_Architecture_Improvements_Plan.md"
+                ),
+                metricsUp = listOf("roadmap_followthrough", "bootstrap_completion"),
+                metricsDown = listOf("orphaned_bootstrap_items"),
+                notes = "Ensure the bootstrap remains aligned to a staged roadmap rather than drifting into an ad hoc checklist."
+            )
+        )
+
+        bootstrapItems.forEach { item ->
+            loadMarkdownSection("documentation/EvoKammer_Architecture_Improvements_Plan.md", item.sectionHeading)
+        }
+
+        val nextBootstrapItem = bootstrapItems.firstOrNull { item ->
+            !kernelState.hypotheses.containsKey(bootstrapHypothesisId(item.idSuffix))
+        } ?: bootstrapItems.last()
+
+        val bootstrapHypothesis = OverseerHypothesis(
+            id = bootstrapHypothesisId(nextBootstrapItem.idSuffix),
+            title = nextBootstrapItem.title,
+            origin = OverseerOrigin(
+                type = OverseerOriginType.HYBRID,
+                sources = bootstrapSourceRefs
+            ),
+            targetScope = OverseerTargetScope(
+                paths = nextBootstrapItem.targetPaths,
                 mutabilityLevel = OverseerMutabilityLevel.FULLY_MUTABLE
             ),
             rationale = buildString {
-                appendLine("The live overseer-cycle run started from an empty kernel and produced no actionable proposals.")
-                appendLine("Seed the first improvement around CLI integration coverage and bootstrap context so the loop can discover concrete work from a cold start.")
+                appendLine("The overseer-cycle bootstrap must produce concrete repo/code hypotheses from the architecture plan, one item at a time.")
+                appendLine("Use the current session and operator guidance in view, but keep the plan excerpt as the primary source.")
+                appendLine()
+                appendLine("Bootstrap selection:")
+                appendLine("cycleIndex=$cycleIndex selected=${nextBootstrapItem.idSuffix}")
+                appendLine()
+                appendLine("Architecture plan excerpt:")
+                appendLine(loadMarkdownSection("documentation/EvoKammer_Architecture_Improvements_Plan.md", nextBootstrapItem.sectionHeading))
                 appendLine()
                 appendLine("Current session context:")
-                appendLine(loadBootstrapContext("documentation/EvoKammer_Current_Session_Handoff.md"))
+                appendLine(currentSessionContext)
                 appendLine()
                 appendLine("Operator guide context:")
-                appendLine(loadBootstrapContext("documentation/EvoKammer_Self_Improvement_Operator_Guide.md"))
+                appendLine(operatorGuideContext)
             }.trim(),
             expectedEffect = OverseerExpectedEffect(
-                metricsUp = listOf("proposal_count", "bootstrap_coverage"),
-                metricsDown = listOf("no_progress_runs")
+                metricsUp = nextBootstrapItem.metricsUp,
+                metricsDown = nextBootstrapItem.metricsDown,
+                invariantsHold = listOf(
+                    "Live checkout remains read-only.",
+                    "Immutable repository paths stay out of scope."
+                )
             ),
-            notes = "Bootstrap-triggered because the agent returned no proposals for an empty kernel in the first overseer cycle. Context extracted from handoff and operator guide files."
+            notes = nextBootstrapItem.notes
         )
 
         val bootstrapPlans = if (includeExperimentPlan) {
             listOf(
                 OverseerExperimentPlan(
-                    id = "PLAN-self-improve-bootstrap-001",
+                    id = "PLAN-self-improve-bootstrap-${nextBootstrapItem.idSuffix}",
                     hypothesisId = bootstrapHypothesis.id,
                     runCount = 1,
                     generationsPerRun = 1,
                     variationSpec = OverseerVariationSpec(
-                        configChanges = listOf("enable overseer execution bridge")
+                        configChanges = listOf("bootstrap section: ${nextBootstrapItem.sectionHeading}"),
+                        toolOrPromptChanges = listOf("bootstrap note: ${nextBootstrapItem.notes}")
                     ),
-                    metrics = OverseerExperimentMetrics(primary = listOf("run_completed")),
+                    metrics = OverseerExperimentMetrics(
+                        primary = listOf("run_completed"),
+                        secondary = listOf("bootstrap_diversity")
+                    ),
                     acceptanceCriteria = OverseerAcceptanceCriteria(
                         predicates = listOf("run_completed > 0.5")
                     ),
@@ -326,8 +474,44 @@ class SelfImprovementLoopRunner(
         return OverseerAgentRunner.OverseerProposal(
             proposedHypotheses = listOf(bootstrapHypothesis),
             proposedExperimentPlans = bootstrapPlans,
-            rationale = "Bootstrap proposal synthesized from handoff guide and operator guide context, enriched with actual file content."
+            rationale = "Bootstrap proposal synthesized from the architecture-improvements plan plus the current handoff and operator guide."
         )
+    }
+
+    private fun bootstrapHypothesisId(idSuffix: String): String = "HYP-self-improve-bootstrap-$idSuffix"
+
+    private data class BootstrapBlueprint(
+        val idSuffix: String,
+        val title: String,
+        val sectionHeading: String,
+        val targetPaths: List<String>,
+        val metricsUp: List<String>,
+        val metricsDown: List<String>,
+        val notes: String
+    )
+
+    private fun loadMarkdownSection(relativePath: String, heading: String, maxLines: Int = 48): String {
+        val file = mutableRepoRoot.resolve(relativePath).normalize()
+        if (!Files.exists(file) || !Files.isRegularFile(file)) {
+            return "[Missing bootstrap section: $heading in $relativePath]"
+        }
+
+        val lines = Files.readAllLines(file)
+        val startIndex = lines.indexOfFirst { it.trim() == heading.trim() }
+        check(startIndex >= 0) { "Missing architecture plan section '$heading' in $relativePath" }
+
+        val remainder = lines.drop(startIndex + 1)
+        val nextTopLevelHeadingIndex = remainder.indexOfFirst { it.startsWith("## ") }
+        val sectionLines = if (nextTopLevelHeadingIndex >= 0) {
+            remainder.take(nextTopLevelHeadingIndex)
+        } else {
+            remainder
+        }
+
+        return buildList {
+            add(heading)
+            addAll(sectionLines.take(maxLines))
+        }.joinToString("\n").trim()
     }
 
     private fun loadBootstrapContext(relativePath: String, maxLines: Int = 80): String {

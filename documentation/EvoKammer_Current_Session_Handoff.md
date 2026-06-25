@@ -7,6 +7,91 @@
   - inspect the outputs and logs for non-error issues, not just crashes
   - verify the implementation is working cleanly and efficiently
 
+## MoE Router Slice (2026-06-15)
+- Expanded the deterministic objective router with a new `perspective-heavy` expert bundle for stakeholder / blind-spot / verification tasks.
+- `ObjectiveExpertRouter.select(...)` now routes perspective-oriented objectives to `PerspectiveTaker`, `Critic`, `Inspector`, `Auditor`, `Educator`, `Planner`, `Connector`, `Researcher`, and `Builder` assignments rather than falling back to the balanced baseline.
+- Added router regressions in `ObjectiveExpertRouterTest` and an API integration regression in `EvoKammerRunServiceObjectiveExpertRoutingTest`.
+- Verified with:
+  - `./gradlew --no-daemon --no-build-cache :evokammer:core:test --tests com.achulkov.evokammer.core.config.ObjectiveExpertRouterTest`
+  - `./gradlew --no-daemon --no-build-cache :evokammer:api:test --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceObjectiveExpertRoutingTest`
+- Next MoE gap:
+  - the router is still deterministic/rule-based by design
+  - a true learned/LLM-backed router would need a separate product decision because it would change runtime routing behavior materially
+
+## Recurrent Loop Slice (2026-06-15)
+- Added an explicit forget-gate compaction pass to the recurrent self-improvement kernel.
+- `OverseerKernel.compactTerminalState(...)` now prunes stale terminal hypotheses, their plans, schedules, and results from the active kernel snapshot while preserving the archived history trail.
+- `OverseerKernel.compactTerminalState(...)` now also removes overflow terminal entries from the stalest end of the age-ordered list, so cap-based compaction removes the oldest terminal state first.
+- `OverseerKernelService.compactTerminalState(...)` now compacts and persists atomically, then records a `COMPACT_KERNEL_STATE` audit entry when pruning occurs.
+- `SelfImprovementLoopRunner` now invokes the forget gate once per cycle so the recursive loop does not keep re-reading stale terminal state forever.
+- Verified with:
+  - `./gradlew --no-daemon --no-build-cache :evokammer:api:test --tests com.achulkov.evokammer.api.service.OverseerKernelServiceForgetGateTest`
+  - `./gradlew --no-daemon --no-build-cache :evokammer:cli:test --tests com.achulkov.evokammer.cli.SelfImprovementLoopRunnerTest`
+- Next recurrent-loop gap:
+  - age-based compaction is deterministic and restart-safe, but it is still a snapshot-level forget gate rather than a learned policy
+
+## Adversarial Reward Slice (2026-06-15)
+- Added a deterministic discriminator reward multiplier derived from the latest blind grading spread.
+- `EvoKammerRunService` now stores that multiplier per run, reloads it from the run meta-archive after restart, and exposes it so the production runtime can reward stronger discriminator rounds with slightly more budget on the next cycle.
+- `GraderRunner` now scales grader spawn budgets through the multiplier, and the production runtime threads the current reward into both the criteria and judging graders.
+- Verified with:
+  - `./gradlew --no-daemon --no-build-cache :evokammer:api:test --tests com.achulkov.evokammer.api.service.AdversarialDiscriminatorRewardTest --tests com.achulkov.evokammer.api.grader.GraderRunnerBudgetMultiplierTest`
+  - `./gradlew --no-daemon --no-build-cache :evokammer:runtime:compileKotlin`
+- Next adversarial gap:
+  - the reward still uses a deterministic grading-spread proxy rather than a learned calibration model
+
+## Collective-Intelligence Slice (2026-06-15)
+- Turn-taking regression is now green in `:evokammer:orchestration:test --tests com.achulkov.evokammer.orchestration.selector.EvolutionarySelectorDiversityTest`.
+- Perspective-taking wiring is already live end-to-end:
+  - `InspectorRunner` raises `Role.PerspectiveTaker` on turn-taking imbalance signals.
+  - `EvoKammerRunService` spawns a `PerspectiveTaker` special agent for those flags.
+  - `RolePromptBuilder` renders the perspective coverage / blind-spot rubric for graders.
+  - `GraderRunner` includes the perspective-aware criteria phase coverage.
+- Verified with:
+  - `./gradlew --no-daemon --no-build-cache :evokammer:orchestration:test --tests com.achulkov.evokammer.orchestration.selector.EvolutionarySelectorDiversityTest`
+  - `./gradlew --no-daemon --no-build-cache :evokammer:orchestration:test --tests com.achulkov.evokammer.orchestration.inspector.InspectorRunnerTest`
+  - `./gradlew --no-daemon --no-build-cache :evokammer:api:test --tests com.achulkov.evokammer.api.grader.GraderRunnerPerspectiveRubricTest --tests com.achulkov.evokammer.api.grader.GraderRunnerPerspectiveRubricIntegrationTest --tests com.achulkov.evokammer.api.EvoKammerRunServiceModeGatingTest`
+- Next likely gap from the architecture plan:
+  - learned or model-backed MoE routing remains deterministic/rule-based for now
+  - if that becomes a priority, it needs product direction because it would change routing behavior materially
+
+## Graph-Topology Slice (2026-06-15)
+- Implemented a trust-aware adaptive dispatch topology on top of the existing ring/star/small-world graph shapes.
+- `DispatchTopologyAdaptationSpec` is now part of `StartingField`, so council-authored runs can enable graph rewiring through the normal run contract.
+- `EvoKammerRunService` now passes the starting-field adaptation spec into `GroupCoordinator.configureTopology(...)` at run startup.
+- `DispatchRelay` now keeps a cached adjacency snapshot and can rewire low-trust edges to higher-trust alternatives when `refreshTopology()` is called.
+- `GroupCoordinator` now refreshes adaptive topology at round boundaries via `onRoundStart(...)`.
+- Added regressions for both the relay-level rewiring behavior and the coordinator round-boundary refresh path.
+- Latest targeted verification:
+  - `./gradlew --no-daemon :evokammer:competition:test --tests com.achulkov.evokammer.competition.dispatch.DispatchRelayAdaptiveTopologyTest --tests com.achulkov.evokammer.competition.coordinator.GroupCoordinatorAdaptiveTopologyTest`
+  - Result: `BUILD SUCCESSFUL`
+
+## Task Decomposition Slice (2026-06-15)
+- Added explicit `owningRole` metadata to `DeliverableSkeletonNode` and `DeliverableSkeletonNodeUpdate`, so role responsibility is part of the persisted DST contract instead of being implied only by the live agent assignment.
+- `DeliverableSkeletonTree.fromNodeGraph(...)` now seeds default owners by node type, and DST refiners/store updates preserve or update the owning role when nodes are split, merged, or promoted.
+- `DeliverableSkeletonTree.summarize()` now reports ownership clarity metrics, which the selector can consume for role-clarity-aware allocation.
+- `RolePromptBuilder` now renders a compact task-ownership map from the run’s deliverable skeleton tree, making decomposition and role ownership visible to agents at spawn time.
+- `FinalSynthesiser` now carries ownership into the final tree renderers and JSON output.
+- Added regression coverage for `FinalSynthesiser` plaintext/JSON ownership rendering and for legacy DST JSON that omits `owningRole`.
+- Added an end-to-end resumed run prompt regression proving the task ownership map survives the full service-to-prompt path.
+- Latest targeted verification:
+  - `./gradlew --no-daemon --no-build-cache :evokammer:core:test --tests com.achulkov.evokammer.core.contract.StartingFieldSerializationTest`
+  - `./gradlew --no-daemon --no-build-cache :evokammer:agents:test --tests com.achulkov.evokammer.agents.factory.RolePromptBuilderTest`
+  - `./gradlew --no-daemon --no-build-cache :evokammer:api:test --tests com.achulkov.evokammer.api.service.DeliverableSkeletonTreeStoreTest`
+  - `./gradlew --no-daemon --no-build-cache :evokammer:orchestration:test --tests com.achulkov.evokammer.orchestration.selector.EvolutionarySelectorDeliverableTreeTest`
+  - `./gradlew --no-daemon --no-build-cache :evokammer:api:test --tests com.achulkov.evokammer.api.service.FinalSynthesiserOwnershipTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceResumeGraphPromptTest`
+  - Result: `BUILD SUCCESSFUL`
+
+## Turn-Taking Slice (2026-06-15)
+- `EvolutionarySelector` now enforces a concrete turn-taking budget balance rule by swapping one unit of an overdominant role into a complementary role when allocation share exceeds the configured dominance ceiling.
+- This keeps the existing inspector-based imbalance detection, but turns the human-team constraint into an actual allocation policy rather than only a post-hoc flag.
+- Added a selector regression proving the balanced allocation reduces dominant-share concentration while preserving diverse roles.
+- Latest targeted verification:
+  - `./gradlew --no-daemon --no-build-cache :evokammer:orchestration:test --tests com.achulkov.evokammer.orchestration.selector.EvolutionarySelectorDiversityTest --tests com.achulkov.evokammer.orchestration.selector.EvolutionarySelectorDeliverableTreeTest --tests com.achulkov.evokammer.orchestration.lifecycle.LifecycleManagerTest`
+  - Result: `BUILD SUCCESSFUL`
+- Verification blocker encountered afterward:
+  - `:evokammer:api:compileKotlin` / `:evokammer:api:compileTestKotlin` surfaced unrelated existing compile failures in `NestedHierarchySpawnPlanner.kt` and `RunInputArtifactFilesTest.kt` while sweeping broader API tests.
+
 ## Current Goal Extension (2026-06-06, self-improvement)
 - New active goal:
   - add a separate `self-improve` launcher command
@@ -57,6 +142,135 @@
   - persisted state now contains an under-experiment hypothesis plus one scheduled experiment plan
 - Remaining limitation:
   - the overseer loop still seeds and schedules; it does not yet apply code edits back into a repo copy automatically
+
+## Current Overseer Relaunch (2026-06-13)
+- Fresh isolated workspace:
+  - `/tmp/evokammer-self-improve-longrun/overseer-20260613-bootstrap3`
+- Bootstrap source:
+  - `documentation/EvoKammer_Architecture_Improvements_Plan.md`
+- Bootstrap shape:
+  - one plan-driven hypothesis is seeded per empty cycle from the architecture-plan backlog
+  - missing architecture-plan headings fail loudly instead of collapsing into a thin fallback rationale
+  - when execution is enabled, the bootstrap also registers one experiment plan for the selected item
+- Current runtime status:
+  - relaunch is active and producing real agent/tool activity
+  - cycle 0 has already moved through grader/criteria activity instead of going inert after bootstrap
+  - the run is now aligned to a backlog model rather than a one-shot bootstrap dump
+- Remaining watch item:
+  - confirm the loop continues beyond the first cycle and keeps advancing through the remaining plan items
+
+## Current Architecture-Plan Follow-up (2026-06-14)
+- Current active implementation focus:
+  - human collective intelligence constraint 7.2, now expressed as a turn-taking imbalance signal plus a `PerspectiveTaker` intervention path
+- Runtime behavior now in place:
+  - `LifecycleManager` emits `INSPECTOR_FLAG` for lopsided role allocation/spend
+  - `InspectorRunner` recognizes turn-taking anomalies in recent event logs
+  - `EvoKammerRunService` can spawn a `PerspectiveTaker` special agent when the inspector flags a coordination blind spot
+- Verification added:
+  - core role/model-selection regressions for `PerspectiveTaker`
+  - orchestration regression for inspector turn-taking detection
+  - API regression for spawning `PerspectiveTaker` from the watchdog path
+- Important scope note:
+  - the earlier fairness work remains in place, but the current improvement is the perspective-taking response path, not just the imbalance signal itself
+
+## Current Run-Seed Propagation (2026-06-14)
+- Residual `StartingField` injection is now threaded into the agent boot context and rendered into the standard system prompt for all ordinary lifecycle-spawned agents.
+- `LifecycleManager` now stores the original run seed via `configureStartingField(...)` and passes it into every `AgentBootContext`, including nested lifecycle managers.
+- `RolePromptBuilder` now renders a concise `=== ORIGINAL RUN SEED ===` block so spawned agents can see the canonical run metadata alongside the current task context.
+- Added a prompt regression test that checks the original run seed block is present in ordinary agent prompts.
+- Verified with `./gradlew :evokammer:core:compileKotlin :evokammer:agents:compileKotlin :evokammer:orchestration:compileKotlin :evokammer:api:compileKotlin :evokammer:agents:test --tests com.achulkov.evokammer.agents.factory.RolePromptBuilderTest`.
+- Verified with `./gradlew :evokammer:api:test --tests com.achulkov.evokammer.api.EvoKammerRunServiceModeGatingTest --tests com.achulkov.evokammer.api.service.NestedHierarchySpawnPlannerTest`.
+- Remaining open question for later follow-up: whether the grader-civilisation prompt path should receive the same boot-context seed block directly, or continue relying on the existing grader seed substrate channel.
+
+## Current Adversarial Loop (2026-06-14)
+- Implemented the first adversarial generator/discriminator feedback loop for round-to-round improvement.
+- After blind scoring, each group's scores are distilled into a compact discriminator brief that highlights the weakest dimensions and the submission-summary headline.
+- Those discriminator briefs are prepended to the next round's stage disclosure so generators receive failure-focused context before spawning.
+- Added a regression test covering the discriminator brief helper.
+- Verified with `./gradlew :evokammer:api:compileKotlin :evokammer:api:test --tests com.achulkov.evokammer.api.service.AdversarialDiscriminatorBriefTest --tests com.achulkov.evokammer.api.service.RunArchiveServiceTest :evokammer:orchestration:test --tests com.achulkov.evokammer.orchestration.lifecycle.LifecycleManagerTest`.
+- Archive output now includes the additional compact `outputs/high-level-run-log.txt` artifact alongside the detailed logs.
+
+## Current Grader Criteria Rubric Fix (2026-06-14)
+- The criteria-phase perspective rubric is now aligned with the live criteria builder path and explicitly includes `trade-off reconciliation`.
+- This fixes the regression where the criteria-phase prompt was correct in structure but failed the exact substring assertions in the live prompt capture tests.
+- Verified with `./gradlew --no-daemon :evokammer:api:test --tests com.achulkov.evokammer.api.grader.GraderRunnerPerspectiveRubricTest --tests com.achulkov.evokammer.api.grader.GraderRunnerPerspectiveRubricIntegrationTest`.
+
+## Current Topology Routing (2026-06-14)
+- Added an explicit `GroupTopologyKind` contract so the competition layer can choose between ring, star, and small-world inter-group routing.
+- `StartingField` now serializes the configured topology kind, and `GroupCoordinator` reconfigures its `DispatchRelay` from that value at run start.
+- `DispatchRelay` now computes neighbours according to the configured topology instead of assuming a fixed ring.
+- Verified with `./gradlew --no-daemon :evokammer:competition:test --tests com.achulkov.evokammer.competition.dispatch.DispatchRelayTopologyTest --tests com.achulkov.evokammer.competition.dispatch.DispatchRelayPrivacyTransformTest :evokammer:api:test --tests com.achulkov.evokammer.api.EvoKammerRunServiceModeGatingTest :evokammer:core:test --tests com.achulkov.evokammer.core.contract.StartingFieldSerializationTest`.
+
+## Current Run-Graph Router (2026-06-14)
+- Extracted the continuation-context scoring and traversal logic into `ContinuationContextGraphRouter` so graph-routing has a dedicated owner instead of living only inside `EvoKammerRunService`.
+- The router now prefers a dedicated `RUN_GRAPH_MESSAGE` archive entry for each completed run, then falls back to the embedded `RunGraphMessage` on the completion record, and only then falls back to the old high-level-log / summary scrape for that same run.
+- `EvoKammerRunService` now writes that dedicated graph-message entry at completion time, so the graph bus is a first-class archive artefact rather than only a derived field.
+- The router still walks the ancestry graph, so ancestor runs can contribute their own messages when present.
+- Verified with `./gradlew --no-daemon :evokammer:api:test --tests com.achulkov.evokammer.api.service.RunCompletionRecordSerializationTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceRoutingTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceGraphRoutingTest`.
+
+## Current Adversarial Critic Loop (2026-06-15)
+- The adversarial discriminator brief is now archived as a dedicated `ADVERSARIAL_DISCRIMINATOR_FEEDBACK` entry per group, not only held in the in-memory round map.
+- `EvoKammerRunService` persists the brief at round end and can read it back when the in-memory brief is absent, so the feedback survives restart / resume boundaries.
+- The next generator round still receives the brief in stage disclosure, but the signal is now durable and replayable.
+- Verified with `./gradlew --no-daemon :evokammer:api:test --tests com.achulkov.evokammer.api.service.AdversarialDiscriminatorBriefTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceRoutingTest --tests com.achulkov.evokammer.api.service.RunCompletionRecordSerializationTest`.
+
+## Current Feedforward Stack And Attention Routing (2026-06-15)
+- Added an explicit `FeedforwardLayerSpec` to `StartingField` so layered runs can carry a first-class L1/L2/L3 descriptor and upstream run IDs.
+- `RolePromptBuilder` now renders a `Feedforward layer` block in the original run seed, and continuation runs automatically advance the layer descriptor when present.
+- `ContinuationContextGraphRouter` now mixes embedding similarity into its scoring, giving the continuation path a simple attention-style signal on top of graph distance and artifact priority.
+- Verified with `./gradlew --no-daemon :evokammer:core:test --tests com.achulkov.evokammer.core.contract.StartingFieldSerializationTest :evokammer:agents:test --tests com.achulkov.evokammer.agents.factory.RolePromptBuilderTest :evokammer:api:test --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceGraphRoutingTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceRoutingTest`.
+
+## Current MoE Router Expansion (2026-06-15)
+- Added a coordination-heavy expert bundle to `ObjectiveExpertRouter` so coordination/integration objectives use a distinct router profile instead of falling through to the generic synthesis or balanced defaults.
+- The objective router now has explicit coverage for research-heavy, build-heavy, synthesis-heavy, coordination-heavy, and balanced-baseline bundles.
+- Verified with `./gradlew --no-daemon :evokammer:core:test --tests com.achulkov.evokammer.core.config.ObjectiveExpertRouterTest :evokammer:api:test --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceObjectiveExpertRoutingTest`.
+
+## Current Dispatch Trust Persistence (2026-06-14)
+- Dispatch trust is now persisted per receiving group/source pair through `TrustScoreDao` when the relay delivers a message or when feedback is recorded.
+- `EvoKammerRunService` now hands each group's trust-score DAO to the coordinator at run start so the trust channel survives process boundaries.
+- `GroupCoordinator` keeps the in-memory scorer and the substrate-backed rows aligned through the same dispatch trust API.
+- Verified with `./gradlew --no-daemon :evokammer:competition:test --tests com.achulkov.evokammer.competition.dispatch.DispatchTrustScoringTest --tests com.achulkov.evokammer.competition.dispatch.DispatchRelayTrustScoringTest --tests com.achulkov.evokammer.competition.dispatch.DispatchRelayTopologyTest --tests com.achulkov.evokammer.competition.dispatch.DispatchRelayPrivacyTransformTest --tests com.achulkov.evokammer.competition.coordinator.GroupCoordinatorDispatchLagTest --tests com.achulkov.evokammer.competition.coordinator.GroupCoordinatorLeakTest :evokammer:api:test --tests com.achulkov.evokammer.api.EvoKammerRunServiceModeGatingTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceDisclosureLeakTest`.
+
+## Current Dispatch Trust Wiring (2026-06-14)
+- `DispatchRelay` now carries an in-memory `DispatchTrustScoring` policy object and exposes `trustScoreOf(...)` plus `recordFeedback(...)`.
+- `GroupCoordinator` delegates dispatch trust operations to the relay so future critic-side feedback can update the same policy surface without adding another trust tracker.
+- Added regressions for the trust scorer itself and for the relay-level trust delegation.
+- Verified with `./gradlew --no-daemon :evokammer:competition:test --tests com.achulkov.evokammer.competition.dispatch.DispatchTrustScoringTest --tests com.achulkov.evokammer.competition.dispatch.DispatchRelayTrustScoringTest --tests com.achulkov.evokammer.competition.dispatch.DispatchRelayTopologyTest --tests com.achulkov.evokammer.competition.dispatch.DispatchRelayPrivacyTransformTest --tests com.achulkov.evokammer.competition.coordinator.GroupCoordinatorDispatchLagTest --tests com.achulkov.evokammer.competition.coordinator.GroupCoordinatorLeakTest :evokammer:api:test --tests com.achulkov.evokammer.api.EvoKammerRunServiceModeGatingTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceDisclosureLeakTest`.
+
+## Current Dispatch Lag Wiring (2026-06-14)
+- `GroupCoordinator` now owns a `FormalDispatchRelay` alongside the topology-aware relay, so voluntary cross-group dispatches can be held for a configurable generation lag.
+- `dispatchLagGenerations` is now carried through the coordinator and flushed at round boundaries from `EvoKammerRunService`, which makes the lagged path live instead of dead code.
+- Added a regression test proving dispatches stay queued until `flushPendingDispatches(...)` runs.
+- Verified with `./gradlew --no-daemon :evokammer:competition:test --tests com.achulkov.evokammer.competition.dispatch.DispatchRelayTopologyTest --tests com.achulkov.evokammer.competition.dispatch.DispatchRelayPrivacyTransformTest --tests com.achulkov.evokammer.competition.coordinator.GroupCoordinatorDispatchLagTest --tests com.achulkov.evokammer.competition.coordinator.GroupCoordinatorLeakTest :evokammer:api:test --tests com.achulkov.evokammer.api.EvoKammerRunServiceModeGatingTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceDisclosureLeakTest`.
+
+## Current Attention Routing (2026-06-14)
+- The continuation path now derives routed prior-run context from the archived source run and threads the selected summaries into the new `StartingField`.
+- `StartingField` carries `routedContextSummaries`, and `RolePromptBuilder` renders them in a bounded `=== ROUTED CONTEXT ===` section for continuation launches.
+- The routing helper is heuristic and archive-driven for now: it prefers compact high-level artifacts, final answer summaries, deliverable HTML, group summaries, and judge outputs, then ranks them with artifact-type priority before objective overlap.
+- Verified with `./gradlew :evokammer:api:compileKotlin :evokammer:api:test --tests com.achulkov.evokammer.api.service.EvoKammerRunServicePersistedResumeTest --tests com.achulkov.evokammer.api.service.AdversarialDiscriminatorBriefTest --tests com.achulkov.evokammer.api.service.RunArchiveServiceTest :evokammer:agents:test --tests com.achulkov.evokammer.agents.factory.RolePromptBuilderTest`.
+- Verified with `./gradlew :evokammer:core:test --tests com.achulkov.evokammer.core.contract.StartingFieldSerializationTest :evokammer:api:test --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceRoutingTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceContinuationRoutingSmokeTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServicePersistedResumeTest --tests com.achulkov.evokammer.api.service.AdversarialDiscriminatorBriefTest --tests com.achulkov.evokammer.api.service.RunArchiveServiceTest :evokammer:agents:test --tests com.achulkov.evokammer.agents.factory.RolePromptBuilderTest`.
+
+## Current MoE Baseline (2026-06-14)
+- Added a deterministic objective router that selects a small expert bundle from the run objective instead of relying only on the generic runtime defaults.
+- The router currently distinguishes research-heavy, build-heavy, synthesis-heavy, and balanced baseline bundles and returns both model assignments and per-role pools.
+- `EvoKammerRunService` now applies the expert bundle only when the council did not already author model selections, so council-authored runs still win.
+- Added regression coverage for the pure router and for the service-level fallback path that fills a test run with an objective-specific expert bundle.
+- Verified with `./gradlew :evokammer:core:test --tests com.achulkov.evokammer.core.config.ObjectiveExpertRouterTest --tests com.achulkov.evokammer.core.contract.StartingFieldSerializationTest :evokammer:api:test --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceObjectiveExpertRoutingTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceRoutingTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceContinuationRoutingSmokeTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServicePersistedResumeTest --tests com.achulkov.evokammer.api.service.AdversarialDiscriminatorBriefTest --tests com.achulkov.evokammer.api.service.RunArchiveServiceTest :evokammer:agents:test --tests com.achulkov.evokammer.agents.factory.RolePromptBuilderTest`.
+
+## Current Run-Graph Expansion (2026-06-14)
+- Added explicit run-graph ancestry edges to `StartingField` so continuation runs can carry a small graph of prior launches instead of only a linear predecessor pointer.
+- `EvoKammerRunService` now appends a continuation edge when it derives a new `StartingField`, and its routed-context selector recursively traverses the inherited ancestry graph to pull context from earlier connected runs.
+- `RolePromptBuilder` renders a bounded `=== RUN GRAPH ===` section so the ancestry is visible in the launched prompt.
+- Added regressions for `StartingField` serialization compatibility, sealed-archive persistence of populated graph edges, graph traversal over an ancestor chain, the continuation edge append behavior, and persisted-resume prompt visibility.
+- Verified with `./gradlew :evokammer:api:compileKotlin :evokammer:core:test --tests com.achulkov.evokammer.core.config.ObjectiveExpertRouterTest --tests com.achulkov.evokammer.core.contract.StartingFieldSerializationTest :evokammer:agents:test --tests com.achulkov.evokammer.agents.factory.RolePromptBuilderTest :evokammer:api:test --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceGraphRoutingTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceObjectiveExpertRoutingTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceContinuationRoutingSmokeTest --tests com.achulkov.evokammer.api.service.EvoKammerRunServiceRoutingTest`.
+
+## Current Human-Pattern Constraints (2026-06-14)
+- The turn-taking dominance signal in `LifecycleManager` now carries explicit conversation-entropy metrics derived from the live role budget distribution, making the equal-participation constraint measurable rather than only heuristic.
+- The emitted inspector-flag payload now includes both `conversationEntropy` and `normalizedConversationEntropy`, which makes the signal auditable downstream.
+- Grader prompts now include a dedicated `=== PERSPECTIVE COVERAGE RUBRIC ===` block that instructs the grader civilisation to score stakeholder-perspective modelling, blind spots, and trade-off reconciliation.
+- `EvolutionarySelector` now emits a role-diversity entropy score, normalized diversity, distinct-role count, and outlier share in its allocation decision payload, giving the bounded-heterogeneity constraint a concrete audit trail.
+- Added regressions for the entropy helper, the turn-taking inspector payload, the grader perspective-coverage rubric, and the selector diversity metric.
+- Verified with `./gradlew :evokammer:orchestration:test --tests com.achulkov.evokammer.orchestration.lifecycle.LifecycleManagerTest --tests com.achulkov.evokammer.orchestration.inspector.InspectorRunnerTest` and `./gradlew :evokammer:agents:compileKotlin :evokammer:agents:test --tests com.achulkov.evokammer.agents.factory.RolePromptBuilderTest`.
 
 ## Fresh Rerun Result
 - Fresh rerun output root:
@@ -298,6 +512,24 @@
 - Revalidated during this pass:
   - final-deliverable discovery after 180 late-stage `DOC` entries is now covered by a regression
   - stale follow-up stage directories are now cleaned before rerun and covered by a regression
+
+## New Long Self-Improvement Run Goal (2026-06-13)
+- New active goal:
+  - start a long recursive self-improvement loop against an isolated copy of the current project state
+  - keep the loop on the overseer-cycle path
+  - allow the loop to execute scheduled experiments rather than stopping after proposal/scheduling
+  - target a multi-hour run with multiple overseer cycles
+- Locked launch shape:
+  - source repo: `/Volumes/CrucialX9_1TB/AStudioProjects/EvoMolior`
+  - workspace root: `/tmp/evokammer-self-improve-longrun`
+  - workspace name: `overseer-20260613`
+  - mode: overseer cycle
+  - execution enabled: yes
+  - continue all requested cycles even if a cycle makes no progress: yes
+  - cycle limit: 5
+- Current expectation:
+  - the loop should operate on the isolated workspace copy, not the live checkout
+  - the run should be supervised during this initial launch window so we can verify progress and artifacts
 
 ## Files touched most recently
 - `evokammer/api/src/main/kotlin/com/achulkov/evokammer/api/service/EvoKammerRunService.kt`

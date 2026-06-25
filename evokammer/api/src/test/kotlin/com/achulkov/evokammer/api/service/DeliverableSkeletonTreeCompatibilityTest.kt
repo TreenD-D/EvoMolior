@@ -57,4 +57,35 @@ class DeliverableSkeletonTreeCompatibilityTest {
         assertEquals(2, tree.nodes.size)
         assertEquals("dst:doc:legacy", tree.nodes.first { it.nodeId != DeliverableSkeletonTree.DEFAULT_ROOT_NODE_ID }.nodeId)
     }
+
+    @Test
+    fun `legacy deliverable skeleton json without owning role still deserializes`() {
+        val legacyTreeJson = """
+            {
+              "runId": "run-legacy-tree",
+              "groupId": "group-0",
+              "rootNodeId": "dst:root",
+              "nodes": [
+                {
+                  "nodeId": "dst:root",
+                  "title": "Root",
+                  "nodeType": "ROOT",
+                  "children": ["dst:doc:legacy"]
+                },
+                {
+                  "nodeId": "dst:doc:legacy",
+                  "parentId": "dst:root",
+                  "title": "Legacy doc",
+                  "nodeType": "DOCUMENT_SECTION"
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val tree = json.decodeFromString(DeliverableSkeletonTree.serializer(), legacyTreeJson)
+
+        assertEquals(null, tree.nodes.first { it.nodeId == "dst:doc:legacy" }.owningRole)
+        assertEquals(2, tree.nodes.size)
+        assertEquals(0.0, tree.summarize().ownershipClarityScore)
+    }
 }

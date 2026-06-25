@@ -110,8 +110,8 @@ class ConstitutionalEnforcer(
             MatchableLogRule(LogRule.BUDGET_DEDUCTION_LOGGED) { action -> action.type == ActionEventType.BUDGET_DEDUCTION }
         )
 
-        /** Maximum staging submission size in bytes (50KB). */
-        private const val MAX_STAGING_SIZE_BYTES = 50_000
+        /** Maximum staging submission size in bytes (256KB). */
+        private const val MAX_STAGING_SIZE_BYTES = 256_000
     }
 }
 

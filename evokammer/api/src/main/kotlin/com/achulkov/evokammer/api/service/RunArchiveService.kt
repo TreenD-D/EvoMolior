@@ -39,6 +39,8 @@ import java.util.zip.ZipOutputStream
  * - **DEAD_ENDS_EXPORT** — all Dead Ends from all groups
  * - **LEGACY_PROTOCOLS** — top-fitness protocol packages from each group
  * - **ROUND_SUMMARY** — per-group end-of-round summary snapshots
+ * - **RUN_GRAPH_MESSAGE** — compact continuation-routing envelope for completed runs
+ * - **ADVERSARIAL_DISCRIMINATOR_FEEDBACK** — per-group failure-focused critic brief
  *
  * @param dbFactory Substrate database factory for opening per-group databases.
  */
@@ -324,6 +326,9 @@ class RunArchiveService(
                 }
             }
 
+            val highLevelRunLog = buildHighLevelRunLog(startingField, resolvedCompletionRecord, generatedOutputs)
+            addEntry("outputs/high-level-run-log.txt", highLevelRunLog.toByteArray(Charsets.UTF_8))
+
             val treeOutputs = File(resolveRunRoot(runId), "results")
                 .listFiles { file -> file.isFile && file.name.startsWith("deliverable-skeleton-tree-") && file.name.endsWith(".json") }
                 ?.sortedBy { it.name }
@@ -395,6 +400,9 @@ class RunArchiveService(
         const val ENTRY_ROUND_SUMMARY    = "ROUND_SUMMARY"
         const val ENTRY_GRADING_SHEET    = "GRADING_SHEET"
         const val ENTRY_RUN_COMPLETED    = "RUN_COMPLETED"
+        const val ENTRY_RUN_GRAPH_MESSAGE = "RUN_GRAPH_MESSAGE"
+        const val ENTRY_ADVERSARIAL_DISCRIMINATOR_FEEDBACK = "ADVERSARIAL_DISCRIMINATOR_FEEDBACK"
+        const val ENTRY_ADVERSARIAL_DISCRIMINATOR_REWARD = "ADVERSARIAL_DISCRIMINATOR_REWARD"
     }
 
     private fun resolveRunRoot(runId: String): File = dbFactory.dbFilePath(runId, "group-0")
@@ -428,6 +436,16 @@ class RunArchiveService(
                 ?: resolvedCompletionRecord?.requestedOutputSpec
                 ?: resolveRequestedOutputSpec(runId)
         )
+        val startingField = runCatching {
+            val startingFieldEntry = entries.firstOrNull { it.entryType == ENTRY_STARTING_FIELD } ?: return@runCatching null
+            json.decodeFromString(StartingField.serializer(), startingFieldEntry.contentJson)
+        }.getOrNull()
+        if (startingField != null) {
+            generatedOutputFile(runId, "high-level-run-log.txt").also { file ->
+                file.parentFile?.mkdirs()
+                file.writeText(buildHighLevelRunLog(startingField, resolvedCompletionRecord, generatedOutputs), Charsets.UTF_8)
+            }
+        }
         generatedOutputs.map { output ->
             generatedOutputFile(runId, output.relativePath).also { file ->
                 file.parentFile?.mkdirs()
@@ -705,6 +723,37 @@ class RunArchiveService(
             append("</body>\n")
             append("</html>\n")
         }
+    }
+
+    private fun buildHighLevelRunLog(
+        startingField: StartingField,
+        completionRecord: RunCompletionRecord?,
+        generatedOutputs: List<GeneratedOutputFile>
+    ): String = buildString {
+        appendLine("EvoKammer High-Level Run Log")
+        appendLine("Run ID: ${startingField.runId}")
+        appendLine("Objective: ${startingField.objective.take(240)}")
+        appendLine("Winner: ${completionRecord?.winnerId ?: "unresolved"}")
+        appendLine("Completed at: ${completionRecord?.completedAtMs?.let { java.time.Instant.ofEpochMilli(it) } ?: java.time.Instant.EPOCH}")
+        appendLine("Final outputs: ${if (generatedOutputs.isEmpty()) "none" else generatedOutputs.joinToString { it.relativePath }}")
+        appendLine("Judge outputs recorded: ${completionRecord?.judgeOutputsByGrader?.size ?: 0}")
+        appendLine("Group summaries recorded: ${completionRecord?.submissionSummariesByGroup?.size ?: 0}")
+        completionRecord?.finalAnswerSummary
+            ?.takeIf { it.isNotBlank() }
+            ?.let { summary ->
+                appendLine()
+                appendLine("Final answer summary:")
+                appendLine(summary.lineSequence().firstOrNull().orEmpty().take(280))
+            }
+        completionRecord?.submissionSummariesByGroup
+            ?.entries
+            ?.sortedBy { it.key }
+            ?.forEach { (groupId, summary) ->
+                val headline = summary.orEmpty().lineSequence().firstOrNull().orEmpty().take(180)
+                appendLine("- $groupId: ${headline.ifBlank { "no submission summary" }}")
+            }
+        appendLine()
+        appendLine("Note: detailed event logs remain in the archive and run event stream.")
     }
 
     private fun resolveRequestedOutputSpec(runId: String): FinalOutputSpec? {
@@ -985,17 +1034,50 @@ class RunArchiveService(
 private val PLACEHOLDER_AUTHOR_PATTERN = Regex("""(?i)\b[A-Z][\p{L}'’\-]+(?:\s+[A-Z](?:\.)?)+,\s*et al\.""")
 
 internal fun validateGeneratedOutputFile(output: GeneratedOutputFile): GeneratedOutputFile {
-    when {
+    return when {
         output.mediaType.startsWith("text/html", ignoreCase = true) -> {
-            validateHtmlCitationTraceability(output.content, output.relativePath)
+            val normalizedOutput = output.copy(
+                content = normalizePublishedHtmlStructure(
+                    content = output.content,
+                    relativePath = output.relativePath
+                )
+            )
+            validateHtmlCitationTraceability(normalizedOutput.content, normalizedOutput.relativePath)
+            normalizedOutput
         }
         output.mediaType.equals("application/json", ignoreCase = true) ||
             output.mediaType.endsWith("+json", ignoreCase = true) -> {
             validateJsonCitationTraceability(output.content, output.relativePath)
+            output
         }
+        else -> output
     }
-    return output
 }
+
+private fun normalizePublishedHtmlStructure(content: String, relativePath: String): String {
+    if (Regex("(?is)<footer\\b").containsMatchIn(content)) return content
+
+    val footer = """
+        <footer class="evokammer-generated-footer" role="contentinfo">
+          <p>Published artifact: ${escapeFooterHtml(relativePath)}.</p>
+        </footer>
+    """.trimIndent()
+
+    return when {
+        Regex("(?is)</body\\s*>").containsMatchIn(content) ->
+            content.replaceFirst(Regex("(?is)</body\\s*>"), "$footer\n</body>")
+        Regex("(?is)</html\\s*>").containsMatchIn(content) ->
+            content.replaceFirst(Regex("(?is)</html\\s*>"), "$footer\n</html>")
+        else -> "$content\n$footer"
+    }
+}
+
+private fun escapeFooterHtml(value: String): String =
+    value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
 
 private fun validateHtmlCitationTraceability(content: String, relativePath: String) {
     val referenceItems = Regex("(?is)<li[^>]*>(.*?)</li>")

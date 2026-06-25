@@ -19,6 +19,7 @@ object ModelSelectionConfig {
     const val DEFAULT_RUNTIME_OUTLIER_MODEL = "deepseek/deepseek-v4-flash"
     const val DEFAULT_RUNTIME_METAPLANNER_MODEL = "openai/gpt-5-mini"
     const val DEFAULT_RUNTIME_AUDITOR_MODEL = DEFAULT_RUNTIME_CRITIC_MODEL
+    const val DEFAULT_RUNTIME_PERSPECTIVE_TAKER_MODEL = DEFAULT_RUNTIME_PLANNER_MODEL
     const val DEFAULT_RUNTIME_FALLBACK_MODEL = "openai/gpt-oss-20b"
 
     const val DEFAULT_COUNCIL_MODEL = "x-ai/grok-4.3"
@@ -76,6 +77,11 @@ object ModelSelectionConfig {
             DEFAULT_RUNTIME_AUDITOR_MODEL,
             "deepseek/deepseek-v4-flash",
             DEFAULT_RUNTIME_FALLBACK_MODEL
+        ),
+        Role.PerspectiveTaker to listOf(
+            DEFAULT_RUNTIME_PERSPECTIVE_TAKER_MODEL,
+            "deepseek/deepseek-v3.2",
+            DEFAULT_RUNTIME_CRITIC_MODEL
         ),
         Role.MetaPlanner to listOf(
             DEFAULT_RUNTIME_METAPLANNER_MODEL,
@@ -143,6 +149,7 @@ object ModelSelectionConfig {
         Role.Builder.name to defaultModelFor(Role.Builder, random),
         Role.Archivist.name to defaultModelFor(Role.Archivist, random),
         Role.Outlier.name to defaultModelFor(Role.Outlier, random),
+        Role.PerspectiveTaker.name to defaultModelFor(Role.PerspectiveTaker, random),
         Role.MetaPlanner.name to defaultModelFor(Role.MetaPlanner, random)
     )
 

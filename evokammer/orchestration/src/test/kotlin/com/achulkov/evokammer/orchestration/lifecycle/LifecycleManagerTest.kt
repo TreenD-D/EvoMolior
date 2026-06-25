@@ -8,6 +8,7 @@ import com.achulkov.evokammer.core.contract.RunInputArtifact
 import com.achulkov.evokammer.core.contract.RunInputArtifactKind
 import com.achulkov.evokammer.core.contract.RoleAllocation
 import com.achulkov.evokammer.core.contract.RoleAllocationEntry
+import com.achulkov.evokammer.core.contract.StartingField
 import com.achulkov.evokammer.core.model.GroupProfile
 import com.achulkov.evokammer.core.model.GroupProfileType
 import com.achulkov.evokammer.core.model.Role
@@ -31,6 +32,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import kotlin.io.path.createTempDirectory
 import kotlin.random.Random
@@ -47,6 +49,7 @@ import kotlin.test.assertTrue
  * No Shuru CLI, Room DB, or LLM is required.
  * Tests verify the spawn/kill/budget-poll lifecycle using a fake runner.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class LifecycleManagerTest {
 
     private data class ManagerHarness(
@@ -118,6 +121,37 @@ class LifecycleManagerTest {
         agentJarPath = "/fake/agent.jar"
     )
 
+
+    @Test
+    fun `nested lifecycle manager inherits starting field into child boot contexts`() = runTest {
+        val observedStartingField = CompletableDeferred<StartingField?>()
+        val startingField = StartingField.default(
+            objective = "propagate the original run seed",
+            runId = "run-test",
+            groupCount = 2
+        )
+
+        val harness = makeManagerHarness(
+            nestedRunner = null,
+            runner = { bootContext, _ ->
+                observedStartingField.complete(bootContext.startingField)
+            }
+        )
+        harness.manager.configureStartingField(startingField)
+
+        val nestedJob = harness.manager.spawnNestedGroup(
+            config = nestedConfig(),
+            scope = this
+        )
+
+        nestedJob.join()
+
+        val childStartingField = observedStartingField.await()
+        assertNotNull(childStartingField)
+        assertEquals(startingField.runId, childStartingField.runId)
+        assertEquals(startingField.objective, childStartingField.objective)
+    }
+
     private fun singleResearcherAllocation(budgetPerAgent: Double = 50.0) = RoleAllocation(
         runId = "run-test",
         groupId = "group-0",
@@ -126,6 +160,114 @@ class LifecycleManagerTest {
         totalBudgetCeiling = budgetPerAgent,
         rationale = "test"
     )
+
+    private fun imbalancedThreeRoleAllocation() = RoleAllocation(
+        runId = "run-test",
+        groupId = "group-0",
+        generation = 1,
+        entries = listOf(
+            RoleAllocationEntry(Role.Researcher, 1, 200.0),
+            RoleAllocationEntry(Role.Builder, 1, 50.0),
+            RoleAllocationEntry(Role.Critic, 1, 50.0)
+        ),
+        totalBudgetCeiling = 300.0,
+        rationale = "test turn-taking imbalance"
+    )
+
+    @Test
+    fun `dominantTurnTakingSignal returns a signal when one role exceeds the cutoff`() {
+        val signal = LifecycleManager(
+            runId = "run-test",
+            groupId = "group-0",
+            shuruVmManager = ShuruVmManager(),
+            substrateDatabaseFactory = SubstrateDatabaseFactory(createTempDirectory("lm-test-pure-").toFile()),
+            agentJarPath = "/fake/agent.jar",
+            openRouterApiKey = "sk-test",
+            groupProfile = profile,
+            localAgentRunner = null
+        ).dominantTurnTakingSignal(
+            valuesByRole = mapOf(
+                Role.Researcher to 200.0,
+                Role.Builder to 50.0,
+                Role.Critic to 50.0
+            ),
+            signalKind = "allocated",
+            minimumDistinctRoles = 2
+        )
+
+        assertNotNull(signal)
+        assertEquals(Role.Researcher, signal.dominantRole)
+        assertEquals("allocated", signal.signalKind)
+        assertEquals(3, signal.activeRoleCount)
+        assertEquals(0.666, signal.dominantShare, 0.01)
+    }
+
+    @Test
+    fun `participation entropy is higher for balanced role distributions than dominant ones`() {
+        val manager = LifecycleManager(
+            runId = "run-test",
+            groupId = "group-0",
+            shuruVmManager = ShuruVmManager(),
+            substrateDatabaseFactory = SubstrateDatabaseFactory(createTempDirectory("lm-entropy-test-").toFile()),
+            agentJarPath = "/fake/agent.jar",
+            openRouterApiKey = "sk-test",
+            groupProfile = profile,
+            localAgentRunner = null
+        )
+
+        val balanced = manager.participationEntropyMetrics(
+            mapOf(
+                Role.Researcher to 100.0,
+                Role.Builder to 100.0,
+                Role.Critic to 100.0
+            )
+        )
+        val dominant = manager.participationEntropyMetrics(
+            mapOf(
+                Role.Researcher to 200.0,
+                Role.Builder to 50.0,
+                Role.Critic to 50.0
+            )
+        )
+
+        assertNotNull(balanced)
+        assertNotNull(dominant)
+        assertTrue(balanced.normalizedEntropy > dominant.normalizedEntropy)
+        assertTrue(balanced.entropy > dominant.entropy)
+    }
+
+    @Test
+    fun `dominantTurnTakingSignal ignores balanced or under-participated role distributions`() {
+        val manager = LifecycleManager(
+            runId = "run-test",
+            groupId = "group-0",
+            shuruVmManager = ShuruVmManager(),
+            substrateDatabaseFactory = SubstrateDatabaseFactory(createTempDirectory("lm-test-pure-2-").toFile()),
+            agentJarPath = "/fake/agent.jar",
+            openRouterApiKey = "sk-test",
+            groupProfile = profile,
+            localAgentRunner = null
+        )
+
+        assertNull(
+            manager.dominantTurnTakingSignal(
+                valuesByRole = mapOf(
+                    Role.Researcher to 100.0,
+                    Role.Builder to 100.0,
+                    Role.Critic to 100.0
+                ),
+                signalKind = "allocated",
+                minimumDistinctRoles = 2
+            )
+        )
+        assertNull(
+            manager.dominantTurnTakingSignal(
+                valuesByRole = mapOf(Role.Researcher to 300.0),
+                signalKind = "allocated",
+                minimumDistinctRoles = 2
+            )
+        )
+    }
 
     /**
      * Polls a value on a real dispatcher until it becomes available.
@@ -237,6 +379,62 @@ class LifecycleManagerTest {
         assertEquals(allocationBudget, receivedBudget, 0.001,
             "bootContext.allocatedBudget must equal the RoleAllocationEntry.budgetPerAgent")
         manager.terminateAll()
+        testScheduler.advanceUntilIdle()
+    }
+
+    @Test
+    fun `spawnGeneration emits an inspector flag when one role dominates the allocation`() = runTest {
+        val harness = makeManagerHarness { bootContext, onBudgetLedger ->
+            val ledger = BudgetLedger(
+                agentId = bootContext.agentId,
+                initialBudget = bootContext.allocatedBudget,
+                floor = 0.0,
+                config = budgetConfig
+            )
+            onBudgetLedger?.invoke(ledger)
+
+            delay(1_000)
+        }
+
+        harness.manager.spawnGeneration(
+            allocation = imbalancedThreeRoleAllocation(),
+            stageDisclosure = "Stage fairness",
+            modelAssignments = mapOf(
+                Role.Researcher.name to "openai/gpt-4o-mini",
+                Role.Builder.name to "openai/gpt-4o-mini",
+                Role.Critic.name to "openai/gpt-4o-mini"
+            ),
+            modelPools = emptyMap(),
+            rolePrompts = mapOf(
+                Role.Researcher.name to "You are a researcher.",
+                Role.Builder.name to "You are a builder.",
+                Role.Critic.name to "You are a critic."
+            ),
+            scope = backgroundScope
+        )
+
+        testScheduler.advanceTimeBy(200)
+        testScheduler.advanceUntilIdle()
+
+        val inspectorFlags = awaitRealTimeValue(timeoutMs = 5_000) {
+            harness.substrateFactory
+                .get("run-test", "group-0")
+                .eventLogDao()
+                .getLatestByType("run-test", "group-0", EventTypes.INSPECTOR_FLAG, 10)
+                .takeIf { it.isNotEmpty() }
+        }
+
+        assertTrue(inspectorFlags.isNotEmpty(), "Expected an inspector flag for turn-taking imbalance")
+        assertTrue(
+            inspectorFlags.any { it.payloadJson.contains("turn_taking") },
+            "Inspector flag payload should classify the issue as turn-taking imbalance"
+        )
+        assertTrue(
+            inspectorFlags.any { it.payloadJson.contains("conversationEntropy") && it.payloadJson.contains("normalizedConversationEntropy") },
+            "Inspector flag payload should include conversation entropy metrics"
+        )
+
+        harness.manager.terminateAll()
         testScheduler.advanceUntilIdle()
     }
 

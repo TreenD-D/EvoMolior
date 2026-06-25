@@ -503,6 +503,10 @@ private fun buildDefaultFollowUpPrompt(primaryPrompt: String): String = """
     Requirements:
     - inspect previous-stage artifacts via read_run_artifact
     - preserve strong structure and improve weak areas
+    - do not compress, summarize, or shorten a prior deliverable that already satisfies the
+      objective; keep its substantive depth and expand only the weak parts
+    - preserve source-grounded evidence notes, evidence-traceability tables, metrics tables,
+      caveats, and explicit inference labels when they exist in the prior deliverable
     - if a prior final deliverable exists, expand and refine it rather than starting over
     - produce one polished operator-facing output file
 """.trimIndent()

@@ -13,6 +13,7 @@ import com.achulkov.evokammer.core.contract.OverseerKernelAuditEntry
 import com.achulkov.evokammer.core.contract.OverseerKernelEligibility
 import com.achulkov.evokammer.core.contract.OverseerKernelState
 import com.achulkov.evokammer.core.contract.OverseerKernelArchive
+import com.achulkov.evokammer.core.contract.OverseerKernelRetentionPolicy
 import com.achulkov.evokammer.core.overseer.OverseerKernel
 import com.achulkov.evokammer.substrate.OverseerKernelAuditStore
 import com.achulkov.evokammer.substrate.OverseerKernelStateStore
@@ -228,6 +229,41 @@ class OverseerKernelService(
                 note = deadEnd.reason
             ).let { auditEntry -> MutationResult(updated, auditEntry) }
         }
+
+    /**
+     * Applies the recurrent-loop forget gate to stale terminal entries.
+     *
+     * @param retentionPolicy Forget-gate policy for terminal hypotheses.
+     * @return Updated kernel snapshot plus audit entry when pruning occurred, or null otherwise.
+     */
+    fun compactTerminalState(
+        retentionPolicy: OverseerKernelRetentionPolicy = OverseerKernelRetentionPolicy()
+    ): MutationResult? {
+        synchronized(this) {
+            val current = currentState()
+            val result = kernel.compactTerminalState(current, retentionPolicy = retentionPolicy)
+            if (result.prunedHypothesisIds.isEmpty() && result.prunedExperimentPlanIds.isEmpty()) {
+                return null
+            }
+
+            val note = buildString {
+                append("Pruned terminal hypotheses: ")
+                append(result.prunedHypothesisIds.sorted().joinToString(", "))
+                if (result.prunedExperimentPlanIds.isNotEmpty()) {
+                    append("; pruned experiment plans: ")
+                    append(result.prunedExperimentPlanIds.sorted().joinToString(", "))
+                }
+            }
+
+            val auditEntry = result.state.auditEntry(
+                actionType = OverseerKernelAuditActionType.COMPACT_KERNEL_STATE,
+                note = note
+            )
+            auditStore.append(auditEntry)
+            stateStore.write(result.state)
+            return MutationResult(result.state, auditEntry)
+        }
+    }
 
     /**
      * Returns the durable Overseer audit trail.

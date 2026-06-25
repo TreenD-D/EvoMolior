@@ -4,6 +4,7 @@ import com.achulkov.evokammer.core.contract.DeliverableSkeletonNode
 import com.achulkov.evokammer.core.contract.DeliverableSkeletonNodeStatus
 import com.achulkov.evokammer.core.contract.DeliverableSkeletonNodeType
 import com.achulkov.evokammer.core.contract.DeliverableSkeletonTree
+import com.achulkov.evokammer.core.contract.DeliverableSkeletonTree.Companion.defaultOwningRoleForNodeType
 import com.achulkov.evokammer.core.contract.DstRefinementKind
 import com.achulkov.evokammer.core.contract.DstRefinementProposal
 import com.achulkov.evokammer.core.contract.DstRefinementResult
@@ -140,6 +141,7 @@ class DeliverableSkeletonTreeRefiner(
                 artifactType = targetNode.artifactType,
                 owningGeneration = 0,
                 owningAgentId = null,
+                owningRole = targetNode.owningRole ?: defaultOwningRoleForNodeType(spec.nodeType),
                 trustScore = 0.0,
                 graderComplexityLevel = spec.graderComplexityLevel,
                 gradingHistory = emptyList(),
@@ -218,6 +220,7 @@ class DeliverableSkeletonTreeRefiner(
             artifactType = bestSource.artifactType,
             owningGeneration = generation,
             owningAgentId = bestSource.owningAgentId,
+            owningRole = bestSource.owningRole ?: defaultOwningRoleForNodeType(proposal.newType ?: bestSource.nodeType),
             trustScore = bestSource.trustScore,
             graderComplexityLevel = sourceNodes.maxOf { it.graderComplexityLevel },
             gradingHistory = sourceNodes.flatMap { it.gradingHistory }.distinct(),
