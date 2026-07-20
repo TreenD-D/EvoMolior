@@ -56,6 +56,9 @@ After one compatible image has been built locally, stream and deploy it again wi
 ./scripts/remote_cli_container.sh deploy-direct
 ```
 
+If the remote host already has the exact local image ID, `deploy-direct` skips the image transfer
+and only refreshes the Compose bundle and service.
+
 ## Fresh Ubuntu VPS Setup
 
 These steps assume a fresh Ubuntu 22.04 or 24.04 VPS with SSH access as `root` or as a sudo-capable user.
@@ -259,7 +262,9 @@ Security notes for the deploy task:
 ## Run The Dashboard
 
 ```bash
-docker run --rm -p 8080:8080 \
+docker run --rm --network host \
+  -e EVOMOLIOR_DASHBOARD_HOST=127.0.0.1 \
+  -e EVOMOLIOR_DASHBOARD_PORT=8080 \
   -e EVOMOLIOR_DASHBOARD_USERNAME=operator \
   -e EVOMOLIOR_DASHBOARD_PASSWORD='change-this-password' \
   -e QWEN_API_KEY="$QWEN_API_KEY" \
@@ -335,12 +340,14 @@ Create `docker-compose.yml`:
 services:
   evomolior-cli:
     image: ${EVOMOLIOR_IMAGE}
-    ports:
-      - "127.0.0.1:8080:8080"
+    network_mode: host
     environment:
+      EVOMOLIOR_DASHBOARD_HOST: "${EVOMOLIOR_REMOTE_BIND_HOST:-127.0.0.1}"
+      EVOMOLIOR_DASHBOARD_PORT: "${EVOMOLIOR_DASHBOARD_PORT:-8080}"
       EVOMOLIOR_DASHBOARD_USERNAME: "${EVOMOLIOR_DASHBOARD_USERNAME:?set an operator username}"
       EVOMOLIOR_DASHBOARD_PASSWORD: "${EVOMOLIOR_DASHBOARD_PASSWORD:?set an operator password}"
       EVOMOLIOR_DASHBOARD_DATA_DIR: /data
+      EVOMOLIOR_DASHBOARD_SECURE_COOKIE: "${EVOMOLIOR_DASHBOARD_SECURE_COOKIE:-false}"
       QWEN_API_KEY: "${QWEN_API_KEY:-}"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
     volumes:
@@ -350,6 +357,23 @@ services:
 volumes:
   evomolior-data:
 ```
+
+The remote bundle uses Linux host networking so the dashboard process can bind directly to
+`127.0.0.1`. This keeps the application on loopback for an SSH tunnel or same-host reverse proxy
+and satisfies the dashboard's fail-closed cookie policy. Set `EVOMOLIOR_REMOTE_BIND_HOST=0.0.0.0`
+only with HTTPS termination and `EVOMOLIOR_DASHBOARD_SECURE_COOKIE=true`.
+
+### Private SSH Tunnel Access
+
+When the dashboard is bound to the recommended `127.0.0.1`, open a tunnel from the operator
+workstation:
+
+```bash
+ssh -N -L 8080:127.0.0.1:8080 evomolior@SERVER_ADDRESS
+```
+
+Keep that terminal open and browse to `http://127.0.0.1:8080`. The dashboard remains unreachable
+on the server's public port while the browser connection travels inside SSH.
 
 Start the service:
 

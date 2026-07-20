@@ -65,6 +65,7 @@ REMOTE_DIR="${EVOMOLIOR_REMOTE_DIR:-/opt/evomolior}"
 REMOTE_PORT="${EVOMOLIOR_REMOTE_PORT:-22}"
 DASHBOARD_PORT="${EVOMOLIOR_DASHBOARD_PORT:-8080}"
 REMOTE_BIND_HOST="${EVOMOLIOR_REMOTE_BIND_HOST:-127.0.0.1}"
+DASHBOARD_SECURE_COOKIE="${EVOMOLIOR_DASHBOARD_SECURE_COOKIE:-false}"
 
 ssh_args=(-p "$REMOTE_PORT")
 scp_args=(-P "$REMOTE_PORT")
@@ -105,12 +106,14 @@ write_remote_bundle() {
 services:
   evomolior-cli:
     image: \${EVOMOLIOR_IMAGE}
-    ports:
-      - "\${EVOMOLIOR_REMOTE_BIND_HOST:-127.0.0.1}:\${EVOMOLIOR_DASHBOARD_PORT:-8080}:8080"
+    network_mode: host
     environment:
+      EVOMOLIOR_DASHBOARD_HOST: "\${EVOMOLIOR_REMOTE_BIND_HOST:-127.0.0.1}"
+      EVOMOLIOR_DASHBOARD_PORT: "\${EVOMOLIOR_DASHBOARD_PORT:-8080}"
       EVOMOLIOR_DASHBOARD_USERNAME: "\${EVOMOLIOR_DASHBOARD_USERNAME:?set an operator username}"
       EVOMOLIOR_DASHBOARD_PASSWORD: "\${EVOMOLIOR_DASHBOARD_PASSWORD:?set an operator password}"
       EVOMOLIOR_DASHBOARD_DATA_DIR: /data
+      EVOMOLIOR_DASHBOARD_SECURE_COOKIE: "\${EVOMOLIOR_DASHBOARD_SECURE_COOKIE:-false}"
       QWEN_API_KEY: "\${QWEN_API_KEY:-}"
       OPENROUTER_API_KEY: "\${OPENROUTER_API_KEY:-}"
     volumes:
@@ -125,6 +128,7 @@ EOF
     write_dotenv_entry EVOMOLIOR_IMAGE "$FULL_IMAGE"
     write_dotenv_entry EVOMOLIOR_REMOTE_BIND_HOST "$REMOTE_BIND_HOST"
     write_dotenv_entry EVOMOLIOR_DASHBOARD_PORT "$DASHBOARD_PORT"
+    write_dotenv_entry EVOMOLIOR_DASHBOARD_SECURE_COOKIE "$DASHBOARD_SECURE_COOKIE"
     write_dotenv_entry EVOMOLIOR_DASHBOARD_USERNAME "${EVOMOLIOR_DASHBOARD_USERNAME:-}"
     write_dotenv_entry EVOMOLIOR_DASHBOARD_PASSWORD "${EVOMOLIOR_DASHBOARD_PASSWORD:-}"
     write_dotenv_entry QWEN_API_KEY "${QWEN_API_KEY:-}"
@@ -185,9 +189,25 @@ detect_remote_platform() {
 }
 
 local_image_platform() {
-  local platform
-  platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$FULL_IMAGE")"
+  local image_id platform
+  image_id="$(local_image_id)"
+  if [[ -z "$image_id" ]]; then
+    echo "Local image is missing: $FULL_IMAGE" >&2
+    exit 2
+  fi
+  platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image_id")"
   normalize_platform "$platform"
+}
+
+local_image_id() {
+  docker image ls --no-trunc --format '{{.ID}}' "$FULL_IMAGE" | head -n 1
+}
+
+remote_image_id() {
+  local remote
+  remote="$(remote_address)"
+  ssh "${ssh_args[@]}" "$remote" \
+    "docker image inspect --format '{{.Id}}' $(shell_quote "$FULL_IMAGE") 2>/dev/null || true"
 }
 
 stage_remote_bundle() (
@@ -223,7 +243,7 @@ deploy_remote() {
 deploy_remote_direct() {
   require_remote_config
 
-  local local_platform remote remote_platform
+  local local_id local_platform remote remote_id remote_platform
   remote="$(remote_address)"
   remote_platform="${1:-$(detect_remote_platform)}"
   local_platform="$(local_image_platform)"
@@ -233,9 +253,15 @@ deploy_remote_direct() {
     exit 2
   fi
 
-  echo "Streaming $FULL_IMAGE ($local_platform) to $remote without a registry..."
-  docker image save "$FULL_IMAGE" | gzip -1 | \
-    ssh "${ssh_args[@]}" "$remote" "docker image load"
+  local_id="$(local_image_id)"
+  remote_id="$(remote_image_id)"
+  if [[ -n "$remote_id" && "$remote_id" == "$local_id" ]]; then
+    echo "$FULL_IMAGE is already loaded on $remote; skipping image transfer."
+  else
+    echo "Streaming $FULL_IMAGE ($local_platform) to $remote without a registry..."
+    docker image save "$FULL_IMAGE" | gzip -1 | \
+      ssh "${ssh_args[@]}" "$remote" "docker image load"
+  fi
 
   stage_remote_bundle
   start_remote_compose never
