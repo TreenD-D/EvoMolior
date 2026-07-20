@@ -77,7 +77,7 @@ jobs:
           gradle-cache-encryption-key: ${{ secrets.GRADLE_CACHE_ENCRYPTION_KEY }}
 
       - name: Generate log artifact
-        run: ./gradlew :evokammer:api:test --tests com.achulkov.evokammer.api.service.RunLogSignatureScannerTest --console=plain > "$RUNNER_TEMP/evokammer-run.log" 2>&1
+        run: ./gradlew :engine:api:test --tests com.achulkov.evomolior.api.service.RunLogSignatureScannerTest --console=plain > "$RUNNER_TEMP/evomolior-run.log" 2>&1
 
       - name: Scan run log signatures
-        run: ./gradlew :evokammer:api:scanRunLogSignatures -PrunLogPath="$RUNNER_TEMP/evokammer-run.log"
+        run: ./gradlew :engine:api:scanRunLogSignatures -PrunLogPath="$RUNNER_TEMP/evomolior-run.log"

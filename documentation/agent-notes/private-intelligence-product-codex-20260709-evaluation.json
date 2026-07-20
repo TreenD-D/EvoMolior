@@ -1,0 +1,324 @@
+{
+  "evaluatedAt": "2026-07-09T17:45:00+02:00",
+  "userRequestEvidence": {
+    "backend": "codex-chatgpt",
+    "model": "gpt-5.4-mini confirmed in Genesis/model log lines",
+    "originalPrimaryRunId": "private-intelligence-product-codex-20260709",
+    "originalPrimaryGroups": 5,
+    "originalPrimaryRounds": 12,
+    "originalPrimaryStatus": "COMPLETED",
+    "originalPrimaryDurationMs": 4796587,
+    "artifactRepairRunId": "private-intelligence-product-codex-retry-20260709",
+    "artifactRepairReason": "Original pipeline aborted at company/product-database.csv because text-only final-output fallback misclassified inherited HTML context; backend fix installed and artifacts regenerated from completed primary run bundle."
+  },
+  "outputRoot": "/Volumes/CrucialX9_1TB/AStudioProjects/EvoMolior/results/private-intelligence-product-codex-retry-20260709/private-intelligence-product-codex-retry-20260709",
+  "pipelineStages": [
+    {
+      "stageId": "primary",
+      "runId": "private-intelligence-product-codex-retry-20260709",
+      "status": "COMPLETED",
+      "durationMs": 276357,
+      "publishedOutputRelativePath": "final-article.html"
+    },
+    {
+      "stageId": "market-map",
+      "runId": "private-intelligence-product-codex-retry-20260709-market-map",
+      "status": "COMPLETED",
+      "durationMs": 298832,
+      "publishedOutputRelativePath": "market-map.html"
+    },
+    {
+      "stageId": "company-product-database",
+      "runId": "private-intelligence-product-codex-retry-20260709-company-product-database",
+      "status": "COMPLETED",
+      "durationMs": 215912,
+      "publishedOutputRelativePath": "company/product-database.csv"
+    },
+    {
+      "stageId": "trend-graph",
+      "runId": "private-intelligence-product-codex-retry-20260709-trend-graph",
+      "status": "COMPLETED",
+      "durationMs": 180645,
+      "publishedOutputRelativePath": "trend-graph.json"
+    },
+    {
+      "stageId": "opportunity-matrix",
+      "runId": "private-intelligence-product-codex-retry-20260709-opportunity-matrix",
+      "status": "COMPLETED",
+      "durationMs": 158381,
+      "publishedOutputRelativePath": "opportunity-matrix.csv"
+    },
+    {
+      "stageId": "thesis",
+      "runId": "private-intelligence-product-codex-retry-20260709-thesis",
+      "status": "COMPLETED",
+      "durationMs": 158106,
+      "publishedOutputRelativePath": "thesis.md"
+    },
+    {
+      "stageId": "weekly-update-feed",
+      "runId": "private-intelligence-product-codex-retry-20260709-weekly-update-feed",
+      "status": "COMPLETED",
+      "durationMs": 160463,
+      "publishedOutputRelativePath": "weekly-update-feed.md"
+    }
+  ],
+  "publishedOutputs": [
+    "company/product-database.csv",
+    "final-article.html",
+    "market-map.html",
+    "opportunity-matrix.csv",
+    "thesis.md",
+    "trend-graph.json",
+    "weekly-update-feed.md"
+  ],
+  "artifactValidation": [
+    {
+      "relativePath": "market-map.html",
+      "absolutePath": "/Volumes/CrucialX9_1TB/AStudioProjects/EvoMolior/results/private-intelligence-product-codex-retry-20260709/private-intelligence-product-codex-retry-20260709/outputs/market-map.html",
+      "exists": true,
+      "bytes": 47116,
+      "sha256": "3ce4dfe80278d63555c711e3c6c6ac3b4b0d904ece1fa8795b94ab3e9522ebdb",
+      "lineCount": 877,
+      "htmlDocumentLike": true
+    },
+    {
+      "relativePath": "company/product-database.csv",
+      "absolutePath": "/Volumes/CrucialX9_1TB/AStudioProjects/EvoMolior/results/private-intelligence-product-codex-retry-20260709/private-intelligence-product-codex-retry-20260709/outputs/company/product-database.csv",
+      "exists": true,
+      "bytes": 24393,
+      "sha256": "691de1bebc45ab0453df1099fda8c743308ecef273ff85a91e0264aabfd6f410",
+      "lineCount": 65,
+      "csvDataRows": 64,
+      "csvColumns": [
+        "category",
+        "company_or_product",
+        "positioning",
+        "target_user",
+        "core_pain",
+        "pricing_or_monetization",
+        "distribution_channel",
+        "defensibility",
+        "gap_or_white_space",
+        "confidence",
+        "evidence_or_assumption"
+      ]
+    },
+    {
+      "relativePath": "trend-graph.json",
+      "absolutePath": "/Volumes/CrucialX9_1TB/AStudioProjects/EvoMolior/results/private-intelligence-product-codex-retry-20260709/private-intelligence-product-codex-retry-20260709/outputs/trend-graph.json",
+      "exists": true,
+      "bytes": 8005,
+      "sha256": "d5aa8ff996c3a03c6ecb4d6500b32a9f5ed13d59f0d436e752a17c11e5cb6627",
+      "lineCount": 1,
+      "jsonValid": true,
+      "jsonKeys": [
+        "assumptions",
+        "edges",
+        "nodes",
+        "watchlist"
+      ],
+      "nodeCount": 10,
+      "edgeCount": 11
+    },
+    {
+      "relativePath": "opportunity-matrix.csv",
+      "absolutePath": "/Volumes/CrucialX9_1TB/AStudioProjects/EvoMolior/results/private-intelligence-product-codex-retry-20260709/private-intelligence-product-codex-retry-20260709/outputs/opportunity-matrix.csv",
+      "exists": true,
+      "bytes": 9844,
+      "sha256": "b74608b8397ab332c92d3362ac94002f933e9a5ef2954d8c2f95ba9e92ebee57",
+      "lineCount": 21,
+      "csvDataRows": 20,
+      "csvColumns": [
+        "rank",
+        "concept",
+        "target_user",
+        "pain",
+        "solution",
+        "wedge",
+        "monetization",
+        "distribution",
+        "mvp_scope",
+        "technical_feasibility",
+        "user_pain_score",
+        "willingness_to_pay_score",
+        "competition_score",
+        "distribution_score",
+        "risk_score",
+        "overall_score",
+        "top_risks",
+        "next_validation_step",
+        "landing_page_headline"
+      ]
+    },
+    {
+      "relativePath": "thesis.md",
+      "absolutePath": "/Volumes/CrucialX9_1TB/AStudioProjects/EvoMolior/results/private-intelligence-product-codex-retry-20260709/private-intelligence-product-codex-retry-20260709/outputs/thesis.md",
+      "exists": true,
+      "bytes": 10669,
+      "sha256": "a2a50e13b02a906d1d3cd0e8bd69af1c502ee24184f53c89e196d4b77983c0e2",
+      "lineCount": 259,
+      "markdownHeadingCount": 24
+    },
+    {
+      "relativePath": "weekly-update-feed.md",
+      "absolutePath": "/Volumes/CrucialX9_1TB/AStudioProjects/EvoMolior/results/private-intelligence-product-codex-retry-20260709/private-intelligence-product-codex-retry-20260709/outputs/weekly-update-feed.md",
+      "exists": true,
+      "bytes": 6410,
+      "sha256": "3a08e7f79e855b81b99324a98fc09e7a56db18561d038298cc108e3d8d91ac79",
+      "lineCount": 113,
+      "markdownHeadingCount": 13
+    }
+  ],
+  "logAudit": {
+    "originalPrimaryAndAbortedPipeline": {
+      "Dimension weight must be positive": 0,
+      "MetaJudge: need": 12,
+      "falling back to submitted dimension scores": 0,
+      "RUN FAILED": 0,
+      "timed out waiting for generated final output": 0,
+      "No space left": 0,
+      "ABORTED": 1,
+      "deepseek": 0,
+      "qwen/qwen": 0,
+      "qwen3": 0,
+      "run loop error": 1,
+      "skipped no-action final deliverable fallback": 4,
+      "allocationSummary": {
+        "records": 62,
+        "minAgents": 3,
+        "maxAgents": 5,
+        "firstRecords": [
+          {
+            "log": "debug-log.txt",
+            "group": "group-0",
+            "round": 0,
+            "agentCount": 5
+          },
+          {
+            "log": "debug-log.txt",
+            "group": "group-1",
+            "round": 0,
+            "agentCount": 5
+          },
+          {
+            "log": "debug-log.txt",
+            "group": "group-2",
+            "round": 0,
+            "agentCount": 5
+          },
+          {
+            "log": "debug-log.txt",
+            "group": "group-3",
+            "round": 0,
+            "agentCount": 5
+          },
+          {
+            "log": "debug-log.txt",
+            "group": "group-4",
+            "round": 0,
+            "agentCount": 5
+          },
+          {
+            "log": "debug-log.txt",
+            "group": "group-0",
+            "round": 1,
+            "agentCount": 4
+          },
+          {
+            "log": "debug-log.txt",
+            "group": "group-1",
+            "round": 1,
+            "agentCount": 4
+          },
+          {
+            "log": "debug-log.txt",
+            "group": "group-2",
+            "round": 1,
+            "agentCount": 4
+          },
+          {
+            "log": "debug-log.txt",
+            "group": "group-3",
+            "round": 1,
+            "agentCount": 4
+          },
+          {
+            "log": "debug-log.txt",
+            "group": "group-4",
+            "round": 1,
+            "agentCount": 4
+          }
+        ]
+      }
+    },
+    "retryPipeline": {
+      "Dimension weight must be positive": 0,
+      "MetaJudge: need": 0,
+      "falling back to submitted dimension scores": 0,
+      "RUN FAILED": 0,
+      "timed out waiting for generated final output": 0,
+      "No space left": 0,
+      "ABORTED": 0,
+      "deepseek": 0,
+      "qwen/qwen": 0,
+      "qwen3": 0,
+      "run loop error": 0,
+      "skipped no-action final deliverable fallback": 0,
+      "allocationSummary": {
+        "records": 7,
+        "minAgents": 3,
+        "maxAgents": 3,
+        "firstRecords": [
+          {
+            "log": "debug-log.txt",
+            "group": "group-0",
+            "round": 0,
+            "agentCount": 3
+          },
+          {
+            "log": "stages/company-product-database/debug-log.txt",
+            "group": "group-0",
+            "round": 0,
+            "agentCount": 3
+          },
+          {
+            "log": "stages/market-map/debug-log.txt",
+            "group": "group-0",
+            "round": 0,
+            "agentCount": 3
+          },
+          {
+            "log": "stages/opportunity-matrix/debug-log.txt",
+            "group": "group-0",
+            "round": 0,
+            "agentCount": 3
+          },
+          {
+            "log": "stages/thesis/debug-log.txt",
+            "group": "group-0",
+            "round": 0,
+            "agentCount": 3
+          },
+          {
+            "log": "stages/trend-graph/debug-log.txt",
+            "group": "group-0",
+            "round": 0,
+            "agentCount": 3
+          },
+          {
+            "log": "stages/weekly-update-feed/debug-log.txt",
+            "group": "group-0",
+            "round": 0,
+            "agentCount": 3
+          }
+        ]
+      }
+    }
+  },
+  "caveats": [
+    "The run had no live web retrieval or curated source corpus; source-sensitive market claims should be treated as hypotheses or public-market reasoning, not verified due diligence.",
+    "The CLI exposes maxAgentsPerGroup, not a hard minimum. Original primary allocation records show 4-5 agents per group per round, despite maxAgentsPerGroup=6.",
+    "The first artifact pipeline aborted after the completed primary run; final deliverables are from the successful retry pipeline rooted at outputRoot."
+  ]
+}

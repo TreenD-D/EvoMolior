@@ -1,0 +1,29 @@
+{
+  "runId": "roadmap-gpt-code-mode-validation-20260711",
+  "roundIndex": 0,
+  "events": [
+    {
+      "graderGroupId": "grader-0",
+      "targetGroupId": "group-0",
+      "scores": {
+        "accuracy": 0.0,
+        "evidence": 0.0
+      }
+    },
+    {
+      "graderGroupId": "grader-1",
+      "targetGroupId": "group-0",
+      "scores": {
+        "accuracy": 8.0,
+        "evidence": 7.0
+      }
+    },
+    {
+      "graderGroupId": "grader-2",
+      "targetGroupId": "group-0",
+      "scores": {
+        "accuracy": 0.0
+      }
+    }
+  ]
+}

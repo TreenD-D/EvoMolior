@@ -2,7 +2,7 @@
 
 ## Project Purpose
 
-EvoMolior is a Kotlin Multiplatform project whose primary JVM target hosts the **EvoKammer** system:
+EvoMolior is a Kotlin Multiplatform project whose primary JVM target hosts the **EvoMolior** system:
 a civilisational multi-agent AI framework where stateless agents compound intelligence through a
 persistent substrate (Knowledge Base + Knowledge Graph + Tool Registry) rather than through
 individual memory. The core insight: _the agent is disposable; the substrate is not._
@@ -11,9 +11,9 @@ individual memory. The core insight: _the agent is disposable; the substrate is 
 
 ```
 EvoMolior/
-  composeApp/           -- KMP app; JVM target = EvoKammer desktop control panel
+  composeApp/           -- KMP app; JVM target = EvoMolior desktop control panel
   designsystem/         -- Shared Compose UI component library
-  evokammer/
+  evomolior/
     core/               -- Domain models, contracts, budget model, constitutional laws
     substrate/          -- Room/SQLite persistence for all substrate layers
     agents/             -- Koog-based agent factory, tools, runner, Death Note protocol
@@ -44,22 +44,18 @@ EvoMolior/
 
 ## Architecture Overview
 
-The system has two runtime components:
-
-1. **Engine** (`:evokammer:*` modules) — runs agent orchestration, manages groups, substrates,
-   scoring. Runs as a separate JVM process. Communicates with the desktop via IPC.
-2. **Control Panel** (`composeApp`, JVM target) — Compose Desktop UI for configuring runs,
-   monitoring live execution, and inspecting results.
-
-Agent workloads execute inside Shuru microVMs, providing OS-level isolation. The
-Constitutional Law Enforcer intercepts every agent action before it reaches the VM.
+Normal CLI, benchmark, self-improvement, and desktop runs execute ordinary agents in-process.
+Shuru VM execution is implemented as an alternate lifecycle branch but is not selected by normal
+production entry points. Native tool calls use connected constitutional interception, typed
+side-effect gates, run-approved and role-aware source egress, and bounded tool subprocesses. The
+desktop normally uses the real service in-process; Ktor IPC is an implemented alternate interface.
 
 ### Isolation Tiers (from spec §2.1)
 
 - **Tier 0** — Global: Watchdog, Meta-Planner, Genesis Council
 - **Tier 1** — Group: each competing group has its own isolated substrate DB + VM network
-- **Tier 2** — Agent: each agent runs in its own Shuru microVM
-- **Tier 3** — Tool: tools run in a nested sub-process inside the agent VM
+- **Tier 2 intent** — Shuru agent isolation is implemented but disconnected from normal production.
+- **Tier 3 implementation** — `ToolSubSandbox` executes tools in bounded child processes.
 
 ## Module Dependency Graph
 
@@ -83,7 +79,7 @@ api       <── composeApp (JVM)
 - **No hardcoded UI strings** — always use Compose resource strings (except previews/tests)
 - **Javadoc on all public classes and functions** with `@param` references
 - **Clear, concise inline comments** explaining the _why_, not the _what_
-- **Package structure** follows `com.achulkov.evokammer.<module>.<feature>` pattern
+- **Package structure** follows `com.achulkov.evomolior.<module>.<feature>` pattern
 - **Koin modules** declared in each submodule's `DI.kt` file; wired in composeApp's `AppInitializer`
 - **Room entities** are pure data classes with no business logic
 - **No business logic in ViewModels** — delegate to use cases or repositories
@@ -91,53 +87,26 @@ api       <── composeApp (JVM)
 
 ## Spec References
 
-- Full spec: `EvoKammer_Specification_v0.2.html`
-- Implementation plan: `EvoKammer_Implementation_Plan_v1.0.md`
+- Current roadmap/state: `documentation/EvoMolior_Roadmap_and_Project_State.md`
+- Full spec: `documentation/EvoMolior_Specification_v0.2.html`
+- Implementation plan: `documentation/EvoMolior_Implementation_Plan_v1.0.md`
 - Conversation context: `conversation.md`
 
 ## Sub-module agents.md Files
 
 Each submodule has its own `agents.md` with detailed context:
 
-- [`evokammer/agents.md`](evokammer/agents.md) — engine parent overview
-- [`evokammer/core/agents.md`](evokammer/core/agents.md) — domain models and contracts
-- [`evokammer/substrate/agents.md`](evokammer/substrate/agents.md) — Room DB schema
-- [`evokammer/agents/agents.md`](evokammer/agents/agents.md) — Koog integration
-- [`evokammer/orchestration/agents.md`](evokammer/orchestration/agents.md) — lifecycle and control
-- [`evokammer/competition/agents.md`](evokammer/competition/agents.md) — multi-group mechanics
-- [`evokammer/sandbox/agents.md`](evokammer/sandbox/agents.md) — isolation and enforcement
-- [`evokammer/api/agents.md`](evokammer/api/agents.md) — IPC contracts
+- [`evomolior/agents.md`](evomolior/agents.md) — engine parent overview
+- [`evomolior/core/agents.md`](evomolior/core/agents.md) — domain models and contracts
+- [`evomolior/substrate/agents.md`](evomolior/substrate/agents.md) — Room DB schema
+- [`evomolior/agents/agents.md`](evomolior/agents/agents.md) — Koog integration
+- [`evomolior/orchestration/agents.md`](evomolior/orchestration/agents.md) — lifecycle and control
+- [`evomolior/competition/agents.md`](evomolior/competition/agents.md) — multi-group mechanics
+- [`evomolior/sandbox/agents.md`](evomolior/sandbox/agents.md) — isolation and enforcement
+- [`evomolior/api/agents.md`](evomolior/api/agents.md) — IPC contracts
 
 ## Implementation Phase Status
 
-| Phase | Description | Status |
-|---|---|---|
-| 0 | Foundation — substrate, models, sandbox, budget | Implemented |
-| 1 | Single group, single generation | Implemented (iterating) |
-| 2 | Multi-generation, civilisational compounding | Implemented (iterating) |
-| 3 | Knowledge Graph integration | Partial |
-| 4 | Multi-group competition | Implemented (iterating) |
-| 5 | Differential privacy leaks | Implemented (iterating) |
-| 6 | Grader groups and blind scoring | Partial |
-| 7 | Progressive disclosure and check-in curriculum | Implemented (iterating) |
-| 8 | Genesis Council automation | Implemented (iterating) |
-| 9 | Hierarchical civilisations and sub-agent delegation | Partial |
-| 10 | Full integration and production hardening | In progress |
-
-Status rationale:
-
-- This table is intentionally aligned to `documentation/EvoKammer_Implementation_Plan_v1.0.md`
-  without modifying that document.
-- Phase 3 is marked `Partial` because KG storage/validation exists, but the plan’s own current
-  estimate still treats the dedicated KG-Critic loop as open.
-- Phase 6 is marked `Partial` because grader criteria/judging, blind sealing, and meta-judge
-  verdicts are wired, but the plan’s current estimate still treats grader civilisation behavior as
-  incomplete.
-- Phase 9 is marked `Partial` because sub-agent delegation tooling is live, nested inner-instance
-  rollup is now implemented, and a narrow production trigger exists via the MetaPlanner stasis
-  path, but hierarchical execution is still not validated through a real full task even though
-  `NestedGroupRunner` now waits on lifecycle quiescence rather than a time-based generation
-  barrier.
-- Phase 10 remains `In progress` because integration/hardening work is active and the plan’s
-  exit conditions still require full realistic-task validation, chaos testing, leak/score-seal
-  audits, and baseline comparison.
+Current phase status is maintained only in
+`documentation/EvoMolior_Roadmap_and_Project_State.md`. This lowercase file is retained for
+tooling compatibility and must not become an independent status authority.

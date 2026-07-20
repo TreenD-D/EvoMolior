@@ -1,0 +1,46 @@
+Build a private strategic-intelligence product for indie AI/mobile app opportunity selection in 2026.
+
+This is not espionage or surveillance intelligence. Use only lawful, public-market reasoning and the
+evidence available inside this run. Treat the product as a strategic opportunity atlas for a solo
+builder or small studio choosing economically useful app and B2B SaaS ideas.
+
+Ignore any month-long-run framing. Produce a bounded, high-signal intelligence product that can be
+reviewed now.
+
+Primary scope:
+- Indie AI/mobile apps.
+- AI tooling landscape.
+- B2B SaaS niches.
+- App Store and distribution-channel gaps.
+- Scientific-funding and patent-white-space angles when they create actionable software opportunities.
+
+Required analysis:
+- Market map of categories, actors, customers, pains, budgets, and distribution channels.
+- Company/product database with representative products, positioning, pricing/monetization, target
+  users, defensibility, and gaps.
+- Trend graph data showing major opportunity themes, drivers, inhibitors, dependencies, and likely
+  2026 direction of travel.
+- Opportunity matrix ranking concrete opportunities by user pain, willingness to pay, competition,
+  distribution feasibility, technical feasibility, regulatory/safety risk, time to MVP, and expected
+  economic upside.
+- Investment/build thesis that explains where a small builder should focus and why.
+- Weekly update feed format that can be maintained over time with signals, changes, and watch items.
+- Twenty ranked app concepts with landing-page copy, MVP scope, target user, wedge, monetization,
+  distribution plan, technical feasibility, data/API dependencies, and top risks.
+
+Required named deliverables:
+- `market-map.html`
+- `company/product-database.csv`
+- `trend-graph.json`
+- `opportunity-matrix.csv`
+- `thesis.md`
+- `weekly-update-feed.md`
+
+Quality rules:
+- Be concrete and economically useful.
+- Prefer explicit uncertainty over invented facts.
+- Clearly separate observed/publicly inferable signals from hypotheses.
+- Do not claim private or non-public information.
+- Do not recommend deceptive scraping, credential misuse, privacy violations, or surveillance.
+- If live source retrieval is unavailable, label source-sensitive claims as hypotheses and use the
+  product as a decision framework rather than factual market due diligence.

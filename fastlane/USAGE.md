@@ -175,8 +175,7 @@ Create the following file:
 {
   "key_id": "KEY_ID_HERE",
   "issuer_id": "ISSUER_ID_HERE",
-  "key": "-----BEGIN PRIVATE KEY-----\nPASTE_P8_KEY_CONTENT_HERE\n-----END PRIVATE KEY-----",
+  "key": "PASTE_THE_CONTENTS_OF_YOUR_DOWNLOADED_P8_FILE_HERE"
 }
 
 ```
-

@@ -9,7 +9,7 @@
 	<key>ANDROID_CLIENT_ID</key>
 	<string>test.apps.googleusercontent.com</string>
 	<key>API_KEY</key>
-	<string>AIyrGxupGvfQdTUWtuANBVFlDNlBosffKORk4to</string>
+	<string>REPLACE_WITH_FIREBASE_API_KEY</string>
 	<key>GCM_SENDER_ID</key>
 	<string>test</string>
 	<key>PLIST_VERSION</key>
@@ -31,6 +31,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:963217316701:ios:b84f58f8d6084572d321b4</string>
+	<string>REPLACE_WITH_FIREBASE_GOOGLE_APP_ID</string>
 </dict>
 </plist>

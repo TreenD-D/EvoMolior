@@ -1,0 +1,72 @@
+name: Bug report
+description: Report a reproducible EvoMolior defect
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Do not include API keys, private prompts, credentials, or
+        security vulnerabilities here. Use the private process in SECURITY.md for vulnerabilities.
+  - type: input
+    id: revision
+    attributes:
+      label: Revision or release
+      description: Commit SHA, branch, or release tag.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, architecture, JDK version, and selected LLM backend.
+      placeholder: macOS 15, arm64, JDK 17, qwen-cloud
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Reproduction command or configuration
+      description: Redact secrets and private paths.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the lifecycle phase and bounded, redacted logs when possible.
+    validations:
+      required: true
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Failure phase
+      options:
+        - CLI or admission
+        - Genesis Council or compilation
+        - Worker lifecycle
+        - Critic or substrate promotion
+        - Grading or scoring
+        - Publication or sealed tests
+        - Archive, replay, or manifest
+        - Dashboard or deployment
+        - Unknown
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I removed credentials, personal data, and private source content.
+          required: true
+        - label: I searched existing issues for the same failure.
+          required: true

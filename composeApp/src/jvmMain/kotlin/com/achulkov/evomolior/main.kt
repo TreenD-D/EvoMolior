@@ -5,30 +5,31 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.achulkov.evokammer.agents.factory.CouncilRunner
-import com.achulkov.evokammer.agents.factory.GraderAgentContext
-import com.achulkov.evokammer.agents.factory.EvoKammerAgentFactory
-import com.achulkov.evokammer.agents.factory.requireProductiveAgentOutcome
-import com.achulkov.evokammer.agents.runner.DeathNoteProtocol
-import com.achulkov.evokammer.api.events.EvoKammerEvent
-import com.achulkov.evokammer.api.grader.GraderRunner
-import com.achulkov.evokammer.api.service.EvoKammerRunService
-import com.achulkov.evokammer.api.model.RunConfig
-import com.achulkov.evokammer.orchestration.council.GenesisCouncil
-import com.achulkov.evokammer.competition.coordinator.GroupCoordinator
-import com.achulkov.evokammer.competition.grader.GraderGroupManager
-import com.achulkov.evokammer.core.budget.BudgetConfig
-import com.achulkov.evokammer.core.model.GroupProfileType
-import com.achulkov.evokammer.core.model.ScoringDimension
-import com.achulkov.evokammer.orchestration.lifecycle.LifecycleManager
-import com.achulkov.evokammer.orchestration.metaplanner.MetaPlannerRunner
-import com.achulkov.evokammer.sandbox.shuru.ShuruVmManager
-import com.achulkov.evokammer.sandbox.toolsandbox.ToolSubSandbox
-import com.achulkov.evokammer.substrate.SubstrateDatabaseFactory
+import com.achulkov.evomolior.agents.factory.CouncilRunner
+import com.achulkov.evomolior.agents.factory.GraderAgentContext
+import com.achulkov.evomolior.agents.factory.EvoMoliorAgentFactory
+import com.achulkov.evomolior.agents.factory.requireProductiveAgentOutcome
+import com.achulkov.evomolior.agents.runner.DeathNoteProtocol
+import com.achulkov.evomolior.api.events.EvoMoliorEvent
+import com.achulkov.evomolior.api.grader.GraderRunner
+import com.achulkov.evomolior.api.service.EvoMoliorRunService
+import com.achulkov.evomolior.api.service.RunArchiveService
+import com.achulkov.evomolior.api.model.RunConfig
+import com.achulkov.evomolior.orchestration.council.GenesisCouncil
+import com.achulkov.evomolior.competition.coordinator.GroupCoordinator
+import com.achulkov.evomolior.competition.grader.GraderGroupManager
+import com.achulkov.evomolior.core.budget.BudgetConfig
+import com.achulkov.evomolior.core.model.GroupProfileType
+import com.achulkov.evomolior.core.model.ScoringDimension
+import com.achulkov.evomolior.orchestration.lifecycle.LifecycleManager
+import com.achulkov.evomolior.orchestration.metaplanner.MetaPlannerRunner
+import com.achulkov.evomolior.sandbox.shuru.ShuruVmManager
+import com.achulkov.evomolior.sandbox.toolsandbox.ToolSubSandbox
+import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
 import com.achulkov.evomolior.common.BuildConfig
-import com.achulkov.evomolior.evokammer.EvoKammerApp
-import com.achulkov.evomolior.evokammer.debug.DebugLogBridge
-import com.achulkov.evomolior.evokammer.viewmodel.EvoKammerViewModel
+import com.achulkov.evomolior.evomolior.EvoMoliorApp
+import com.achulkov.evomolior.evomolior.debug.DebugLogBridge
+import com.achulkov.evomolior.evomolior.viewmodel.EvoMoliorViewModel
 import com.achulkov.evomolior.root.AppInitializer
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
@@ -50,11 +51,11 @@ private const val OPENROUTER_PROVIDER_TOOL_PARSE_NEEDLE = "toolCallPartsOrNull"
 /**
  * Desktop application entry point.
  *
- * Wires the real [EvoKammerRunService] in-process for the JVM desktop target,
+ * Wires the real [EvoMoliorRunService] in-process for the JVM desktop target,
  * connecting all engine subsystems (substrate, orchestration, competition, sandbox).
  *
  * ### Execution mode
- * All agents run **in-process** via [EvoKammerAgentFactory] — no Shuru VMs are required.
+ * All agents run **in-process** via [EvoMoliorAgentFactory] — no Shuru VMs are required.
  * Shuru is checked at startup for informational purposes only; the run continues regardless.
  */
 fun main() {
@@ -66,25 +67,25 @@ fun main() {
     Napier.base(DebugLogBridge.antilog)
     DebugLogBridge.enabled = true // ensure always-on even if default flipped
 
-    // ── EvoKammer engine wiring ──────────────────────────────────────────────
-    // Data root: ~/.evokammer (created on first run)
-    val dataRootDir = File(System.getProperty("user.home"), ".evokammer").also { it.mkdirs() }
-    Napier.i("EvoKammer: data root = ${dataRootDir.absolutePath}")
+    // ── EvoMolior engine wiring ──────────────────────────────────────────────
+    // Data root: ~/.evomolior (created on first run)
+    val dataRootDir = File(System.getProperty("user.home"), ".evomolior").also { it.mkdirs() }
+    Napier.i("EvoMolior: data root = ${dataRootDir.absolutePath}")
 
     val substrateFactory = SubstrateDatabaseFactory(dataRootDir)
     val shuruVmManager = ShuruVmManager()
 
-    val engineService = EvoKammerRunService(
+    val engineService = EvoMoliorRunService(
         lifecycleManagerProvider = { runId, groupId, openRouterApiKey, agentJarPath, groupProfile ->
-            Napier.i("EvoKammer: creating LifecycleManager for runId=$runId groupId=$groupId profile=${groupProfile.profileType} (in-process mode)")
+            Napier.i("EvoMolior: creating LifecycleManager for runId=$runId groupId=$groupId profile=${groupProfile.profileType} (in-process mode)")
 
             // Each group gets its own database handle and workspace directory.
             val groupDb = substrateFactory.get(runId, groupId)
             val budgetConfig = BudgetConfig(groupId = groupId, profile = groupProfile)
             val workspaceDir = File(dataRootDir, "workspace/$runId/$groupId").also { it.mkdirs() }
 
-            // EvoKammerAgentFactory creates Koog AIAgent instances wired to OpenRouter.
-            val agentFactory = EvoKammerAgentFactory(
+            // EvoMoliorAgentFactory creates Koog AIAgent instances wired to OpenRouter.
+            val agentFactory = EvoMoliorAgentFactory(
                 openRouterApiKey = openRouterApiKey,
                 db = groupDb,
                 toolSubSandbox = ToolSubSandbox(workspaceDir),
@@ -107,7 +108,7 @@ fun main() {
                     val agentId = bootContext.agentId
                     val role = bootContext.role
                     val model = bootContext.modelAssignment
-                    Napier.i("EvoKammer [$groupId]: launching agent $agentId (${role.name}) model=$model allocatedBudget=${bootContext.allocatedBudget}")
+                    Napier.i("EvoMolior [$groupId]: launching agent $agentId (${role.name}) model=$model allocatedBudget=${bootContext.allocatedBudget}")
 
                     // Early guard: blank API key means the OpenRouter executor will throw at
                     // construction time (createOpenRouterPromptExecutor("") is evaluated inside
@@ -134,7 +135,7 @@ fun main() {
                     } catch (e: Exception) {
                         val durationMs = System.currentTimeMillis() - startMs
                         Napier.e(
-                            "EvoKammer [$groupId]: agent $agentId (${role.name}) CONSTRUCT FAILED " +
+                            "EvoMolior [$groupId]: agent $agentId (${role.name}) CONSTRUCT FAILED " +
                             "after ${durationMs}ms [${e::class.simpleName}]: ${e.message}",
                             e
                         )
@@ -148,7 +149,7 @@ fun main() {
 
                     // Register the live BudgetLedger so LifecycleManager can poll it
                     onBudgetLedger?.invoke(agentContext.budgetLedger)
-                    Napier.i("EvoKammer [$groupId]: agent $agentId BudgetLedger registered (initial=${agentContext.budgetLedger.initialBudget})")
+                    Napier.i("EvoMolior [$groupId]: agent $agentId BudgetLedger registered (initial=${agentContext.budgetLedger.initialBudget})")
 
                     // The agent's task prompt is derived from its role prompt or stage disclosure.
                     val taskPrompt = buildString {
@@ -163,10 +164,10 @@ fun main() {
                             appendLine()
                         }
                         append(bootContext.rolePrompt.ifBlank {
-                            "You are an EvoKammer ${role.name} agent. Fulfill your role objectives for this round."
+                            "You are an EvoMolior ${role.name} agent. Fulfill your role objectives for this round."
                         })
                     }
-                    Napier.d("EvoKammer [$groupId]: agent $agentId task prompt (${taskPrompt.length} chars): ${taskPrompt.take(200)}…")
+                    Napier.d("EvoMolior [$groupId]: agent $agentId task prompt (${taskPrompt.length} chars): ${taskPrompt.take(200)}…")
 
                     // ── Phase 2: Agent execution ───────────────────────────────────────
                     var finalResult: String? = null
@@ -174,15 +175,34 @@ fun main() {
                         finalResult = runWithOpenRouterProviderRetryLocal("AgentRunner[$agentId]") {
                             agentContext.agent.run(taskPrompt)
                         }
-                        requireProductiveAgentOutcome("AgentRunner[$agentId]", finalResult!!, agentContext.budgetLedger)
+                        requireProductiveAgentOutcome(
+                            "AgentRunner[$agentId]",
+                            finalResult!!,
+                            agentContext.budgetLedger,
+                            textOnlyCompatibilityMode = agentFactory.usesTextOnlyCompatibilityMode()
+                        )
+                        val qwenTextOnlySubmissionWritten = agentFactory.writeQwenTextOnlySubmission(
+                            bootContext = bootContext,
+                            finalResult = finalResult
+                        )
                         val actionCount = agentContext.budgetLedger.snapshot().actionLog.size
                         if (actionCount == 0) {
+                            val textOnlyCompatibilityCompletion = agentFactory.usesTextOnlyCompatibilityMode() &&
+                                qwenTextOnlySubmissionWritten
                             agentFactory.writeEmergencyDeathNote(
                                 bootContext = bootContext,
-                                reason = "WarningOnlyNoProgressCompletion",
-                                errorMessage = "agent completed without tool/write actions",
+                                reason = if (textOnlyCompatibilityCompletion) {
+                                    "TextOnlyCompatibilityCompletion"
+                                } else {
+                                    "WarningOnlyNoProgressCompletion"
+                                },
+                                errorMessage = if (textOnlyCompatibilityCompletion) {
+                                    "text-only backend completion was preserved as a staged compatibility artifact"
+                                } else {
+                                    "agent completed without tool/write actions"
+                                },
                                 finalResult = finalResult,
-                                noteKind = "warning-only"
+                                noteKind = if (textOnlyCompatibilityCompletion) "text-only" else "warning-only"
                             )
                             deathNoteProtocol.markDeathNoteWritten()
                         }
@@ -191,15 +211,15 @@ fun main() {
                         val spentBudget = String.format(java.util.Locale.ROOT, "%.2f", ledgerSnapshot.initialBudget - ledgerSnapshot.currentBalance)
                         val remainingBudget = String.format(java.util.Locale.ROOT, "%.2f", ledgerSnapshot.currentBalance)
                         Napier.i(
-                            "EvoKammer [$groupId]: agent $agentId completed in ${durationMs}ms — " +
+                            "EvoMolior [$groupId]: agent $agentId completed in ${durationMs}ms — " +
                             "budget: spent=$spentBudget remaining=$remainingBudget " +
                             "actions=${ledgerSnapshot.actionLog.size} " +
                             "result=${finalResult!!.take(100)}"
                         )
-                    } catch (e: com.achulkov.evokammer.core.contract.BlockingAgentAbortException) {
+                    } catch (e: com.achulkov.evomolior.core.contract.BlockingAgentAbortException) {
                         val durationMs = System.currentTimeMillis() - startMs
                         Napier.e(
-                            "EvoKammer [$groupId]: agent $agentId (${role.name}) RUN FAILED " +
+                            "EvoMolior [$groupId]: agent $agentId (${role.name}) RUN FAILED " +
                             "after ${durationMs}ms [${e::class.simpleName}]: ${e.message}",
                             e
                         )
@@ -215,7 +235,7 @@ fun main() {
                     } catch (e: Exception) {
                         val durationMs = System.currentTimeMillis() - startMs
                         Napier.e(
-                            "EvoKammer [$groupId]: agent $agentId (${role.name}) RUN FAILED " +
+                            "EvoMolior [$groupId]: agent $agentId (${role.name}) RUN FAILED " +
                             "after ${durationMs}ms [${e::class.simpleName}]: ${e.message}",
                             e
                         )
@@ -236,11 +256,11 @@ fun main() {
             )
         },
         groupCoordinatorProvider = { groupIds, dimensions ->
-            Napier.i("EvoKammer: creating GroupCoordinator for groups=$groupIds")
+            Napier.i("EvoMolior: creating GroupCoordinator for groups=$groupIds")
             GroupCoordinator(groupIds = groupIds, dimensions = dimensions)
         },
         graderGroupManagerProvider = { dimensions ->
-            Napier.i("EvoKammer: creating GraderGroupManager with ${dimensions.size} dimensions")
+            Napier.i("EvoMolior: creating GraderGroupManager with ${dimensions.size} dimensions")
             GraderGroupManager(dimensions = dimensions)
         },
         // Legacy graderRunner disabled — new two-phase architecture used instead.
@@ -250,7 +270,7 @@ fun main() {
             // Grader agents develop the scoring rubric without accessing any competing group.
             if (openRouterApiKey.isBlank()) {
                 Napier.w("GraderRunner: API key blank — skipping criteria phase run=$runId round=$roundIndex")
-                return@EvoKammerRunService
+                return@EvoMoliorRunService
             }
             val criteriaRunner = GraderRunner(
                 openRouterApiKey = openRouterApiKey,
@@ -266,11 +286,11 @@ fun main() {
                 onProgress = onProgress
             )
         },
-        graderJudgingRunner = { runId, openRouterApiKey, graderGroupIds, competingGroupIds, roundIndex, runObjective, scoringDimensions, graderGroupManager, onProgress ->
+        graderJudgingRunner = { runId, openRouterApiKey, graderGroupIds, competingGroupIds, roundIndex, runObjective, scoringDimensions, graderGroupManager, nodeAssignments, onNodeGradeBundles, onProgress ->
             // Phase B: RoundJudge — reads criteria from grader staging DB + scores all competing groups.
             if (openRouterApiKey.isBlank()) {
                 Napier.w("GraderRunner: API key blank — skipping judging phase run=$runId round=$roundIndex")
-                return@EvoKammerRunService emptyMap()
+                return@EvoMoliorRunService emptyMap()
             }
             val judgingRunner = GraderRunner(
                 openRouterApiKey = openRouterApiKey,
@@ -285,46 +305,53 @@ fun main() {
                 runObjective = runObjective,
                 scoringDimensions = scoringDimensions,
                 graderGroupManager = graderGroupManager,
+                nodeGradingAssignments = nodeAssignments,
+                onNodeGradeBundles = onNodeGradeBundles,
                 onProgress = onProgress
             )
         },
         metaPlannerRunner = MetaPlannerRunner(),
         substrateFactory = substrateFactory,
         shuruVmManager = shuruVmManager,
-        genesisCouncilRunner = { runId, objective, openRouterApiKey, onProgress ->
+        archiveService = RunArchiveService(substrateFactory),
+        genesisCouncilRunner = {
+                runId,
+                objective,
+                openRouterApiKey,
+                executionEnvelope,
+                inputArtifacts,
+                onProgress,
+                onInvocationStarted ->
+            onInvocationStarted()
             // Wire Genesis Council to the real CouncilRunner backed by OpenRouter.
-            // The API key flows from RunConfig → EvoKammerRunService → this lambda.
+            // The API key flows from RunConfig → EvoMoliorRunService → this lambda.
             Napier.i("GenesisCouncil: starting council for run=$runId objective='${objective.take(80)}'")
             onProgress?.invoke("Genesis Council initialising — assembling council agents…")
 
-            val council = GenesisCouncil(objective = objective, openRouterApiKey = openRouterApiKey)
-            val runner = CouncilRunner(openRouterApiKey = openRouterApiKey)
+            val council = GenesisCouncil(
+                objective = objective,
+                executionEnvelope = executionEnvelope
+            )
+            val runner = CouncilRunner(
+                openRouterApiKey = openRouterApiKey,
+                executionEnvelope = executionEnvelope
+            )
 
             Napier.i("GenesisCouncil: running council agents (this may take 1–3 minutes)")
             onProgress?.invoke("Genesis Council running 8 specialist agents in sequence…")
 
-            try {
-                val startingField = council.run(
-                    agentRunner = runner.agentRunner(),
-                    onProgress = onProgress
-                )
-                Napier.i("GenesisCouncil: council complete — groups=${startingField.groupCount} " +
-                    "models=${startingField.modelAssignment.size} " +
-                    "stages=${startingField.stageContents.size}")
-                onProgress?.invoke("Genesis Council complete — ${startingField.groupCount} groups designed")
-                // Overlay runId from the active run (council generates its own placeholder)
-                startingField.copy(runId = runId)
-            } catch (e: Exception) {
-                Napier.e("GenesisCouncil: council run failed: ${e.message}", e)
-                onProgress?.invoke("Genesis Council failed: ${e.message} — using defaults")
-                com.achulkov.evokammer.core.contract.StartingField.default(objective, runId)
-            }
+            council.runCompiled(
+                runId = runId,
+                agentRunner = runner.agentRunner(),
+                inputArtifacts = inputArtifacts,
+                onProgress = onProgress
+            )
         }
     )
 
     val autoReplayConfig = buildAutoReplayConfig()
     val autoReplayLogPath = buildAutoReplayLogPath(dataRootDir, autoReplayConfig)
-    val viewModel = EvoKammerViewModel(
+    val viewModel = EvoMoliorViewModel(
         engineService = engineService,
         substrateFactory = substrateFactory,
         dataRootDir = dataRootDir
@@ -338,31 +365,31 @@ fun main() {
         val windowState = rememberWindowState(size = DpSize(1400.dp, 900.dp))
         Window(
             onCloseRequest = ::exitApplication,
-            title = "EvoKammer — Civilisational AI Control Panel",
+            title = "EvoMolior — Civilisational AI Control Panel",
             state = windowState
         ) {
-            EvoKammerApp(viewModel = viewModel)
+            EvoMoliorApp(viewModel = viewModel)
         }
     }
 }
 
 private fun runHeadlessAutoReplay(
-    engineService: EvoKammerRunService,
+    engineService: EvoMoliorRunService,
     autoReplayConfig: RunConfig,
     logPath: File?
 ) {
     runBlocking {
         println("AUTO_REPLAY_START runId=${autoReplayConfig.runId}")
-        Napier.i("EvoKammer: headless auto replay enabled runId=${autoReplayConfig.runId}")
+        Napier.i("EvoMolior: headless auto replay enabled runId=${autoReplayConfig.runId}")
         if (logPath != null) {
-            Napier.i("EvoKammer: headless auto replay log path=${logPath.absolutePath}")
+            Napier.i("EvoMolior: headless auto replay log path=${logPath.absolutePath}")
         }
         val completionSignal = CompletableDeferred<Unit>()
 
         val eventLogger = launch(Dispatchers.Default) {
             engineService.events.collect { event ->
                 logHeadlessEvent(event)
-                if (event is EvoKammerEvent.RunCompleted && !completionSignal.isCompleted) {
+                if (event is EvoMoliorEvent.RunCompleted && !completionSignal.isCompleted) {
                     completionSignal.complete(Unit)
                 }
             }
@@ -376,7 +403,7 @@ private fun runHeadlessAutoReplay(
             }
             delay(2_000)
             println("AUTO_REPLAY_COMPLETE runId=${autoReplayConfig.runId}")
-            Napier.i("EvoKammer: headless auto replay completed runId=${autoReplayConfig.runId}")
+            Napier.i("EvoMolior: headless auto replay completed runId=${autoReplayConfig.runId}")
         } finally {
             eventLogger.cancelAndJoin()
             dumpAutoReplayLog(logPath, autoReplayConfig.runId)
@@ -384,72 +411,72 @@ private fun runHeadlessAutoReplay(
     }
 }
 
-private fun logHeadlessEvent(event: EvoKammerEvent) {
+private fun logHeadlessEvent(event: EvoMoliorEvent) {
     when (event) {
-        is EvoKammerEvent.RunStarted -> {
-            Napier.i("EvoKammerViewModel: run started runId=${event.runId}")
-            Napier.d("EvoKammerViewModel: received event RunStarted")
+        is EvoMoliorEvent.RunStarted -> {
+            Napier.i("EvoMoliorViewModel: run started runId=${event.runId}")
+            Napier.d("EvoMoliorViewModel: received event RunStarted")
         }
-        is EvoKammerEvent.RoundStarted -> {
-            Napier.i("EvoKammerViewModel: round started round=${event.roundIndex} runId=${event.runId}")
-            Napier.d("EvoKammerViewModel: received event RoundStarted")
+        is EvoMoliorEvent.RoundStarted -> {
+            Napier.i("EvoMoliorViewModel: round started round=${event.roundIndex} runId=${event.runId}")
+            Napier.d("EvoMoliorViewModel: received event RoundStarted")
         }
-        is EvoKammerEvent.RoundCompleted -> {
-            Napier.i("EvoKammerViewModel: round completed round=${event.result.roundIndex}")
-            Napier.d("EvoKammerViewModel: received event RoundCompleted")
+        is EvoMoliorEvent.RoundCompleted -> {
+            Napier.i("EvoMoliorViewModel: round completed round=${event.result.roundIndex}")
+            Napier.d("EvoMoliorViewModel: received event RoundCompleted")
         }
-        is EvoKammerEvent.RunCompleted -> {
-            Napier.i("EvoKammerViewModel: run completed runId=${event.runId} winner=${event.winnerId}")
-            Napier.d("EvoKammerViewModel: received event RunCompleted")
+        is EvoMoliorEvent.RunCompleted -> {
+            Napier.i("EvoMoliorViewModel: run completed runId=${event.runId} winner=${event.winnerId}")
+            Napier.d("EvoMoliorViewModel: received event RunCompleted")
         }
-        is EvoKammerEvent.GraderRoundStarted -> {
-            Napier.i("EvoKammerViewModel: grader round started graderGroupId=${event.graderGroupId} round=${event.roundIndex}")
-            Napier.d("EvoKammerViewModel: received event GraderRoundStarted")
+        is EvoMoliorEvent.GraderRoundStarted -> {
+            Napier.i("EvoMoliorViewModel: grader round started graderGroupId=${event.graderGroupId} round=${event.roundIndex}")
+            Napier.d("EvoMoliorViewModel: received event GraderRoundStarted")
         }
-        is EvoKammerEvent.GraderRoundCompleted -> {
-            Napier.d("EvoKammerViewModel: unhandled event type GraderRoundCompleted")
-            Napier.d("EvoKammerViewModel: received event GraderRoundCompleted")
+        is EvoMoliorEvent.GraderRoundCompleted -> {
+            Napier.d("EvoMoliorViewModel: unhandled event type GraderRoundCompleted")
+            Napier.d("EvoMoliorViewModel: received event GraderRoundCompleted")
         }
-        is EvoKammerEvent.EngineProgress -> {
-            Napier.d("EvoKammerViewModel: engine progress phase=${event.phase} msg=${event.message}")
-            Napier.d("EvoKammerViewModel: received event EngineProgress")
+        is EvoMoliorEvent.EngineProgress -> {
+            Napier.d("EvoMoliorViewModel: engine progress phase=${event.phase} msg=${event.message}")
+            Napier.d("EvoMoliorViewModel: received event EngineProgress")
         }
         else -> {
-            Napier.d("EvoKammerViewModel: unhandled event type ${event::class.simpleName}")
-            Napier.d("EvoKammerViewModel: received event ${event::class.simpleName}")
+            Napier.d("EvoMoliorViewModel: unhandled event type ${event::class.simpleName}")
+            Napier.d("EvoMoliorViewModel: received event ${event::class.simpleName}")
         }
     }
 }
 
 private fun buildAutoReplayLogPath(dataRootDir: File, autoReplayConfig: RunConfig?): File? {
     if (autoReplayConfig == null) return null
-    val overridePath = readReplayStringProperty("evokammer.replay.logPath")
+    val overridePath = readReplayStringProperty("evomolior.replay.logPath")
     return overridePath?.let { File(it) }
         ?: File(dataRootDir, "replay-logs/${autoReplayConfig.runId}.log")
 }
 
 private fun buildAutoReplayConfig(): RunConfig? {
-    val enabled = System.getProperty("evokammer.replay.enabled")
+    val enabled = System.getProperty("evomolior.replay.enabled")
         ?.equals("true", ignoreCase = true)
         ?: false
     if (!enabled) return null
 
-    val runId = readReplayStringProperty("evokammer.replay.runId")
+    val runId = readReplayStringProperty("evomolior.replay.runId")
         ?: "replay-${System.currentTimeMillis()}"
-    val objective = readReplayStringProperty("evokammer.replay.objective")
-        ?: "Replay the full EvoKammer run lifecycle for log verification."
+    val objective = readReplayStringProperty("evomolior.replay.objective")
+        ?: "Replay the full EvoMolior run lifecycle for log verification."
     val apiKey = BuildConfig.OPENROUTER_API_KEY.takeIf { it.isNotBlank() }
-        ?: error("EvoKammer auto replay requires BuildConfig.OPENROUTER_API_KEY")
-    val rounds = System.getProperty("evokammer.replay.rounds")
+        ?: error("EvoMolior auto replay requires BuildConfig.OPENROUTER_API_KEY")
+    val rounds = System.getProperty("evomolior.replay.rounds")
         ?.toIntOrNull()
         ?: 1
-    val groupCount = System.getProperty("evokammer.replay.groupCount")
+    val groupCount = System.getProperty("evomolior.replay.groupCount")
         ?.toIntOrNull()
         ?: 2
-    val roundDurationMinutes = System.getProperty("evokammer.replay.roundDurationMinutes")
+    val roundDurationMinutes = System.getProperty("evomolior.replay.roundDurationMinutes")
         ?.toIntOrNull()
         ?: 0
-    val maxAgentsPerGroup = System.getProperty("evokammer.replay.maxAgentsPerGroup")
+    val maxAgentsPerGroup = System.getProperty("evomolior.replay.maxAgentsPerGroup")
         ?.toIntOrNull()
         ?: 1
 
@@ -500,7 +527,7 @@ private fun dumpAutoReplayLog(logPath: File?, runId: String) {
             "${Instant.ofEpochMilli(entry.timestamp)} ${entry.level} ${entry.tag.orEmpty()} ${entry.message}"
         }
     logPath.writeText(lines)
-    Napier.i("EvoKammer: wrote auto replay log for runId=$runId to ${logPath.absolutePath}")
+    Napier.i("EvoMolior: wrote auto replay log for runId=$runId to ${logPath.absolutePath}")
 }
 
 private suspend fun <T> runWithOpenRouterProviderRetryLocal(
@@ -519,7 +546,7 @@ private suspend fun <T> runWithOpenRouterProviderRetryLocal(
             }
 
             if (attempt >= maxRetries) {
-                throw com.achulkov.evokammer.core.contract.BlockingAgentAbortException(
+                throw com.achulkov.evomolior.core.contract.BlockingAgentAbortException(
                     message = "$agentLabel aborted after ${attempt + 1} OpenRouter provider failure(s): ${e.message}",
                     cause = e
                 )
@@ -554,7 +581,7 @@ private suspend fun runGraderCriteriaAgent(graderContext: GraderAgentContext): S
         requireProductiveAgentOutcome("GraderCriteria[$agentId]", result, graderContext.budgetLedger)
         Napier.i("GraderRunner.criteria: $agentId completed in ${System.currentTimeMillis() - startMs}ms")
         result
-    } catch (e: com.achulkov.evokammer.core.contract.BlockingAgentAbortException) {
+    } catch (e: com.achulkov.evomolior.core.contract.BlockingAgentAbortException) {
         Napier.e("GraderRunner.criteria: $agentId aborted due to blocking provider/runtime error", e)
         throw e
     } catch (e: Exception) {
@@ -575,7 +602,7 @@ private suspend fun runGraderJudgeAgent(graderContext: GraderAgentContext): Stri
         requireProductiveAgentOutcome("GraderJudge[$agentId]", result, graderContext.budgetLedger)
         Napier.i("GraderRunner.judge: $agentId completed in ${System.currentTimeMillis() - startMs}ms")
         result
-    } catch (e: com.achulkov.evokammer.core.contract.BlockingAgentAbortException) {
+    } catch (e: com.achulkov.evomolior.core.contract.BlockingAgentAbortException) {
         Napier.e("GraderRunner.judge: $agentId aborted due to blocking provider/runtime error", e)
         throw e
     } catch (e: Exception) {

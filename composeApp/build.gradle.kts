@@ -161,15 +161,15 @@ kotlin {
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutinesSwing)
-            // EvoKammer control panel — engine IPC bridge + events
-            implementation(project(":evokammer:api"))
-            implementation(project(":evokammer:core"))
-            // EvoKammer engine modules — wired in-process for the JVM desktop target
-            implementation(project(":evokammer:substrate"))
-            implementation(project(":evokammer:agents"))
-            implementation(project(":evokammer:orchestration"))
-            implementation(project(":evokammer:competition"))
-            implementation(project(":evokammer:sandbox"))
+            // EvoMolior control panel — engine IPC bridge + events
+            implementation(project(":engine:api"))
+            implementation(project(":engine:core"))
+            // EvoMolior engine modules — wired in-process for the JVM desktop target
+            implementation(project(":engine:substrate"))
+            implementation(project(":engine:agents"))
+            implementation(project(":engine:orchestration"))
+            implementation(project(":engine:competition"))
+            implementation(project(":engine:sandbox"))
         }
 
         val nonWebMain by getting {

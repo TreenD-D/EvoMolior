@@ -1,0 +1,58 @@
+{
+  "benchmark": "DeepResearch Bench prompt 62 artifact-completeness audit",
+  "backend": "codex-chatgpt",
+  "model_policy": "all runtime roles assigned gpt-5.4-mini; Codex exec model_reasoning_effort=low",
+  "run_root": "results/tier3-official-deepresearchbench-codex-final-20260709/tier3-drb-q62-codex-final-20260709",
+  "completed_at": "2026-07-09T12:20:16.030539Z",
+  "pipeline_run_id": "tier3-drb-q62-codex-final-20260709",
+  "stages": [
+    {
+      "stage_id": "primary",
+      "run_id": "tier3-drb-q62-codex-final-20260709",
+      "status": "COMPLETED",
+      "duration_ms": 359580,
+      "published_output": "final-article.html"
+    },
+    {
+      "stage_id": "report",
+      "run_id": "tier3-drb-q62-codex-final-20260709-report",
+      "status": "COMPLETED",
+      "duration_ms": 177311,
+      "published_output": "report.md"
+    }
+  ],
+  "output": {
+    "path": "results/tier3-official-deepresearchbench-codex-final-20260709/tier3-drb-q62-codex-final-20260709/outputs/report.md",
+    "sha256": "ea16756401c80b4a7fcb37d62e89769a6dc72f565a403add1bf4c941ac837055",
+    "bytes": 19764,
+    "line_count": 372
+  },
+  "artifact_completeness": {
+    "required_sections": {
+      "Executive Summary": true,
+      "Technical Landscape": true,
+      "Comparison Table": true,
+      "Claim Ledger": true,
+      "Citation Map": true,
+      "Limitations": true,
+      "Open Questions": true
+    },
+    "all_required_sections_present": true,
+    "claim_ledger_rows": 10,
+    "contains_unverified_disclaimer": true,
+    "explicit_no_live_sources_caveat": true
+  },
+  "log_audit": {
+    "forbidden_model_mentions": {
+      "deepseek": 0,
+      "qwen/qwen": 0,
+      "qwen3": 0
+    },
+    "no_space_left_mentions": 0,
+    "run_failed_mentions": 2,
+    "aborted_mentions": 0,
+    "genesis_gpt54mini_mentions": 146
+  },
+  "score": null,
+  "score_note": "Official DeepResearch Bench rubric evaluator is not wired; this file records artifact completeness and backend/model evidence only."
+}

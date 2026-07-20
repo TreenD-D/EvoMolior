@@ -1,0 +1,15 @@
+{
+  "run_id": "tier4-real-metasyn-task24-rerun-20260704",
+  "output_path": "results/tier4-real-metasyn-20260704-rerun/tier4-real-metasyn-task24-rerun-20260704/outputs/systematic_review_pack.md",
+  "output_sha256": "9add605a219cdb5d8f46b761469118dd480ca5bd4c1a37a7022f8c5e11faafed",
+  "input_path": "results/tier4-real-metasyn-20260704-input/metasyn_task_24_candidates.md",
+  "input_sha256": "327341b8f269fe6a68b76817f814b9084f8dbaeb9edaca4274b324e9ea1d1fc7",
+  "predicted_included_corpus_ids": [4565, 4566],
+  "predicted_excluded_corpus_ids": [4567, 4558, 4559, 4568, 4570, 4571],
+  "predicted_synthesis_direction": "Null",
+  "predicted_statistical_significance": "Non-significant",
+  "predicted_conclusion_summary": "Very-low-calorie diet therapy appears to produce a similar magnitude of weight loss in obese patients irrespective of diabetes status.",
+  "false_negative_rationale_from_output": {
+    "4567": "EvoMolior excluded this official matched positive because the abstract presents a single mixed cohort without a separate non-diabetic comparator."
+  }
+}

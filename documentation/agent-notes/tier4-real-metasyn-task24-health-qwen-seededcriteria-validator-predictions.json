@@ -1,0 +1,30 @@
+{
+  "run_id": "tier4-real-metasyn-task24-complex-health-qwen-seededcriteria-validator-20260705",
+  "output_path": "results/tier4-real-metasyn-task24-health-20260704-complex/tier4-real-metasyn-task24-complex-health-qwen-seededcriteria-validator-20260705/outputs/systematic_review_pack.md",
+  "output_sha256": "9c23b0865781efeaf0fa271e030e961627a8a13b1e5180f05bb36b9b6d42fee6",
+  "input_path": "results/tier4-real-metasyn-20260704-input/metasyn_task_24_candidates.md",
+  "input_sha256": "327341b8f269fe6a68b76817f814b9084f8dbaeb9edaca4274b324e9ea1d1fc7",
+  "predicted_included_corpus_ids": [
+    4565,
+    4566
+  ],
+  "predicted_excluded_corpus_ids": [
+    4558,
+    4559,
+    4567,
+    4568,
+    4570,
+    4571
+  ],
+  "predicted_synthesis_direction": "Null",
+  "predicted_statistical_significance": "Non-significant",
+  "predicted_conclusion_summary": "The seeded-criteria Qwen validator run concluded that two eligible VLCD studies suggest comparable magnitude of weight loss between obese adults with and without type 2 diabetes, while excluding 4567 as a pooled mixed cohort without a reported T2DM versus non-T2DM weight-loss comparison.",
+  "false_negative_rationale_from_output": {
+    "4567": "The final pack excluded 4567 because it judged that the abstract reported pooled weight loss for a mixed cohort and did not provide a stratified T2DM versus non-T2DM weight-change comparison."
+  },
+  "extraction_notes": [
+    "The final systematic_review_pack.md contains candidate rows for all eight task-24 candidate IDs across included_studies.csv, excluded_hard_negatives.csv, exclusion_reasons.csv, and evidence_table.csv.",
+    "The run used the Qwen backend and completed after deterministic criteria seeding plus systematic-review final-output validator hardening.",
+    "This is a candidate-subset benchmark audit, not an official full MetaSyn leaderboard run."
+  ]
+}

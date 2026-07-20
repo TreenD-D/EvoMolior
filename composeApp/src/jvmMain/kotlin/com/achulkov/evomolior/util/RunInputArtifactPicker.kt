@@ -1,8 +1,8 @@
 package com.achulkov.evomolior.util
 
-import com.achulkov.evokammer.api.model.RunInputArtifactUpload
-import com.achulkov.evokammer.api.util.bundleBasePath
-import com.achulkov.evokammer.api.util.toRunInputArtifactUpload
+import com.achulkov.evomolior.api.model.RunInputArtifactUpload
+import com.achulkov.evomolior.api.util.bundleBasePath
+import com.achulkov.evomolior.api.util.toRunInputArtifactUpload
 import java.io.File
 import java.nio.file.Path
 import javax.swing.JFileChooser

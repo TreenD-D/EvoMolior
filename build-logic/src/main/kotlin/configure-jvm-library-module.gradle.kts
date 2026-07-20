@@ -1,6 +1,6 @@
 /**
  * Convention plugin for pure JVM library modules (no Android/iOS/JS targets).
- * Used by all :evokammer:* submodules.
+ * Used by all :engine:* submodules.
  *
  * Applies:
  * - org.jetbrains.kotlin.jvm
