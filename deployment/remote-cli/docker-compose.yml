@@ -3,12 +3,14 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
+    network_mode: host
     environment:
+      EVOMOLIOR_DASHBOARD_HOST: "${EVOMOLIOR_REMOTE_BIND_HOST:-127.0.0.1}"
+      EVOMOLIOR_DASHBOARD_PORT: "${EVOMOLIOR_DASHBOARD_PORT:-8080}"
       EVOMOLIOR_DASHBOARD_USERNAME: "${EVOMOLIOR_DASHBOARD_USERNAME:?set an operator username}"
       EVOMOLIOR_DASHBOARD_PASSWORD: "${EVOMOLIOR_DASHBOARD_PASSWORD:?set an operator password}"
       EVOMOLIOR_DASHBOARD_DATA_DIR: /data
+      EVOMOLIOR_DASHBOARD_SECURE_COOKIE: "${EVOMOLIOR_DASHBOARD_SECURE_COOKIE:-false}"
       QWEN_API_KEY: "${QWEN_API_KEY:-}"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
     volumes:
