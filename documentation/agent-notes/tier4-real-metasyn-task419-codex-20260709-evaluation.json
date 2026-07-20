@@ -1,0 +1,26 @@
+{
+  "candidate_level_accuracy": 0.8571428571428571,
+  "dataset": "THUIR/MetaSyn",
+  "hard_negative_rejection_accuracy": 1.0,
+  "hard_negative_true_negatives": [
+    7008,
+    7012,
+    7014,
+    7015,
+    7018
+  ],
+  "included_false_negatives": [
+    7016
+  ],
+  "included_false_positives": [],
+  "included_precision": 1.0,
+  "included_recall": 0.5,
+  "included_true_positives": [
+    7017
+  ],
+  "is_full_leaderboard_run": false,
+  "run_id": null,
+  "scoring_scope": "candidate_subset_with_all_matched_positive_corpus_ids",
+  "synthesis_direction_match": true,
+  "task_id": 419
+}

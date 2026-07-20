@@ -1,0 +1,17 @@
+{
+  "primary": {
+    "id": "appendix-b-full",
+    "prompt": "Produce the exact receiver-facing Appendix B acceptance deliverable.",
+    "fast": true,
+    "rounds": 6,
+    "groupCount": 2,
+    "maxAgentsPerGroup": 4,
+    "councilExecutionPurpose": "appendix-b-acceptance",
+    "acceptanceProfile": "appendix-b-full",
+    "finalOutput": {
+      "relativePath": "receiver/final-output.md",
+      "mediaType": "text/markdown",
+      "description": "Canonical textual Appendix B receiver deliverable"
+    }
+  }
+}

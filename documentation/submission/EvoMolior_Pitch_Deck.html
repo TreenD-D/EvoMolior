@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>EvoMolior — Qwen Cloud Agent Society</title>
+  <style>
+    :root {
+      --bg: #07101f;
+      --panel: #111f3a;
+      --ink: #f6f8ff;
+      --muted: #a8b8d5;
+      --cyan: #62e7ff;
+      --green: #35d9a6;
+      --purple: #8b70ff;
+      --pink: #ec77c1;
+      --amber: #ffc76a;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: #050a14; color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .slide {
+      width: 13.333in;
+      height: 7.5in;
+      position: relative;
+      overflow: hidden;
+      page-break-after: always;
+      padding: .58in .68in;
+      background:
+        radial-gradient(circle at 90% 0%, rgba(139,112,255,.18), transparent 34%),
+        radial-gradient(circle at 0% 100%, rgba(53,217,166,.12), transparent 34%),
+        linear-gradient(135deg, #07101f, #0b1730 58%, #111a3a);
+    }
+    .slide:last-child { page-break-after: auto; }
+    .brand { color: var(--cyan); text-transform: uppercase; letter-spacing: .16em; font-size: 13px; font-weight: 800; }
+    h1 { margin: .18in 0 .14in; font-size: 43px; line-height: 1.06; letter-spacing: -.035em; }
+    h2 { margin: .14in 0 .18in; font-size: 34px; line-height: 1.1; letter-spacing: -.025em; }
+    h3 { margin: 0 0 8px; font-size: 18px; }
+    p, li { color: var(--muted); font-size: 16px; line-height: 1.43; }
+    strong { color: var(--ink); }
+    .hero { width: 77%; margin-top: .75in; }
+    .hero h1 { font-size: 54px; }
+    .tag { color: var(--muted); font-size: 23px; line-height: 1.35; max-width: 9.7in; }
+    .thesis { margin-top: .48in; font-size: 21px; color: var(--ink); }
+    .thesis b { color: var(--green); }
+    .footer { position: absolute; left: .68in; right: .68in; bottom: .25in; display: flex; justify-content: space-between; color: #7185aa; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .pill { display: inline-block; border: 1px solid #456080; border-radius: 999px; padding: 7px 13px; margin: 0 7px 8px 0; color: #dce7fb; font-size: 13px; font-weight: 700; }
+    .accent { color: var(--cyan); }
+    .green { color: var(--green); }
+    .amber { color: var(--amber); }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .28in; }
+    .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: .22in; }
+    .card { background: rgba(17,31,58,.82); border: 1px solid #294666; border-radius: 18px; padding: .22in; box-shadow: 0 12px 35px rgba(0,0,0,.22); }
+    .card p { margin: 7px 0 0; font-size: 14px; }
+    .big-number { font-size: 34px; font-weight: 850; letter-spacing: -.04em; color: var(--green); }
+    .metric-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .09em; }
+    ul { margin: 8px 0 0; padding-left: 22px; }
+    li { margin-bottom: 7px; }
+    .diagram { width: 100%; height: 5.45in; object-fit: contain; margin-top: -.05in; }
+    .arch-caption { position: absolute; right: .72in; bottom: .48in; color: #8193b4; font-size: 12px; }
+    .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: .35in; align-items: stretch; }
+    .flow .step { padding: 18px 15px; background: rgba(17,31,58,.88); border: 1px solid #355273; border-radius: 16px; font-size: 14px; line-height: 1.35; color: var(--muted); position: relative; }
+    .flow .step:after { content: "→"; position: absolute; right: -15px; top: 40%; color: #7690b9; font-size: 21px; z-index: 2; }
+    .flow .step:last-child:after { content: ""; }
+    .flow b { display: block; color: var(--ink); margin-bottom: 6px; }
+    .evidence { width: 100%; border-collapse: collapse; margin-top: .2in; font-size: 14px; }
+    .evidence th, .evidence td { border-bottom: 1px solid #29405f; padding: 12px 13px; text-align: left; }
+    .evidence th { color: #8da2c7; text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
+    .evidence td { color: #c9d5eb; }
+    .win { color: var(--green) !important; font-weight: 800; }
+    .tie { color: var(--amber) !important; font-weight: 800; }
+    .warning { margin-top: .16in; padding: 13px 16px; border-left: 4px solid var(--amber); background: rgba(255,199,106,.08); color: #d7c6a3; font-size: 13px; }
+    .timeline { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 22px; margin-top: .18in; }
+    .timeline .item { border-left: 3px solid var(--purple); padding: 7px 14px; }
+    .timeline .item b { display: block; font-size: 14px; color: var(--ink); margin-bottom: 4px; }
+    .timeline .item span { color: var(--muted); font-size: 13px; line-height: 1.35; }
+    .close { text-align: center; padding-top: 1.25in; }
+    .close h1 { font-size: 55px; }
+    .close .tag { margin: 0 auto; }
+    .links { margin-top: .48in; color: #9eb3d5; font-size: 15px; }
+    @page { size: 13.333in 7.5in; margin: 0; }
+    @media print {
+      html, body { background: transparent; }
+      .slide { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <section class="slide">
+    <div class="brand">Global AI Hackathon Series with Qwen Cloud · Agent Society</div>
+    <div class="hero">
+      <h1>EvoMolior</h1>
+      <div class="tag">An auditable Qwen Cloud agent society that turns short-lived specialists into durable collective intelligence.</div>
+      <div class="thesis">The agent is disposable. <b>The reviewed substrate is not.</b></div>
+      <div style="margin-top:.42in">
+        <span class="pill">Qwen Cloud</span>
+        <span class="pill">Competitive societies</span>
+        <span class="pill">Exact evidence</span>
+        <span class="pill">Replayable publication</span>
+      </div>
+    </div>
+    <div class="footer"><span>EvoMolior</span><span>01</span></div>
+  </section>
+
+  <section class="slide">
+    <div class="brand">The problem</div>
+    <h2>One context window is a fragile place to keep intelligence.</h2>
+    <div class="grid3" style="margin-top:.32in">
+      <div class="card">
+        <h3>Reasoning disappears</h3>
+        <p>When a long-lived agent exits, useful intermediate evidence and failed approaches become difficult to recover.</p>
+      </div>
+      <div class="card">
+        <h3>Agreement is invisible</h3>
+        <p>Prompted “debate” often collapses into one model rewriting itself without independent authority or replay.</p>
+      </div>
+      <div class="card">
+        <h3>Completion is too easy</h3>
+        <p>A polished answer can hide missing tests, unsupported claims, unavailable metrics, and unsettled work.</p>
+      </div>
+    </div>
+    <div class="grid2" style="margin-top:.35in">
+      <div>
+        <div class="metric-label">Who needs this</div>
+        <p><strong>Research, policy, technical strategy, and diligence teams</strong> whose output must be inspected, challenged, and reproduced.</p>
+      </div>
+      <div>
+        <div class="metric-label">Our design principle</div>
+        <p><strong>Persist reviewed knowledge, evidence, tools, tests, dead ends, and lineage.</strong> Let individual model invocations remain mortal.</p>
+      </div>
+    </div>
+    <div class="footer"><span>Why EvoMolior</span><span>02</span></div>
+  </section>
+
+  <section class="slide">
+    <div class="brand">Architecture</div>
+    <img class="diagram" src="assets/evomolior-architecture.svg" alt="EvoMolior architecture">
+    <div class="arch-caption">Full-resolution diagram included in the repository</div>
+    <div class="footer"><span>Qwen Cloud → societies → evidence → publication</span><span>03</span></div>
+  </section>
+
+  <section class="slide">
+    <div class="brand">How the society works</div>
+    <h2>Authority is explicit at every boundary.</h2>
+    <div class="flow">
+      <div class="step"><b>1 · Compile</b>Genesis Council creates typed roles, sealed tests, stages, and separate Worker/Grader Atlases.</div>
+      <div class="step"><b>2 · Compete</b>Redacted worker societies claim exact nodes and contribute through isolated substrates.</div>
+      <div class="step"><b>3 · Critique</b>Documents, KG facts, tools, and simulations are promoted, rejected, or arbitrated.</div>
+      <div class="step"><b>4 · Grade</b>Separate grader societies freeze criteria, score exact bundles, and resolve disagreement.</div>
+      <div class="step"><b>5 · Publish</b>Contract tests, quiescence, cost settlement, score replay, and manifest verification gate output.</div>
+    </div>
+    <div class="grid3" style="margin-top:.45in">
+      <div class="card"><h3 class="green">Mortal specialists</h3><p>Researchers, Builders, Critics, Archivists, Outliers, Perspective Takers, and oversight roles.</p></div>
+      <div class="card"><h3 class="accent">Durable substrate</h3><p>KB, typed KG, staging, tool registry, evidence, messages, dead ends, and exact lineage.</p></div>
+      <div class="card"><h3 style="color:var(--pink)">Independent evaluation</h3><p>Competitive Grader Atlas, private criteria, isolated scoring, quorum, and deterministic replay.</p></div>
+    </div>
+    <div class="footer"><span>Agent Society, not agent cosplay</span><span>04</span></div>
+  </section>
+
+  <section class="slide">
+    <div class="brand">Qwen Cloud implementation</div>
+    <h2>Qwen Cloud is a first-class runtime backend.</h2>
+    <div class="grid2" style="margin-top:.25in">
+      <div class="card">
+        <h3>Direct model execution</h3>
+        <ul>
+          <li>DashScope / OpenAI-compatible chat completions</li>
+          <li><strong>Qwen3.7-Plus</strong> and <strong>Qwen3.6-Flash</strong></li>
+          <li>Required function/tool calls for tool-enabled turns</li>
+          <li>Structured JSON output and schema-aware decoding</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Production integration</h3>
+        <ul>
+          <li>Long-context ephemeral cache markers</li>
+          <li>Token metadata in observability</li>
+          <li>Maintained direct single-Qwen baseline path</li>
+          <li>Optional <strong>Qwen Image 2.0 Pro</strong> final assets</li>
+        </ul>
+      </div>
+    </div>
+    <div class="warning"><strong>Honest model identity:</strong> `deepseek-v4-flash` can be routed through Qwen Cloud in selected configurations, but it is not described as a Qwen model.</div>
+    <div style="margin-top:.32in">
+      <span class="pill">Kotlin</span><span class="pill">JetBrains Koog</span><span class="pill">Ktor</span><span class="pill">Room / SQLite</span><span class="pill">Docker</span><span class="pill">Alibaba Cloud</span>
+    </div>
+    <div class="footer"><span>Built with Qwen Cloud</span><span>05</span></div>
+  </section>
+
+  <section class="slide">
+    <div class="brand">Evidence</div>
+    <h2>We report where society helps—and where it does not.</h2>
+    <table class="evidence">
+      <thead><tr><th>Qwen Cloud comparison</th><th>EvoMolior</th><th>Single Qwen agent</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>FRAMES 19–21</td><td>2/3 exact</td><td>1/3 exact</td><td class="win">Narrow society win</td></tr>
+        <tr><td>Hard FRAMES 537</td><td>1/1 exact</td><td>0/1 exact</td><td class="win">One-task win</td></tr>
+        <tr><td>MetaSyn task 24 subset</td><td>Accuracy .875</td><td>Accuracy .875</td><td class="tie">Tie; society much slower</td></tr>
+        <tr><td>MetaSyn task 419 subset</td><td>Accuracy .8571</td><td>Accuracy .8571</td><td class="tie">Tie</td></tr>
+        <tr><td>DeepResearch prompt 62</td><td>Required report present</td><td>Required report present</td><td class="tie">Unscored completeness</td></tr>
+      </tbody>
+    </table>
+    <div class="grid3" style="margin-top:.25in">
+      <div><div class="big-number">1.0</div><div class="metric-label">Evidence-path coverage in both FRAMES arms</div></div>
+      <div><div class="big-number">No hype</div><div class="metric-label">No broad superiority or cost-efficiency claim</div></div>
+      <div><div class="big-number">Replay</div><div class="metric-label">Wins, ties, failures, latency, and unavailable values retained</div></div>
+    </div>
+    <div class="footer"><span>Small samples, explicit caveats</span><span>06</span></div>
+  </section>
+
+  <section class="slide">
+    <div class="brand">Built during the contest period</div>
+    <h2>From agent orchestration to an auditable authority system.</h2>
+    <div class="timeline">
+      <div class="item"><b>Direct Qwen Cloud runtime</b><span>Native model IDs, tool-call compatibility, structured output, cache markers, usage telemetry, and image generation.</span></div>
+      <div class="item"><b>Worker and Grader Atlases</b><span>Sealed task authority, redacted views, exact leases, private grading criteria, and typed evidence bundles.</span></div>
+      <div class="item"><b>Competitive progression</b><span>Node grading and capture, delayed yields, progressive disclosure, Outlier shadows, amendments, tools, and simulations.</span></div>
+      <div class="item"><b>Trustworthy publication</b><span>Causal lineage, cost reservations, final contracts, score replay, typed metrics, and hash-verifiable archives.</span></div>
+      <div class="item"><b>Post-v72 hardening</b><span>Typed sealed-tests-v3, pure test compilation, exact regressions, pre-activation checks, and final-output retry-boundary validation.</span></div>
+      <div class="item"><b>Immutable acceptance</b><span>Content-addressed distributions, OS lock, admission control, startup rejection evidence, and source/binary drift checks.</span></div>
+    </div>
+    <div class="warning">The full multi-round Appendix-B qualification is being finalized. The next matched comparison is deliberately deferred, so it is not used as a submission claim.</div>
+    <div class="footer"><span>May 26–July 20, 2026</span><span>07</span></div>
+  </section>
+
+  <section class="slide">
+    <div class="close">
+      <div class="brand">EvoMolior</div>
+      <h1>Agents die.<br><span class="green">Knowledge compounds.</span></h1>
+      <div class="tag">Qwen Cloud-powered societies that collaborate, compete, disagree, and leave behind inspectable intelligence.</div>
+      <div class="links">github.com/TreenD-D/EvoMolior · AGPL-3.0-only · Agent Society</div>
+    </div>
+    <div class="footer"><span>Thank you</span><span>08</span></div>
+  </section>
+</body>
+</html>

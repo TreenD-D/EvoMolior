@@ -1,0 +1,27 @@
+{
+  "candidate_level_accuracy": 0.875,
+  "dataset": "THUIR/MetaSyn",
+  "hard_negative_rejection_accuracy": 1.0,
+  "hard_negative_true_negatives": [
+    4558,
+    4559,
+    4568,
+    4570,
+    4571
+  ],
+  "included_false_negatives": [
+    4567
+  ],
+  "included_false_positives": [],
+  "included_precision": 1.0,
+  "included_recall": 0.6666666666666666,
+  "included_true_positives": [
+    4565,
+    4566
+  ],
+  "is_full_leaderboard_run": false,
+  "run_id": "tier4-real-metasyn-task24-complex-post-hardening-20260704",
+  "scoring_scope": "candidate_subset_with_all_matched_positive_corpus_ids",
+  "synthesis_direction_match": true,
+  "task_id": 24
+}

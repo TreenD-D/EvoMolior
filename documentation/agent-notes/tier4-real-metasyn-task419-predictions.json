@@ -1,0 +1,24 @@
+{
+  "run_id": "tier4-real-metasyn-task419-20260704",
+  "input_path": "results/tier4-real-metasyn-task419-20260704-input/metasyn_task_419_candidates.md",
+  "input_sha256": "1c72bdb36302beb00af501ad597466412aa5b4944f7628e4e591ef067f7f4398",
+  "output_path": "results/tier4-real-metasyn-task419-20260704-run/tier4-real-metasyn-task419-20260704/outputs/systematic_review_pack.md",
+  "output_sha256": "7e0dbd211947eaf063ff8368e75ef7944100bbefc06d031f5f9f4248cd2f8d6b",
+  "predicted_included_corpus_ids": [
+    7017
+  ],
+  "predicted_excluded_corpus_ids": [
+    7008,
+    7012,
+    7014,
+    7015,
+    7016,
+    7018
+  ],
+  "predicted_synthesis_direction": "Positive",
+  "predicted_statistical_significance": "Partially",
+  "predicted_conclusion_summary": "A self-guided eHealth program reduced depressive symptoms and weight, giving preliminary evidence that internet/mobile interventions can improve both mental health and weight outcomes in overweight/obese adults with comorbid depressive symptoms.",
+  "false_negative_rationale_from_output": {
+    "7016": "EvoMolior excluded this official matched positive because it judged the integrated collaborative care behavioral intervention as not internet/mobile-based."
+  }
+}

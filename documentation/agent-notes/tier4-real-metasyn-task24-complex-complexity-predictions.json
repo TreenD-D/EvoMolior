@@ -1,0 +1,29 @@
+{
+  "run_id": "tier4-real-metasyn-task24-complex-complexity-20260704",
+  "output_path": "results/tier4-real-metasyn-task24-two-complexity-20260704-complex/tier4-real-metasyn-task24-complex-complexity-20260704/outputs/systematic_review_pack.md",
+  "output_sha256": "0f69cabfdff94da877834f5d0be85c387f4edc606a25df89534f0c5f220f34f5",
+  "input_path": "results/tier4-real-metasyn-20260704-input/metasyn_task_24_candidates.md",
+  "input_sha256": "327341b8f269fe6a68b76817f814b9084f8dbaeb9edaca4274b324e9ea1d1fc7",
+  "predicted_included_corpus_ids": [
+    4565,
+    4566
+  ],
+  "predicted_excluded_corpus_ids": [
+    4558,
+    4559,
+    4567,
+    4568,
+    4570,
+    4571
+  ],
+  "predicted_synthesis_direction": "Null",
+  "predicted_statistical_significance": "Non-significant",
+  "predicted_conclusion_summary": "The complex run concluded that two eligible VLCD studies suggest comparable weight loss between obese adults with and without type 2 diabetes.",
+  "false_negative_rationale_from_output": {
+    "4567": "The complex run excluded this official matched positive because it judged that the abstract did not provide subgroup weight-loss outcomes for diabetic versus non-diabetic participants."
+  },
+  "extraction_notes": [
+    "4568, 4570, and 4571 are absent from the complex run's excluded_hard_negatives.csv and evidence_table.csv, but are explicitly excluded in exclusion_reasons.csv.",
+    "The prediction partition is scored from all explicit include/exclude decisions in the persisted Markdown output."
+  ]
+}

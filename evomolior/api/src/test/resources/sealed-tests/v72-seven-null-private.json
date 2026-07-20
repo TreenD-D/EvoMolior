@@ -1,0 +1,88 @@
+{
+  "atlasHash": "744c28eeb5fea0ee2086921965ec5038b91ed4ea1cf46a77f63fab288a4c63ac",
+  "rubricSchemaVersion": "node-atlas-v1",
+  "schemaVersion": "sealed-tests-v2",
+  "tests": [
+    {
+      "acceptedArtifactTypes": [
+        "FINAL_DELIVERABLE"
+      ],
+      "commitmentHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "id": "final-package-completeness-check",
+      "kind": "GENERAL",
+      "nodeId": "node_218c6b72b879f26e1915a9a776c21d9aeef223421d0f47c254d704f48dc93666",
+      "opportunityId": null,
+      "testDefinitionJson": "null"
+    },
+    {
+      "acceptedArtifactTypes": [
+        "DECISION_RECORD",
+        "VALIDATION_REPORT"
+      ],
+      "commitmentHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "id": "one-round-reuse-scheduling-check",
+      "kind": "GENERAL",
+      "nodeId": "node_1b83fdeb7e3e865d94f025053d12b0288a81d5454f4f609732d5de9449c07c1c",
+      "opportunityId": null,
+      "testDefinitionJson": "null"
+    },
+    {
+      "acceptedArtifactTypes": [
+        "SOURCE_CODE",
+        "TOOL"
+      ],
+      "commitmentHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "id": "simulator-cop-boundary-test",
+      "kind": "GENERAL",
+      "nodeId": "node_8b35e1d4b5e16e00e549f7d72ec746034b7c548e2330c6866b0cc59b40b43e6b",
+      "opportunityId": null,
+      "testDefinitionJson": "null"
+    },
+    {
+      "acceptedArtifactTypes": [
+        "SOURCE_CODE",
+        "TOOL"
+      ],
+      "commitmentHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "id": "simulator-hour-count-test",
+      "kind": "GENERAL",
+      "nodeId": "node_8b35e1d4b5e16e00e549f7d72ec746034b7c548e2330c6866b0cc59b40b43e6b",
+      "opportunityId": null,
+      "testDefinitionJson": "null"
+    },
+    {
+      "acceptedArtifactTypes": [
+        "SOURCE_CODE",
+        "TOOL"
+      ],
+      "commitmentHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "id": "simulator-load-conservation-test",
+      "kind": "GENERAL",
+      "nodeId": "node_8b35e1d4b5e16e00e549f7d72ec746034b7c548e2330c6866b0cc59b40b43e6b",
+      "opportunityId": null,
+      "testDefinitionJson": "null"
+    },
+    {
+      "acceptedArtifactTypes": [
+        "VALIDATION_REPORT"
+      ],
+      "commitmentHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "id": "validation-fixture-reproduction-test",
+      "kind": "GENERAL",
+      "nodeId": "node_fa91447ffe1e65b6d9613161cf0a804498d8e3487ff0dcd52c0577783b06b023",
+      "opportunityId": null,
+      "testDefinitionJson": "null"
+    },
+    {
+      "acceptedArtifactTypes": [
+        "VALIDATION_REPORT"
+      ],
+      "commitmentHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "id": "validation-invalid-input-test",
+      "kind": "GENERAL",
+      "nodeId": "node_fa91447ffe1e65b6d9613161cf0a804498d8e3487ff0dcd52c0577783b06b023",
+      "opportunityId": null,
+      "testDefinitionJson": "null"
+    }
+  ]
+}

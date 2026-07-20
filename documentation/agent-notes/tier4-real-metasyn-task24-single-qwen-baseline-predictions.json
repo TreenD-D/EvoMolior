@@ -1,0 +1,30 @@
+{
+  "run_id": "tier4-real-metasyn-task24-single-qwen-baseline-20260705",
+  "output_path": "results/tier4-real-metasyn-task24-health-20260704-complex/tier4-real-metasyn-task24-single-qwen-baseline-20260705/outputs/systematic_review_pack.md",
+  "output_sha256": "412f5bdab660b5efe7ce07ed2d4bad0a9d2e6d3444058b545c2fa084e4adc0ce",
+  "input_path": "results/tier4-real-metasyn-20260704-input/metasyn_task_24_candidates.md",
+  "input_sha256": "327341b8f269fe6a68b76817f814b9084f8dbaeb9edaca4274b324e9ea1d1fc7",
+  "predicted_included_corpus_ids": [
+    4565,
+    4566
+  ],
+  "predicted_excluded_corpus_ids": [
+    4558,
+    4559,
+    4567,
+    4568,
+    4570,
+    4571
+  ],
+  "predicted_synthesis_direction": "Null",
+  "predicted_statistical_significance": "Non-significant",
+  "predicted_conclusion_summary": "The single Qwen qwen3.7-plus baseline concluded that two VLCD studies support comparable substantial weight loss in obese adults with and without T2DM, while excluding 4567 because it reports pooled results from a mixed cohort without a stratified T2DM versus non-T2DM comparison.",
+  "false_negative_rationale_from_output": {
+    "4567": "The single-agent output excluded 4567 because it judged the study as a single-arm observational cohort with aggregated results and no separate comparison of weight change in participants with versus without T2DM."
+  },
+  "extraction_notes": [
+    "The baseline used one direct Qwen qwen3.7-plus chat-completions call, not EvoMolior society orchestration.",
+    "The final output includes all eight candidate IDs across included_studies.csv, excluded_hard_negatives.csv, exclusion_reasons.csv, and evidence_table.csv, although excluded_hard_negatives.csv only lists three of the six excluded candidates.",
+    "This is a candidate-subset benchmark audit, not an official full MetaSyn leaderboard run."
+  ]
+}

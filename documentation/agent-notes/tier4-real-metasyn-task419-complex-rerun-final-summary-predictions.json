@@ -1,0 +1,28 @@
+{
+  "run_id": "tier4-real-metasyn-task419-complex-rerun-final-summary-20260704",
+  "input_path": "results/tier4-real-metasyn-task419-20260704-input/metasyn_task_419_candidates.md",
+  "input_sha256": "1c72bdb36302beb00af501ad597466412aa5b4944f7628e4e591ef067f7f4398",
+  "output_path": "results/tier4-real-metasyn-task419-20260704-complex-rerun-final-summary/tier4-real-metasyn-task419-complex-rerun-final-summary-20260704/outputs/systematic_review_pack.md",
+  "output_sha256": "4227fbbd674576255fbff66ec32ad511598faa5e41002259bfb00df368bff6ec",
+  "predicted_included_corpus_ids": [
+    7017
+  ],
+  "predicted_excluded_corpus_ids": [
+    7008,
+    7012,
+    7014,
+    7015,
+    7016,
+    7018
+  ],
+  "predicted_synthesis_direction": "Positive",
+  "predicted_statistical_significance": "Partially",
+  "predicted_conclusion_summary": "The post-fix complex rerun concluded that only candidate 7017 met all inclusion criteria and that a single self-guided eHealth RCT showed improvements in depressive symptoms and weight.",
+  "false_negative_rationale_from_output": {
+    "7016": "The post-fix rerun again excluded this official matched positive because it judged the integrated collaborative care intervention as in-person rather than internet/mobile-based."
+  },
+  "extraction_notes": [
+    "Predictions are extracted from the persisted outputs/systematic_review_pack.md, not from intermediate round summaries.",
+    "The output contains a duplicate 7014 exclusion row; the evaluator scores unique candidate IDs and the duplicate does not change the prediction partition."
+  ]
+}

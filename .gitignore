@@ -4,15 +4,56 @@
 .idea
 .kotlin
 .DS_Store
+__pycache__/
+*.py[cod]
+hs_err_pid*.log
+replay_pid*.log
+*.hprof
+*.log
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
 build
 */build
 captures
 .externalNativeBuild
 .cxx
 local.properties
+.env
+.env.*
+.text-tmp/
+.evomolior-codex-tmp/
+.evomolior-locks/
+.evomolior-tmp/
+.gradle-user/
+.test-tmp/
+.java-tmp/
+
+# Local run/provider state. Keep the bytes locally; never publish them.
+/results/
+/runs/
+/output/
+/outputs/
+**/.evomolior-data/
+
+# Internal, generated, or superseded documentation.
+documentation/tmp/
+documentation/development/
+documentation/agent-notes/
+documentation/logs/
+documentation/stale/
+documentation/prompts/
+documentation/examples/
+documentation/temp_presub.md
+documentation/Remediation_plan_after_v72.md
 xcuserdata/
 Pods/
 *.jks
+*.pem
+*.p12
+*.p8
 *yarn.lock
 
 # Android distribution
@@ -21,13 +62,16 @@ distribution/android/*.aab
 distribution/android/*.apk
 distribution/android/keystore/keystore.properties
 distribution/android/google-service-app-publisher.json
+**/google-services.json
 
 # iOS distribution
 distribution/ios/*.ipa
 distribution/ios/*.zip
 distribution/ios/*.p8
 distribution/ios/appstore-publisher.json
+**/GoogleService-Info.plist
 
 # Firebender internal state (not source code)
 /.firebender/
 /.junie/
+/.kent/

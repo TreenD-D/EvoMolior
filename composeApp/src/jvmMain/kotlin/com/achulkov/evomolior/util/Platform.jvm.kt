@@ -1,12 +1,12 @@
 package com.achulkov.evomolior.util
 
-import com.achulkov.evokammer.api.di.evokammerApiModule
-import com.achulkov.evokammer.api.service.EvoKammerIpcServer
-import com.achulkov.evokammer.competition.di.evokammerCompetitionModule
-import com.achulkov.evokammer.core.di.evokammerCoreModule
-import com.achulkov.evokammer.orchestration.di.evokammerOrchestrationModule
-import com.achulkov.evokammer.sandbox.di.sandboxBindingsModule
-import com.achulkov.evokammer.substrate.di.evokammerSubstrateModule
+import com.achulkov.evomolior.api.di.evomoliorApiModule
+import com.achulkov.evomolior.api.service.EvoMoliorIpcServer
+import com.achulkov.evomolior.competition.di.evomoliorCompetitionModule
+import com.achulkov.evomolior.core.di.evomoliorCoreModule
+import com.achulkov.evomolior.orchestration.di.evomoliorOrchestrationModule
+import com.achulkov.evomolior.sandbox.di.sandboxBindingsModule
+import com.achulkov.evomolior.substrate.di.evomoliorSubstrateModule
 import com.achulkov.evomolior.data.source.featureflag.FeatureFlagManager
 import com.achulkov.evomolior.data.source.featureflag.NoImplFeatureFlagManager
 import com.achulkov.evomolior.data.source.local.DatabaseProvider
@@ -34,20 +34,20 @@ internal actual val platformModule: Module = module {
     single { NoImplAnalytics } bind Analytics::class
     single { NoImplAdsManager } bind AdsManager::class
 
-    // EvoKammer engine modules (JVM-only)
+    // EvoMolior engine modules (JVM-only)
     includes(
-        evokammerCoreModule,
-        evokammerSubstrateModule,
+        evomoliorCoreModule,
+        evomoliorSubstrateModule,
         sandboxBindingsModule(),
-        evokammerOrchestrationModule,
-        evokammerCompetitionModule,
-        evokammerApiModule
+        evomoliorOrchestrationModule,
+        evomoliorCompetitionModule,
+        evomoliorApiModule
     )
 }
 
 internal actual fun onApplicationStartPlatformSpecific() {
     NotifierManager.initialize(NotificationPlatformConfiguration.Desktop())
-    // EvoKammer IPC server is started lazily when first needed — accessed via Koin
+    // EvoMolior IPC server is started lazily when first needed — accessed via Koin
 }
 
 internal actual val isAndroid: Boolean

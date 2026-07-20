@@ -1,0 +1,106 @@
+{
+  "stages": [
+    {
+      "id": "market-map",
+      "promptFile": "private-intelligence-product-prompt-20260709.txt",
+      "fast": true,
+      "rounds": 1,
+      "groupCount": 1,
+      "maxAgentsPerGroup": 3,
+      "roundDurationMinutes": 3,
+      "budgetOverride": 220,
+      "inheritsPreviousOutputs": true,
+      "finalOutput": {
+        "relativePath": "market-map.html",
+        "mediaType": "text/html",
+        "description": "Interactive strategic market map for indie AI/mobile app opportunities",
+        "kind": "HTML_ARTICLE"
+      }
+    },
+    {
+      "id": "company-product-database",
+      "prompt": "Using the prior stage and run evidence, write `company/product-database.csv`. Include columns: category,company_or_product,positioning,target_user,core_pain,pricing_or_monetization,distribution_channel,defensibility,gap_or_white_space,confidence,evidence_or_assumption. Use CSV with a header row and at least 40 rows. Do not invent private information; mark assumptions clearly.",
+      "fast": true,
+      "rounds": 1,
+      "groupCount": 1,
+      "maxAgentsPerGroup": 3,
+      "roundDurationMinutes": 3,
+      "budgetOverride": 180,
+      "inheritsPreviousOutputs": true,
+      "finalOutput": {
+        "relativePath": "company/product-database.csv",
+        "mediaType": "text/csv",
+        "description": "Company and product opportunity database",
+        "kind": "GENERIC_FILE"
+      }
+    },
+    {
+      "id": "trend-graph",
+      "prompt": "Using the prior stage and run evidence, write `trend-graph.json`. Produce valid JSON with keys: nodes, edges, assumptions, watchlist. Nodes must include id, label, type, confidence, summary, opportunity_relevance. Edges must include source, target, relationship, confidence, rationale. Focus on 2026 indie AI/mobile app and B2B SaaS opportunity themes.",
+      "fast": true,
+      "rounds": 1,
+      "groupCount": 1,
+      "maxAgentsPerGroup": 3,
+      "roundDurationMinutes": 3,
+      "budgetOverride": 180,
+      "inheritsPreviousOutputs": true,
+      "finalOutput": {
+        "relativePath": "trend-graph.json",
+        "mediaType": "application/json",
+        "description": "Trend graph data for the opportunity atlas",
+        "kind": "GENERIC_FILE"
+      }
+    },
+    {
+      "id": "opportunity-matrix",
+      "prompt": "Using the prior stage and run evidence, write `opportunity-matrix.csv`. Include exactly 20 ranked app or SaaS concepts. Columns: rank,concept,target_user,pain,solution,wedge,monetization,distribution,mvp_scope,technical_feasibility,user_pain_score,willingness_to_pay_score,competition_score,distribution_score,risk_score,overall_score,top_risks,next_validation_step,landing_page_headline. Use CSV with a header row.",
+      "fast": true,
+      "rounds": 1,
+      "groupCount": 1,
+      "maxAgentsPerGroup": 3,
+      "roundDurationMinutes": 3,
+      "budgetOverride": 180,
+      "inheritsPreviousOutputs": true,
+      "finalOutput": {
+        "relativePath": "opportunity-matrix.csv",
+        "mediaType": "text/csv",
+        "description": "Ranked opportunity matrix",
+        "kind": "GENERIC_FILE"
+      }
+    },
+    {
+      "id": "thesis",
+      "prompt": "Using the prior stage and run evidence, write `thesis.md`. It should be a concise but substantive build/investment thesis for a small indie AI/mobile app studio in 2026. Include: executive thesis, strongest opportunity clusters, why now, what to avoid, recommended portfolio of 5 bets, validation plan, 30/60/90-day build roadmap, and caveats.",
+      "fast": true,
+      "rounds": 1,
+      "groupCount": 1,
+      "maxAgentsPerGroup": 3,
+      "roundDurationMinutes": 3,
+      "budgetOverride": 180,
+      "inheritsPreviousOutputs": true,
+      "finalOutput": {
+        "relativePath": "thesis.md",
+        "mediaType": "text/markdown",
+        "description": "Strategic build thesis",
+        "kind": "GENERIC_FILE"
+      }
+    },
+    {
+      "id": "weekly-update-feed",
+      "prompt": "Using the prior stage and run evidence, write `weekly-update-feed.md`. Create a maintainable update-feed template plus an initial issue. Include sections: signal digest, new products to watch, pricing/monetization changes, distribution-channel signals, funding/patent/research signals, opportunity score changes, experiments to run this week, and stale assumptions to revisit.",
+      "fast": true,
+      "rounds": 1,
+      "groupCount": 1,
+      "maxAgentsPerGroup": 3,
+      "roundDurationMinutes": 3,
+      "budgetOverride": 180,
+      "inheritsPreviousOutputs": true,
+      "finalOutput": {
+        "relativePath": "weekly-update-feed.md",
+        "mediaType": "text/markdown",
+        "description": "Initial weekly update feed and maintenance template",
+        "kind": "GENERIC_FILE"
+      }
+    }
+  ]
+}

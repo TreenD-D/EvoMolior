@@ -1,0 +1,54 @@
+{
+  "dataset": "THUIR/MetaSyn",
+  "task_id": 419,
+  "run_id": "tier4-real-metasyn-task419-complex-rerun-final-summary-20260704",
+  "included_true_positives": [
+    7017
+  ],
+  "included_false_negatives": [
+    7016
+  ],
+  "included_false_positives": [],
+  "hard_negative_true_negatives": [
+    7008,
+    7012,
+    7014,
+    7015,
+    7018
+  ],
+  "included_recall": 0.5,
+  "included_precision": 1.0,
+  "hard_negative_rejection_accuracy": 1.0,
+  "candidate_level_accuracy": 0.8571428571428571,
+  "synthesis_direction_match": true,
+  "is_full_leaderboard_run": false,
+  "scoring_scope": "candidate_subset_with_all_matched_positive_corpus_ids",
+  "complexity_profile": {
+    "stage_group_count": 2,
+    "stage_round_count": 3,
+    "stage_max_agents_per_group": 5,
+    "stage_round_duration_minutes": 3,
+    "stage_budget_override": 320
+  },
+  "baseline_comparison": {
+    "baseline_run_id": "tier4-real-metasyn-task419-20260704",
+    "previous_complex_run_id": "tier4-real-metasyn-task419-complex-20260704",
+    "benchmark_rank_delta_vs_baseline": "tie_on_candidate_subset_metrics",
+    "benchmark_rank_delta_vs_previous_complex": "tie_on_candidate_subset_metrics",
+    "still_false_negative": [
+      7016
+    ]
+  },
+  "runtime": {
+    "primary_duration_ms": 62228,
+    "systematic_review_pack_duration_ms": 1454079,
+    "systematic_review_pack_wall_clock_minutes": 24.23465,
+    "stage_winner_id": "group-1"
+  },
+  "notes": [
+    "The post-fix rerun completed and published outputs/systematic_review_pack.md.",
+    "The persisted output still excludes official matched positive 7016 as not internet/mobile-based.",
+    "The rerun does not prove result improvement; it preserves the same candidate-subset metrics as the previous simple and complex task 419 runs.",
+    "The output includes a duplicate exclusion row for 7014; unique candidate scoring is unaffected."
+  ]
+}

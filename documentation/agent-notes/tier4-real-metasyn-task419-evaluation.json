@@ -1,0 +1,31 @@
+{
+  "dataset": "THUIR/MetaSyn",
+  "task_id": 419,
+  "run_id": "tier4-real-metasyn-task419-20260704",
+  "included_true_positives": [
+    7017
+  ],
+  "included_false_negatives": [
+    7016
+  ],
+  "included_false_positives": [],
+  "hard_negative_true_negatives": [
+    7008,
+    7012,
+    7014,
+    7015,
+    7018
+  ],
+  "included_recall": 0.5,
+  "included_precision": 1.0,
+  "hard_negative_rejection_accuracy": 1.0,
+  "candidate_level_accuracy": 0.8571428571428571,
+  "synthesis_direction_match": true,
+  "is_full_leaderboard_run": false,
+  "scoring_scope": "candidate_subset_with_all_matched_positive_corpus_ids",
+  "notes": [
+    "The score is over the candidate subset supplied to EvoMolior, not the full MetaSyn retrieval corpus.",
+    "The official task row exposes two matched positive corpus IDs for a three-study systematic review.",
+    "The only screening error on the supplied subset is false-negative exclusion of corpus ID 7016."
+  ]
+}

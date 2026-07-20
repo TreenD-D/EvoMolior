@@ -1,0 +1,156 @@
+{
+  "schemaVersion": "evomolior-public-benchmark-evidence-v1",
+  "generatedAt": "2026-07-20",
+  "scope": "Two small Qwen Cloud FRAMES comparisons. This artifact excludes local filesystem paths, benchmark questions, gold answers, and model response text.",
+  "claimBoundary": "Narrow exact-answer evidence only. It does not support broad superiority, cost efficiency, or lower latency.",
+  "comparisons": [
+    {
+      "id": "frames-19-21",
+      "benchmark": "FRAMES",
+      "taskIds": [
+        "frames-19",
+        "frames-20",
+        "frames-21"
+      ],
+      "society": {
+        "backend": "QWEN_CLOUD",
+        "runner": "evomolior-society",
+        "modelAssignments": [
+          "qwen3.7-plus"
+        ],
+        "startedAtUtc": "2026-07-05T19:48:42.264926Z",
+        "completedAtUtc": "2026-07-05T19:57:03.933664Z",
+        "wallClockSeconds": 501.668738,
+        "executedCount": 3,
+        "exactCorrectCount": 2,
+        "exactAccuracy": 0.6666666666666666,
+        "evidencePathCoverage": 1.0,
+        "providerCostUsd": null,
+        "failures": [],
+        "tasks": [
+          {
+            "taskId": "frames-19",
+            "runId": "tier0-frames-19-0f687912",
+            "status": "COMPLETED",
+            "exactCorrect": true,
+            "evidencePathPresent": true
+          },
+          {
+            "taskId": "frames-20",
+            "runId": "tier0-frames-20-07cbb6f8",
+            "status": "COMPLETED",
+            "exactCorrect": false,
+            "evidencePathPresent": true
+          },
+          {
+            "taskId": "frames-21",
+            "runId": "tier0-frames-21-1fa2a999",
+            "status": "COMPLETED",
+            "exactCorrect": true,
+            "evidencePathPresent": true
+          }
+        ],
+        "privateSourceReportSha256": "e834a8a832bac9770fc8c406c1a66181fe30ef67e47a51707d6c507712256375"
+      },
+      "singleAgent": {
+        "backend": "QWEN_CLOUD",
+        "runner": "single-agent",
+        "modelId": "qwen3.7-plus",
+        "startedAtUtc": "2026-07-05T20:01:56.730044Z",
+        "completedAtUtc": "2026-07-05T20:02:23.533932Z",
+        "wallClockSeconds": 26.803888,
+        "executedCount": 3,
+        "exactCorrectCount": 1,
+        "exactAccuracy": 0.3333333333333333,
+        "evidencePathCoverage": 1.0,
+        "toolNativeSuccessRate": 1.0,
+        "providerCostUsd": null,
+        "failures": [],
+        "tasks": [
+          {
+            "taskId": "frames-19",
+            "runId": "tier0-frames-19-dc69bd6a",
+            "status": "COMPLETED",
+            "exactCorrect": false,
+            "evidencePathPresent": true
+          },
+          {
+            "taskId": "frames-20",
+            "runId": "tier0-frames-20-d66eb31c",
+            "status": "COMPLETED",
+            "exactCorrect": false,
+            "evidencePathPresent": true
+          },
+          {
+            "taskId": "frames-21",
+            "runId": "tier0-frames-21-ee149aab",
+            "status": "COMPLETED",
+            "exactCorrect": true,
+            "evidencePathPresent": true
+          }
+        ],
+        "privateSourceReportSha256": "b561f9d99e2d1fb4d667515cd7b8e2136c5f3fd37cdfea1aaa5582a21d9af1e7"
+      },
+      "verdict": "EvoMolior produced one additional strict exact answer on this three-task slice. Both arms had complete evidence-path coverage. The society was approximately 18.7 times slower."
+    },
+    {
+      "id": "frames-537",
+      "benchmark": "FRAMES",
+      "taskIds": [
+        "frames-537"
+      ],
+      "society": {
+        "backend": "QWEN_CLOUD",
+        "runner": "evomolior-society",
+        "modelAssignments": [
+          "qwen3.7-plus"
+        ],
+        "startedAtUtc": "2026-07-06T08:07:13.589295Z",
+        "completedAtUtc": "2026-07-06T08:15:32.665867Z",
+        "wallClockSeconds": 499.076572,
+        "executedCount": 1,
+        "exactCorrectCount": 1,
+        "exactAccuracy": 1.0,
+        "evidencePathCoverage": 1.0,
+        "providerCostUsd": null,
+        "failures": [],
+        "tasks": [
+          {
+            "taskId": "frames-537",
+            "runId": "tier0-frames-537-39a443bf",
+            "status": "COMPLETED",
+            "exactCorrect": true,
+            "evidencePathPresent": true
+          }
+        ],
+        "privateSourceReportSha256": "44937ea7e3baab8a0185258dc7fd2adf0351b7e07dcb92246b6686b1c592fee1"
+      },
+      "singleAgent": {
+        "backend": "QWEN_CLOUD",
+        "runner": "single-agent",
+        "modelId": "qwen3.7-plus",
+        "startedAtUtc": "2026-07-06T17:11:52.061360Z",
+        "completedAtUtc": "2026-07-06T17:12:06.426150Z",
+        "wallClockSeconds": 14.36479,
+        "executedCount": 1,
+        "exactCorrectCount": 0,
+        "exactAccuracy": 0.0,
+        "evidencePathCoverage": 1.0,
+        "toolNativeSuccessRate": 1.0,
+        "providerCostUsd": null,
+        "failures": [],
+        "tasks": [
+          {
+            "taskId": "frames-537",
+            "runId": "tier0-frames-537-895cc5ae",
+            "status": "COMPLETED",
+            "exactCorrect": false,
+            "evidencePathPresent": true
+          }
+        ],
+        "privateSourceReportSha256": "787e193ecb927778903c8d0fdae1ccb0743e1599728cfeac9ff536fe28246963"
+      },
+      "verdict": "EvoMolior won this one-task high-source-fan-out case. The sample size is one and the society was much slower."
+    }
+  ]
+}

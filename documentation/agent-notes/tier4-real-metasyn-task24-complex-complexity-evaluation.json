@@ -1,0 +1,44 @@
+{
+  "dataset": "THUIR/MetaSyn",
+  "task_id": 24,
+  "run_id": "tier4-real-metasyn-task24-complex-complexity-20260704",
+  "included_true_positives": [
+    4565,
+    4566
+  ],
+  "included_false_negatives": [
+    4567
+  ],
+  "included_false_positives": [],
+  "hard_negative_true_negatives": [
+    4558,
+    4559,
+    4568,
+    4570,
+    4571
+  ],
+  "included_recall": 0.6666666666666666,
+  "included_precision": 1.0,
+  "hard_negative_rejection_accuracy": 1.0,
+  "candidate_level_accuracy": 0.875,
+  "synthesis_direction_match": true,
+  "is_full_leaderboard_run": false,
+  "scoring_scope": "candidate_subset_with_all_matched_positive_corpus_ids",
+  "complexity_profile": {
+    "stage_group_count": 2,
+    "stage_round_count": 3,
+    "stage_max_agents_per_group": 5,
+    "stage_round_duration_minutes": 3,
+    "stage_budget_override": 320
+  },
+  "runtime": {
+    "primary_duration_ms": 84913,
+    "systematic_review_pack_duration_ms": 1513902,
+    "systematic_review_pack_wall_clock_minutes": 25.2317,
+    "stage_winner_id": "group-0"
+  },
+  "artifact_quality_notes": [
+    "The complex output did not list 4568, 4570, and 4571 in excluded_hard_negatives.csv or evidence_table.csv.",
+    "Those candidates are explicitly excluded in exclusion_reasons.csv, so the candidate partition remains complete for evaluator scoring."
+  ]
+}

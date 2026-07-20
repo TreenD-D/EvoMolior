@@ -43,6 +43,10 @@ appcompat = "1.7.1"
 material = "1.13.0"
 
 koog = "1.0.0"
+koogDashscope = "1.0.0-beta-preview7"
+commonsCsv = "1.14.1"
+re2j = "1.7"
+jsonSchemaValidator = "2.0.4"
 
 
 [libraries]
@@ -105,13 +109,18 @@ koog-agents = { module = "ai.koog:koog-agents", version.ref = "koog" }
 koog-agents-core = { module = "ai.koog:agents-core", version.ref = "koog" }
 koog-agents-tools = { module = "ai.koog:agents-tools", version.ref = "koog" }
 koog-prompt-executor-openrouter-client = { module = "ai.koog:prompt-executor-openrouter-client-jvm", version.ref = "koog" }
+koog-prompt-executor-dashscope-client = { module = "ai.koog:prompt-executor-dashscope-client-jvm", version.ref = "koogDashscope" }
 koog-agents-features-event-handler = { module = "ai.koog:agents-features-event-handler", version.ref = "koog" }
+commons-csv = { module = "org.apache.commons:commons-csv", version.ref = "commonsCsv" }
+re2j = { module = "com.google.re2j:re2j", version.ref = "re2j" }
+json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "jsonSchemaValidator" }
 
 # Ktor server (for engine IPC)
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
 ktor-server-netty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor" }
 ktor-server-websockets = { module = "io.ktor:ktor-server-websockets", version.ref = "ktor" }
 ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor" }
+ktor-server-test-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }
 
 # Ktor client
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
