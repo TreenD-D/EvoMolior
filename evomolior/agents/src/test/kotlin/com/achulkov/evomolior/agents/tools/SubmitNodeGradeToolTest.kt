@@ -28,7 +28,7 @@ import kotlin.test.assertTrue
 
 class SubmitNodeGradeToolTest {
     @Test
-    fun `valid response preserves complete vector and exact assignment commitments`() = runTest {
+    fun `assignment id resolves immutable commitments into valid hashed response`() = runTest {
         val assignment = assignment()
         val responses = mutableListOf<NodeGraderResponse>()
         val tool = tool(assignment, responses)
@@ -37,21 +37,40 @@ class SubmitNodeGradeToolTest {
 
         assertTrue(result.startsWith("Node grade recorded"))
         val response = responses.single()
+        assertEquals(assignment.assignmentId, response.assignmentId)
         assertEquals(assignment.assignmentHash, response.assignmentHash)
         assertEquals("grader-1", response.graderId)
+        assertEquals(vector(), response.scoreVector)
         assertEquals(NodeGraderResponseVerdict.VALID, response.verdict)
+        assertEquals(
+            AtlasHashing.hashText("${assignment.assignmentHash}|grader-1"),
+            response.responseId
+        )
         assertTrue(response.hasValidHash())
     }
 
     @Test
-    fun `commitment mismatch and malformed verdict fail without callback`() = runTest {
+    fun `model facing arguments contain no caller supplied immutable commitments`() {
+        val encoded = Json.encodeToJsonElement(
+            SubmitNodeGradeTool.Args.serializer(),
+            args(assignment())
+        ).jsonObject
+
+        assertEquals(
+            setOf("assignmentId", "verdict", "scoreVector", "rationale"),
+            encoded.keys
+        )
+    }
+
+    @Test
+    fun `unknown assignment and malformed verdict fail without callback`() = runTest {
         val assignment = assignment()
         val responses = mutableListOf<NodeGraderResponse>()
         val tool = tool(assignment, responses)
 
         assertTrue(
-            tool.execute(args(assignment).copy(packetHash = "tampered"))
-                .startsWith("Error: submitted commitments")
+            tool.execute(args(assignment).copy(assignmentId = "not-assigned"))
+                .startsWith("Error: assignmentId is not assigned")
         )
         assertTrue(
             tool.execute(
@@ -62,6 +81,22 @@ class SubmitNodeGradeToolTest {
             ).startsWith("Error: non-VALID")
         )
         assertTrue(responses.isEmpty())
+    }
+
+    @Test
+    fun `non normalized vector fails without claiming assignment`() = runTest {
+        val assignment = assignment()
+        val responses = mutableListOf<NodeGraderResponse>()
+        val tool = tool(assignment, responses)
+
+        val invalidResult = tool.execute(
+            args(assignment).copy(scoreVector = vector().copy(confidence = 1.01))
+        )
+        val repairedResult = tool.execute(args(assignment))
+
+        assertTrue(invalidResult.startsWith("Error: every score and confidence"))
+        assertTrue(repairedResult.startsWith("Node grade recorded"))
+        assertEquals(1, responses.size)
     }
 
     @Test
@@ -161,14 +196,6 @@ class SubmitNodeGradeToolTest {
 
     private fun args(assignment: NodeGradingAssignment) = SubmitNodeGradeTool.Args(
         assignmentId = assignment.assignmentId,
-        assignmentHash = assignment.assignmentHash,
-        packetId = assignment.packet.packetId,
-        packetHash = assignment.packet.packetHash,
-        nodeId = assignment.packet.nodeId.value,
-        atlasHash = assignment.packet.atlasHash,
-        nodePayloadHash = assignment.packet.nodePayloadHash,
-        criteriaHash = assignment.criteriaHash,
-        capturePolicyHash = assignment.capturePolicyHash,
         verdict = NodeGradeSubmissionVerdict.VALID,
         scoreVector = vector(),
         rationale = "The exact accepted artifact satisfies the frozen proof contract."

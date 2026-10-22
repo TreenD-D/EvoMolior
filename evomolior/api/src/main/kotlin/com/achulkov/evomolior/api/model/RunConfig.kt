@@ -4,8 +4,10 @@ import com.achulkov.evomolior.core.model.GroupProfileType
 import com.achulkov.evomolior.core.model.ScoringDimension
 import com.achulkov.evomolior.core.contract.RunInputArtifactKind
 import com.achulkov.evomolior.core.config.AcceptanceProfile
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
 import com.achulkov.evomolior.core.config.LlmBackend
 import com.achulkov.evomolior.core.config.CouncilExecutionPurpose
+import com.achulkov.evomolior.core.council.QuantitativeToolObligation
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -21,27 +23,37 @@ import kotlinx.serialization.Serializable
  * @param groupProfiles Profile type for each group (ordered, same length as [groupCount]).
  * @param rounds Total number of evaluation rounds.
  *   When [autoCompletionPolicy] is present, this is the mandatory safety ceiling.
- * @param roundDurationMinutes Minutes per round before forced check-in.
+ * @param roundDurationMinutes Minutes per round before forced check-in. For production runs,
+ *   zero or a negative value selects budget-led round completion when no test-only duration
+ *   override is supplied; agents then run until completion or the round anti-stall guard fires.
  * @param maxAgentsPerGroup Maximum concurrent agents per group.
  * @param scoringDimensions Dimensions used by Grader agents.
  * @param openRouterApiKey API key for [llmBackend] (kept under the historical name for API compatibility).
  * @param llmBackend LLM backend used by runtime agents.
  * @param councilExecutionPurpose Explicit persisted purpose governing Council provider policy.
  * @param acceptanceProfile Explicit topology and evidence profile; never inferred from purpose.
+ * @param acceptanceDiagnosticMode Optional non-accepting late-publication diagnostic sweep.
+ * @param codexReasoningEffort Persisted per-run Codex reasoning authority.
+ * @param quantitativeToolObligation Optional operator-owned typed quantitative-tool authority.
  * @param autoCompletionPolicy Optional grader-authoritative convergence policy.
  * @param modelOverrides Optional per-role model overrides (role name → model string).
  * @param contextArtifacts Uploaded run-start context artifacts.
  * @param continuationFromRunId Optional completed run to continue from by reusing its sealed
  *   `StartingField` snapshot as the baseline for this fresh run.
  * @param finalOutputSpec Optional spec for the run's operator-facing generated output file.
+ * @param codexRuntimePreset Optional role/model policy; effort becomes a ceiling when selected.
  * @param isTestRun When true, enables a minimal single-group diagnostic run:
  *   - groupCount = 1 is allowed
  *   - Genesis Council is bypassed (defaults used)
  *   - [budgetOverride] is applied to cap spend for fast verification
  * @param budgetOverride Optional global budget ceiling override (used in test runs, e.g. 200.0).
  *   Has no effect unless [isTestRun] is true or the run service explicitly respects it.
- * @param graderGroupCountOverride Exact grader group count for a comparative experiment.
+ * @param graderGroupCountOverride Exact grader group count: any positive count for test/experiment
+ *   runs, or 1-3 for normal production runs to trade evaluation independence for grading cost.
+ *   Acceptance profiles always use the production count.
  * @param enforceProviderMonetaryCostCap Whether unknown provider pricing must fail a monetary cap.
+ * @param ordinaryAgentTtlSeconds Optional lifetime of one ordinary worker in seconds (60-3600).
+ *   Null keeps the runtime default. It bounds time, not credits or provider spend.
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -59,6 +71,14 @@ data class RunConfig(
     val councilExecutionPurpose: CouncilExecutionPurpose = CouncilExecutionPurpose.STANDARD,
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val acceptanceProfile: AcceptanceProfile = AcceptanceProfile.NORMAL,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val acceptanceDiagnosticMode: AcceptanceDiagnosticMode = AcceptanceDiagnosticMode.STRICT,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val quantitativeToolObligation: QuantitativeToolObligation? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val codexRuntimePreset: com.achulkov.evomolior.core.config.CodexRuntimePreset? = null,
     val autoCompletionPolicy: RunAutoCompletionPolicy? = null,
     val modelOverrides: Map<String, String> = emptyMap(),
     val contextArtifacts: List<RunInputArtifactUpload> = emptyList(),
@@ -73,9 +93,25 @@ data class RunConfig(
      */
     val budgetOverride: Double? = null,
     val graderGroupCountOverride: Int? = null,
-    val enforceProviderMonetaryCostCap: Boolean = true
+    val enforceProviderMonetaryCostCap: Boolean = true,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val ordinaryAgentTtlSeconds: Int? = null
 ) {
     init {
+        require(codexRuntimePreset == null || llmBackend == LlmBackend.CODEX_CHATGPT) {
+            "Codex runtime presets require the codex-chatgpt backend"
+        }
+        codexRuntimePreset?.let { preset ->
+            require(
+                preset != com.achulkov.evomolior.core.config.CodexRuntimePreset.MIXED_FAMILIES ||
+                    acceptanceProfile == AcceptanceProfile.NORMAL
+            ) {
+                "Existing acceptance profiles require Luna-only model authority"
+            }
+            require(preset.supportedModelIds.containsAll(modelOverrides.values)) {
+                "Model overrides exceed the selected Codex preset"
+            }
+        }
         // Test runs allow a single group; full runs require at least 2 for competition.
         val minGroups = if (isTestRun) 1 else 2
         require(groupCount in minGroups..8) {
@@ -123,6 +159,14 @@ data class RunConfig(
                 "Acceptance profile ${acceptanceProfile.id} requires at least two worker groups"
             }
         }
+        if (acceptanceDiagnosticMode == AcceptanceDiagnosticMode.FULL_SWEEP_NON_ACCEPTING) {
+            require(acceptanceProfile != AcceptanceProfile.NORMAL) {
+                "The full non-accepting diagnostic sweep requires an acceptance profile"
+            }
+            require(councilExecutionPurpose == CouncilExecutionPurpose.APPENDIX_B_ACCEPTANCE) {
+                "The full non-accepting diagnostic sweep requires Appendix-B Council purpose"
+            }
+        }
         when (acceptanceProfile) {
             AcceptanceProfile.NORMAL -> Unit
             AcceptanceProfile.RUNTIME_USABILITY_SMOKE -> require(rounds == 1) {
@@ -132,15 +176,35 @@ data class RunConfig(
                 "Full Appendix B acceptance requires exactly $APPENDIX_B_FULL_ROUNDS rounds"
             }
         }
+        ordinaryAgentTtlSeconds?.let {
+            require(it in 60..3_600) { "ordinaryAgentTtlSeconds must be between 60 and 3600" }
+        }
         graderGroupCountOverride?.let {
             require(it > 0) { "graderGroupCountOverride must be positive" }
-            require(isTestRun) { "graderGroupCountOverride is restricted to test/experiment runs" }
+            require(isTestRun || (acceptanceProfile == AcceptanceProfile.NORMAL && it <= MAX_PRODUCTION_GRADER_GROUPS)) {
+                "graderGroupCountOverride must be 1-$MAX_PRODUCTION_GRADER_GROUPS for normal production runs " +
+                    "and is unavailable to acceptance profiles"
+            }
         }
     }
 
     companion object {
         private const val APPENDIX_B_FULL_ROUNDS: Int = 6
+
+        /** Largest operator-selected grader count for production runs (the production default). */
+        const val MAX_PRODUCTION_GRADER_GROUPS: Int = 3
     }
+}
+
+/**
+ * Controls whether a late strict-acceptance failure receives an exhaustive non-accepting sweep.
+ *
+ * The diagnostic branch cannot produce normal completion or accepted publication authority.
+ */
+@Serializable
+enum class AcceptanceDiagnosticMode {
+    STRICT,
+    FULL_SWEEP_NON_ACCEPTING
 }
 
 /**
@@ -250,8 +314,14 @@ data class FinalOutputSpec(
  * @param csvRankedEvidence Evidence-density rules for the leading rows of a ranked CSV.
  * @param csvSourceMetadata Source metadata and access-date requirements for CSV records.
  * @param researchClaimSupportCoverage Claim-support coverage required when a claim ledger is available.
+ * @param jupyterNotebookSource Optional static source contract for a Jupyter notebook deliverable.
+ * @param maximumWordCount Maximum whitespace-delimited words, including code and headings.
+ * @param minimumWordCount Minimum whitespace-delimited words; guards against silently condensed reports.
+ * @param exactMarkdownHeadings Exact ordered headings, ignoring heading-level markers only.
+ * @param requiredTextStatements Literal statements required in the report (case-insensitive).
  */
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class FinalOutputValidationContract(
     val minimumPublicUrlCount: Int = 0,
     val requireInteractiveHtml: Boolean = false,
@@ -267,15 +337,66 @@ data class FinalOutputValidationContract(
     val requireMarkdownAccessDate: Boolean = false,
     val csvRankedEvidence: CsvRankedEvidenceContract? = null,
     val csvSourceMetadata: CsvSourceMetadataContract? = null,
-    val researchClaimSupportCoverage: ResearchClaimSupportCoverageContract? = null
+    val researchClaimSupportCoverage: ResearchClaimSupportCoverageContract? = null,
+    val jupyterNotebookSource: JupyterNotebookSourceContract? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val maximumWordCount: Int? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val exactMarkdownHeadings: List<String> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val requiredTextStatements: List<String> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val minimumWordCount: Int? = null,
 ) {
     init {
         require(minimumPublicUrlCount >= 0) { "minimumPublicUrlCount must be non-negative" }
         minimumCsvDataRows?.let { require(it >= 0) { "minimumCsvDataRows must be non-negative" } }
         exactCsvDataRows?.let { require(it >= 0) { "exactCsvDataRows must be non-negative" } }
+        maximumWordCount?.let { require(it > 0) { "maximumWordCount must be positive" } }
+        minimumWordCount?.let { minimum ->
+            require(minimum > 0) { "minimumWordCount must be positive" }
+            require(maximumWordCount == null || minimum <= maximumWordCount) {
+                "minimumWordCount must not exceed maximumWordCount"
+            }
+        }
+        require((exactMarkdownHeadings + requiredTextStatements).none(String::isBlank)) {
+            "Exact headings and required statements must not be blank"
+        }
         minimumJsonArraySizes.forEach { (key, size) ->
             require(key.isNotBlank()) { "minimumJsonArraySizes keys must not be blank" }
             require(size >= 0) { "minimumJsonArraySizes values must be non-negative" }
+        }
+    }
+}
+
+/**
+ * Deterministic static source requirements for a Jupyter notebook deliverable.
+ *
+ * Executable behavior remains the responsibility of sandboxed promotion and acceptance tests.
+ * This contract prevents a structurally valid but irrelevant or pre-executed notebook from
+ * crossing the publication boundary.
+ *
+ * @param minimumCodeCellCount Minimum number of code cells.
+ * @param requiredCodeSignals Case-insensitive source fragments required across code cells.
+ * @param requiredMarkdownSignals Case-insensitive source fragments required across Markdown cells.
+ * @param forbiddenCodeSignals Case-insensitive fragments forbidden across code cells.
+ * @param requireCleanCodeCells Whether code cells must have null execution counts and no outputs.
+ * @param requireUniqueCellIdsForNbformat45 Whether nbformat 4.5+ cells require unique nonblank IDs.
+ */
+@Serializable
+data class JupyterNotebookSourceContract(
+    val minimumCodeCellCount: Int = 1,
+    val requiredCodeSignals: List<String> = emptyList(),
+    val requiredMarkdownSignals: List<String> = emptyList(),
+    val forbiddenCodeSignals: List<String> = emptyList(),
+    val requireCleanCodeCells: Boolean = true,
+    val requireUniqueCellIdsForNbformat45: Boolean = true
+) {
+    init {
+        require(minimumCodeCellCount > 0) {
+            "minimumCodeCellCount must be positive"
+        }
+        require(
+            (requiredCodeSignals + requiredMarkdownSignals + forbiddenCodeSignals)
+                .none(String::isBlank)
+        ) {
+            "Jupyter notebook source signals must not be blank"
         }
     }
 }

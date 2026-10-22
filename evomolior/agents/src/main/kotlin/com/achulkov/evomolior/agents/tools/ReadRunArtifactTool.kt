@@ -26,13 +26,16 @@ class ReadRunArtifactTool(
         Read uploaded run-start context artifacts.
         Use listOnly=true or omit relativePath to enumerate available inputs and compact summaries.
         Use relativePath to read a specific text or preview a binary artifact.
+        For source citations, set includeLineNumbers=true and cite the displayed L numbers.
+        Artifact metadata headers are not part of the source file's line numbering.
         Cost: FREE.
     """.trimIndent()
 ) {
     @Serializable
     data class Args(
         val relativePath: String? = null,
-        val listOnly: Boolean = false
+        val listOnly: Boolean = false,
+        val includeLineNumbers: Boolean = false,
     )
 
     override suspend fun execute(args: Args): String {
@@ -55,9 +58,10 @@ class ReadRunArtifactTool(
 
         val metadata = artifact
         val preview = metadata?.textPreview?.takeIf { it.isNotBlank() }
-        val content = runCatching {
+        val sourceText = runCatching {
             Files.readString(resolvedPath)
-        }.getOrElse {
+        }.getOrNull()
+        val content = sourceText ?: run {
             preview ?: runCatching {
                 val bytes = Files.readAllBytes(resolvedPath)
                 "Binary artifact (${bytes.size} bytes). Use the archive download to retrieve the raw file."
@@ -74,7 +78,14 @@ class ReadRunArtifactTool(
                 appendLine("SHA-256: ${it.sha256}")
             }
             appendLine()
-            appendLine(content)
+            if (args.includeLineNumbers && sourceText != null) {
+                appendLine("Source lines (L1 is the first file line; metadata above is excluded):")
+                sourceText.lineSequence().forEachIndexed { index, line ->
+                    appendLine("L${index + 1}: $line")
+                }
+            } else {
+                appendLine(content)
+            }
         }
     }
 

@@ -30,6 +30,7 @@ import com.achulkov.evomolior.core.atlas.ToolLifecycleEvent
 import com.achulkov.evomolior.core.atlas.ToolLifecycleState
 import com.achulkov.evomolior.core.atlas.ToolOpportunity
 import com.achulkov.evomolior.core.atlas.ToolOpportunityCommitment
+import com.achulkov.evomolior.core.atlas.ToolOpportunityCommitmentAuthority
 import com.achulkov.evomolior.core.atlas.ToolOpportunityType
 import com.achulkov.evomolior.core.atlas.ToolValidationExecutionAuthority
 import com.achulkov.evomolior.core.atlas.ToolVersionId
@@ -66,8 +67,10 @@ class ExpectedToolReuseAuthorityResolverTest {
             val repository = ToolInfrastructureRepository(database)
             val registryEntry = preparePromotedTool(repository, database, atlas)
             val resolver = ExpectedToolReuseAuthorityResolver()
+            val commitments = ToolOpportunityCommitmentAuthority.current(atlas)
+                .byOpportunityId
 
-            val pending = resolver.resolve(database, atlas, groupId)
+            val pending = resolver.resolve(database, atlas, groupId, commitments)
 
             val validationCard =
                 pending.toolCardsByNodeId.getValue(validationNodeId).single()
@@ -100,13 +103,73 @@ class ExpectedToolReuseAuthorityResolverTest {
                 recordedAt = at
             )
 
-            val satisfied = resolver.resolve(database, atlas, groupId)
+            val satisfied = resolver.resolve(database, atlas, groupId, commitments)
             assertEquals(
                 setOf(validationNodeId, expectedNodeId),
                 satisfied.toolCardsByNodeId.keys
             )
             assertEquals(emptySet(), satisfied.pendingNodeIds)
         }
+
+    @Test
+    fun `promoted origin commitment remains discoverable after Atlas amendment`() = runTest {
+        val factory = SubstrateDatabaseFactory(
+            createTempDirectory("expected-reuse-amendment-").toFile()
+        )
+        val database = factory.get(runId, groupId.value)
+        val parent = atlas()
+        val repository = ToolInfrastructureRepository(database)
+        preparePromotedTool(repository, database, parent)
+        val child = parent.copy(
+            version = 2,
+            parentAtlasHash = parent.atlasHash,
+            amendmentIds = listOf("amendment-1"),
+            atlasHash = ""
+        ).withComputedHash()
+        val commitments = ToolOpportunityCommitmentAuthority
+            .resolve(listOf(parent, child))
+            .byOpportunityId
+
+        val authority = ExpectedToolReuseAuthorityResolver().resolve(
+            database = database,
+            atlas = child,
+            groupId = groupId,
+            opportunityCommitments = commitments
+        )
+
+        val cards = authority.toolCardsByNodeId
+        assertEquals(
+            commitments.getValue(opportunity().opportunityId).commitmentHash,
+            cards.getValue(expectedNodeId).single().opportunityCommitmentHash
+        )
+        assertEquals(setOf(expectedNodeId), authority.pendingNodeIds)
+    }
+
+    @Test
+    fun `successful reuse without matching later-agent lifecycle remains pending`() = runTest {
+        val factory = SubstrateDatabaseFactory(
+            createTempDirectory("expected-reuse-unlinked-execution-").toFile()
+        )
+        val database = factory.get(runId, groupId.value)
+        val atlas = atlas()
+        val repository = ToolInfrastructureRepository(database)
+        preparePromotedTool(repository, database, atlas)
+        val commitments = ToolOpportunityCommitmentAuthority.current(atlas)
+            .byOpportunityId
+        repository.appendExecution(
+            execution(
+                id = "unlinked-successful-execution",
+                nodeId = expectedNodeId,
+                purpose = ToolExecutionPurpose.AGENT_USE,
+                round = 2
+            )
+        )
+
+        val authority = ExpectedToolReuseAuthorityResolver()
+            .resolve(database, atlas, groupId, commitments)
+
+        assertEquals(setOf(expectedNodeId), authority.pendingNodeIds)
+    }
 
     @Test
     fun `repository separates validation from expected reuse execution authority`() = runTest {
@@ -184,7 +247,12 @@ class ExpectedToolReuseAuthorityResolverTest {
         )
 
         assertFailsWith<IllegalArgumentException> {
-            ExpectedToolReuseAuthorityResolver().resolve(database, atlas, groupId)
+            ExpectedToolReuseAuthorityResolver().resolve(
+                database,
+                atlas,
+                groupId,
+                ToolOpportunityCommitmentAuthority.current(atlas).byOpportunityId
+            )
         }
     }
 

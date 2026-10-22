@@ -5,9 +5,12 @@ import com.achulkov.evomolior.api.service.AcceptanceAdmissionArtifact
 import com.achulkov.evomolior.api.service.AcceptanceAdmissionCheck
 import com.achulkov.evomolior.api.service.AcceptanceRunBoundary
 import com.achulkov.evomolior.api.service.AcceptanceRunBoundaryVerifier
+import com.achulkov.evomolior.api.service.ArcAgi2NotebookQualificationAuthority
+import com.achulkov.evomolior.api.model.FinalOutputSpec
 import com.achulkov.evomolior.core.config.AcceptanceProfile
 import com.achulkov.evomolior.core.config.LlmBackend
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
+import com.achulkov.evomolior.core.council.QuantitativeToolObligation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -48,6 +51,78 @@ private const val ACCEPTANCE_DISTRIBUTION_SCHEMA = "acceptance-distribution-mani
 private const val ACCEPTANCE_LOCK_SCHEMA = "appendix-b-acceptance-lock-v1"
 private const val MINIMUM_FREE_BYTES = 10L * 1024L * 1024L * 1024L
 private const val MAX_OWNER_DIAGNOSTIC_BYTES = 2_048
+private val ACCEPTANCE_ADMISSION_CODES = setOf(
+    "acceptance_jvm_running",
+    "acceptance_jvm_temp_authority_mismatch",
+    "acceptance_jvm_temp_free_space",
+    "acceptance_jvm_temp_mismatch",
+    "acceptance_jvm_temp_missing",
+    "acceptance_launcher_mismatch",
+    "acceptance_launcher_missing",
+    "acceptance_lock_held",
+    "acceptance_pipeline_shape",
+    "acceptance_temp_not_dedicated",
+    "archive_estimate_missing",
+    "arc_qualification_authority_mismatch",
+    "cli_code_source",
+    "codex_binary_mismatch",
+    "codex_route_mismatch",
+    "codex_temp_free_space",
+    "codex_temp_missing",
+    "codex_temp_volume_unauthorized",
+    "codex_version_mismatch",
+    "configuration_authority_missing",
+    "configuration_hash_mismatch",
+    "daemon_running",
+    "distribution_content_address",
+    "distribution_file_changed",
+    "distribution_file_missing",
+    "distribution_file_mutable",
+    "distribution_id_mismatch",
+    "distribution_inventory_mismatch",
+    "distribution_manifest_invalid",
+    "distribution_manifest_missing",
+    "distribution_manifest_name",
+    "distribution_mutable",
+    "distribution_root_missing",
+    "distribution_symlink",
+    "effective_classpath_inventory",
+    "effective_classpath_outside_bundle",
+    "final_output",
+    "gate_evidence_mismatch",
+    "gradle_compile_test_running",
+    "jdk_home_mismatch",
+    "jdk_java_hash_mismatch",
+    "jdk_modules_hash_mismatch",
+    "jdk_not_17",
+    "jdk_release_hash_mismatch",
+    "jvm_version_mismatch",
+    "model_assignment_hash_mismatch",
+    "output_free_space",
+    "process_inventory_unavailable",
+    "profile_horizon",
+    "protected_source_changed",
+    "provider_model_fallback",
+    "provider_route",
+    "repository_root_changed",
+    "repository_root_mismatch",
+    "repository_root_missing",
+    "required_file_missing",
+    "run_output_authority_lost",
+    "run_output_exists",
+    "run_output_name_missing",
+    "run_output_parent_missing",
+    "scoring_child_health",
+    "source_manifest_mismatch",
+    "source_manifest_symlink",
+    "source_revision_changed",
+    "source_revision_mismatch",
+    "source_tree_dirty",
+    "source_tree_dirty_manifest",
+    "subprocess_failed",
+    "subprocess_timeout",
+    "worker_count"
+)
 
 @Serializable
 internal data class AcceptanceDistributionFileV1(
@@ -71,6 +146,10 @@ internal data class AcceptanceDistributionManifestV1(
     val sourceRevision: String,
     val sourceTreeClean: Boolean,
     val javaVersion: String,
+    val javaHome: String,
+    val javaExecutableSha256: String,
+    val javaReleaseSha256: String,
+    val javaModulesSha256: String,
     val acceptanceJvmTmpDir: String,
     val mainClass: String,
     val configurationSha256: String,
@@ -90,6 +169,10 @@ internal data class AcceptanceDistributionManifestV1(
         require(modelAssignmentsSha256.isSha256())
         require(codexCliSha256.isSha256())
         require(codexCliVersion.isNotBlank())
+        require(javaHome.isNotBlank() && Path.of(javaHome).isAbsolute)
+        require(javaExecutableSha256.isSha256())
+        require(javaReleaseSha256.isSha256())
+        require(javaModulesSha256.isSha256())
         require(acceptanceJvmTmpDir.isNotBlank() && Path.of(acceptanceJvmTmpDir).isAbsolute)
         require(gateEvidence.isNotEmpty())
         require(gateEvidence.map { it.path } == gateEvidence.map { it.path }.sorted())
@@ -124,6 +207,10 @@ internal data class AcceptanceLockOwnerV1(
     val configurationSha256: String,
     val modelAssignmentsSha256: String,
     val jvmVersion: String,
+    val javaHome: String,
+    val javaExecutableSha256: String,
+    val javaReleaseSha256: String,
+    val javaModulesSha256: String,
     val codexCliPath: String,
     val codexCliSha256: String,
     val codexCliVersion: String
@@ -133,7 +220,16 @@ internal class AcceptanceAdmissionException(
     val code: String,
     message: String,
     cause: Throwable? = null
-) : IllegalStateException(message, cause)
+) : IllegalStateException(message, cause) {
+    init {
+        require(code in ACCEPTANCE_ADMISSION_CODES) {
+            "Acceptance admission code must be a member of the closed non-secret catalog"
+        }
+    }
+
+    internal fun ownerDiagnostic(): String =
+        "EvoMolior acceptance admission rejected: code=$code"
+}
 
 internal fun interface AcceptanceAdmissionController {
     fun admit(
@@ -160,7 +256,8 @@ internal class AcceptanceRunLease(
     private val repositoryRoot: Path,
     private val distributionRoot: Path,
     private val manifest: AcceptanceDistributionManifestV1,
-    private val acceptanceLock: AppendixBAcceptanceRunLock
+    private val acceptanceLock: AppendixBAcceptanceRunLock,
+    private val acceptanceJvmTmpDir: Path
 ) : AcceptanceRunLeaseHandle {
     override fun verifyStable(boundary: String) {
         val currentSourceRevision = git(repositoryRoot, "rev-parse", "HEAD")
@@ -170,7 +267,11 @@ internal class AcceptanceRunLease(
                 "Acceptance source revision changed at $boundary"
             )
         }
-        val current = snapshotProtectedRepositoryFiles(repositoryRoot, distributionRoot)
+        val current = snapshotProtectedRepositoryFiles(
+            repositoryRoot = repositoryRoot,
+            distributionRoot = distributionRoot,
+            excludedRoots = listOf(acceptanceJvmTmpDir)
+        )
         if (current != repositorySnapshot) {
             val changed = (current.keys + repositorySnapshot.keys)
                 .filter { current[it] != repositorySnapshot[it] }
@@ -273,7 +374,7 @@ internal class AppendixBAcceptanceRunLock private constructor(
 internal data class AcceptanceAdmissionLeafProbes(
     val effectiveClasspath: (Path, AcceptanceDistributionManifestV1) -> Unit =
         ::verifyEffectiveClasspath,
-    val rejectCompetingProcesses: () -> Unit = ::rejectCompetingProcesses,
+    val rejectCompetingProcesses: () -> Unit = ::rejectCompetingProcessesForAdmission,
     val localDaemonRunning: () -> Boolean = { LocalRunDaemonClient.status() != null },
     val codexCli: (AcceptanceDistributionManifestV1, CliOptions) -> Unit =
         ::verifyAcceptanceCodexCli,
@@ -282,7 +383,8 @@ internal data class AcceptanceAdmissionLeafProbes(
         AcceptanceTempAuthorities = ::resolveAcceptanceTempAuthorities,
     val writableVolume: (Path, Long, String) -> Unit = ::verifyWritableVolume,
     val shellAndPython: () -> Unit = ::verifyShellAndPython,
-    val providerSchema: (AcceptanceProfile) -> String = ::verifyAcceptanceProviderSchema,
+    val providerSchema: (AcceptanceProfile, QuantitativeToolObligation?) -> String =
+        ::verifyAcceptanceProviderSchema,
     val scoringChild: (Path) -> Unit = ::verifyScoringChild
 )
 
@@ -311,6 +413,19 @@ internal class DefaultAcceptanceAdmissionController(
         }
         val stage = acceptanceStages.single()
         requireAcceptanceProfile(stage, options)
+        verifyAcceptanceTargetAuthority(
+            stageId = stage.id,
+            quantitativeToolObligation = stage.quantitativeToolObligation,
+            finalOutputSpec = stage.finalOutputSpec?.let { output ->
+                FinalOutputSpec(
+                    relativePath = output.relativePath,
+                    mediaType = output.mediaType,
+                    description = output.description,
+                    kind = output.kind,
+                    validation = output.validation,
+                )
+            },
+        )
 
         val manifestPath = env[ACCEPTANCE_MANIFEST_ENV]
             ?.trim()
@@ -366,6 +481,10 @@ internal class DefaultAcceptanceAdmissionController(
                 configurationSha256 = manifest.configurationSha256,
                 modelAssignmentsSha256 = manifest.modelAssignmentsSha256,
                 jvmVersion = System.getProperty("java.runtime.version"),
+                javaHome = manifest.javaHome,
+                javaExecutableSha256 = manifest.javaExecutableSha256,
+                javaReleaseSha256 = manifest.javaReleaseSha256,
+                javaModulesSha256 = manifest.javaModulesSha256,
                 codexCliPath = manifest.codexCliPath,
                 codexCliSha256 = manifest.codexCliSha256,
                 codexCliVersion = manifest.codexCliVersion
@@ -376,7 +495,11 @@ internal class DefaultAcceptanceAdmissionController(
             verifyDistributionFiles(distributionRoot, manifest)
             verifyDistributionIdentity(manifest)
             val authorizedSource = manifest.sourceFiles.associate { it.path to it.sha256 }.toSortedMap()
-            val currentSource = snapshotProtectedRepositoryFiles(repositoryRoot, distributionRoot)
+            val currentSource = snapshotProtectedRepositoryFiles(
+                repositoryRoot = repositoryRoot,
+                distributionRoot = distributionRoot,
+                excludedRoots = listOf(Path.of(manifest.acceptanceJvmTmpDir))
+            )
             if (currentSource != authorizedSource) {
                 throw AcceptanceAdmissionException(
                     "source_manifest_mismatch",
@@ -426,6 +549,10 @@ internal class DefaultAcceptanceAdmissionController(
                 configurationSha256 = manifest.configurationSha256,
                 modelAssignmentsSha256 = manifest.modelAssignmentsSha256,
                 jvmVersion = System.getProperty("java.runtime.version"),
+                javaHome = manifest.javaHome,
+                javaExecutableSha256 = manifest.javaExecutableSha256,
+                javaReleaseSha256 = manifest.javaReleaseSha256,
+                javaModulesSha256 = manifest.javaModulesSha256,
                 codexCliPath = manifest.codexCliPath,
                 codexCliSha256 = manifest.codexCliSha256,
                 codexCliVersion = manifest.codexCliVersion,
@@ -433,14 +560,22 @@ internal class DefaultAcceptanceAdmissionController(
                 requiredFreeBytes = requiredFreeBytes,
                 checks = checks
             )
-            val snapshot = snapshotProtectedRepositoryFiles(repositoryRoot, distributionRoot)
+            val acceptanceJvmTmpDir = Path.of(manifest.acceptanceJvmTmpDir)
+                .toAbsolutePath()
+                .normalize()
+            val snapshot = snapshotProtectedRepositoryFiles(
+                repositoryRoot = repositoryRoot,
+                distributionRoot = distributionRoot,
+                excludedRoots = listOf(acceptanceJvmTmpDir)
+            )
             return AcceptanceRunLease(
                 record = record,
                 repositorySnapshot = snapshot,
                 repositoryRoot = repositoryRoot,
                 distributionRoot = distributionRoot,
                 manifest = manifest,
-                acceptanceLock = acceptanceLock
+                acceptanceLock = acceptanceLock,
+                acceptanceJvmTmpDir = acceptanceJvmTmpDir
             )
         } catch (error: Throwable) {
             acceptanceLock.close()
@@ -464,19 +599,22 @@ internal class DefaultAcceptanceAdmissionController(
             )
         }
         checks += AcceptanceAdmissionCheck("output_authority", pipelineRunOutput.toString())
-        if (Runtime.version().feature() != 17) {
-            throw AcceptanceAdmissionException("jdk_not_17", "Acceptance requires JDK 17")
-        }
-        if (System.getProperty("java.runtime.version") != manifest.javaVersion) {
-            throw AcceptanceAdmissionException(
-                "jvm_version_mismatch",
-                "Acceptance JVM version differs from the immutable distribution manifest"
-            )
-        }
-        checks += AcceptanceAdmissionCheck("jdk_17", System.getProperty("java.runtime.version"))
+        checks += verifyAcceptanceJavaRuntime(manifest)
 
         if (git(repositoryRoot, "rev-parse", "HEAD") != manifest.sourceRevision) {
             throw AcceptanceAdmissionException("source_revision_mismatch", "Source HEAD differs from manifest")
+        }
+        if (!manifest.sourceTreeClean) {
+            throw AcceptanceAdmissionException(
+                "source_tree_dirty_manifest",
+                "Strict acceptance requires sourceTreeClean=true in the immutable manifest"
+            )
+        }
+        if (git(repositoryRoot, "status", "--porcelain", "--untracked-files=all").isNotBlank()) {
+            throw AcceptanceAdmissionException(
+                "source_tree_dirty",
+                "Strict acceptance requires a clean source tree matching the immutable manifest"
+            )
         }
         checks += AcceptanceAdmissionCheck(
             "source_revision",
@@ -523,7 +661,10 @@ internal class DefaultAcceptanceAdmissionController(
         probes.shellAndPython()
         checks += AcceptanceAdmissionCheck("sandbox_capabilities", "bounded shell and Python probes passed")
 
-        val schemaEvidence = probes.providerSchema(stage.acceptanceProfile)
+        val schemaEvidence = probes.providerSchema(
+            stage.acceptanceProfile,
+            stage.quantitativeToolObligation
+        )
         checks += AcceptanceAdmissionCheck(
             "provider_schema",
             schemaEvidence
@@ -565,6 +706,56 @@ internal class DefaultAcceptanceAdmissionController(
                 "archive_estimate_missing",
                 "$ACCEPTANCE_ESTIMATED_ARCHIVE_BYTES_ENV must be a positive byte count"
             )
+}
+
+internal fun verifyAcceptanceJavaRuntime(
+    manifest: AcceptanceDistributionManifestV1,
+    runtimeVersion: String = System.getProperty("java.runtime.version"),
+    runtimeFeature: Int = Runtime.version().feature(),
+    runtimeJavaHome: Path = Path.of(System.getProperty("java.home")).toRealPath(),
+): AcceptanceAdmissionCheck {
+    if (runtimeFeature != 17) {
+        throw AcceptanceAdmissionException("jdk_not_17", "Acceptance requires JDK 17")
+    }
+    if (runtimeVersion != manifest.javaVersion) {
+        throw AcceptanceAdmissionException(
+            "jvm_version_mismatch",
+            "Acceptance JVM version differs from the immutable distribution manifest",
+        )
+    }
+    if (runtimeJavaHome != Path.of(manifest.javaHome).toAbsolutePath().normalize()) {
+        throw AcceptanceAdmissionException(
+            "jdk_home_mismatch",
+            "Acceptance JDK home differs from the immutable distribution manifest",
+        )
+    }
+    val javaExecutable = runtimeJavaHome.resolve("bin/java")
+    val release = runtimeJavaHome.resolve("release")
+    val modules = runtimeJavaHome.resolve("lib/modules")
+    if (sha256(javaExecutable) != manifest.javaExecutableSha256) {
+        throw AcceptanceAdmissionException(
+            "jdk_java_hash_mismatch",
+            "Acceptance JDK java executable bytes changed",
+        )
+    }
+    if (sha256(release) != manifest.javaReleaseSha256) {
+        throw AcceptanceAdmissionException(
+            "jdk_release_hash_mismatch",
+            "Acceptance JDK release metadata bytes changed",
+        )
+    }
+    if (sha256(modules) != manifest.javaModulesSha256) {
+        throw AcceptanceAdmissionException(
+            "jdk_modules_hash_mismatch",
+            "Acceptance JDK runtime modules bytes changed",
+        )
+    }
+    return AcceptanceAdmissionCheck(
+        "jdk_17",
+        "$runtimeVersion:home=${manifest.javaHome}:" +
+            "java=${manifest.javaExecutableSha256}:release=${manifest.javaReleaseSha256}:" +
+            "modules=${manifest.javaModulesSha256}",
+    )
 }
 
 private fun reserveAcceptanceRunOutput(pipelineRunOutput: Path): Path {
@@ -611,11 +802,45 @@ private fun verifyAcceptanceCodexCli(
     CodexAuthCommand.requireUsableSession(codexPath.toString())
 }
 
-private fun verifyAcceptanceProviderSchema(acceptanceProfile: AcceptanceProfile): String =
-    CouncilAcceptanceSchemaAdmissionProbe.validate(acceptanceProfile)
+private fun verifyAcceptanceProviderSchema(
+    acceptanceProfile: AcceptanceProfile,
+    quantitativeToolObligation: QuantitativeToolObligation?
+): String =
+    CouncilAcceptanceSchemaAdmissionProbe.validate(
+        acceptanceProfile,
+        quantitativeToolObligation
+    )
         .schemaSha256ByRole
         .entries
         .joinToString(",") { (role, hash) -> "$role:$hash" }
+
+internal fun verifyAcceptanceTargetAuthority(
+    stageId: String,
+    quantitativeToolObligation: QuantitativeToolObligation?,
+    finalOutputSpec: FinalOutputSpec? = null,
+) {
+    if (stageId != ArcAgi2NotebookQualificationAuthority.PIPELINE_STAGE_ID) {
+        return
+    }
+    try {
+        ArcAgi2NotebookQualificationAuthority.requireExact(
+            requireNotNull(quantitativeToolObligation) {
+                "ARC qualification requires its canonical quantitative tool obligation"
+            }
+        )
+        ArcAgi2NotebookQualificationAuthority.requireExactNotebookOutputSpec(
+            requireNotNull(finalOutputSpec) {
+                "ARC qualification requires its canonical notebook output specification"
+            }
+        )
+    } catch (failure: IllegalArgumentException) {
+        throw AcceptanceAdmissionException(
+            "arc_qualification_authority_mismatch",
+            "ARC qualification authority differs from the executable target contract",
+            failure
+        )
+    }
+}
 
 private fun requireAcceptanceProfile(stage: CliStagePlan, options: CliOptions) {
     if (options.llmBackend != LlmBackend.CODEX_CHATGPT) {
@@ -772,6 +997,10 @@ internal fun canonicalDistributionId(manifest: AcceptanceDistributionManifestV1)
         })
         append(']')
         append(",\"javaVersion\":${canonicalJson(manifest.javaVersion)}")
+        append(",\"javaHome\":${canonicalJson(manifest.javaHome)}")
+        append(",\"javaExecutableSha256\":${canonicalJson(manifest.javaExecutableSha256)}")
+        append(",\"javaReleaseSha256\":${canonicalJson(manifest.javaReleaseSha256)}")
+        append(",\"javaModulesSha256\":${canonicalJson(manifest.javaModulesSha256)}")
         append(",\"acceptanceJvmTmpDir\":${canonicalJson(manifest.acceptanceJvmTmpDir)}")
         append(",\"mainClass\":${canonicalJson(manifest.mainClass)}")
         append(",\"configurationSha256\":${canonicalJson(manifest.configurationSha256)}")
@@ -855,10 +1084,110 @@ internal fun isProtectedGradleCompileOrTestCommand(command: String): Boolean =
         """(?:^|\s):?(?:(?:[A-Za-z0-9_.-]+):)*(?:compile[\w-]*|test|check|build)(?=\s|$)"""
     ).containsMatchIn(command)
 
-private fun rejectCompetingProcesses() {
-    val currentPid = ProcessHandle.current().pid()
+internal enum class CompetingProcessKind(
+    val admissionCode: String
+) {
+    ACCEPTANCE("acceptance_jvm_running"),
+    GRADLE_COMPILE_OR_TEST("gradle_compile_test_running")
+}
+
+internal data class AcceptanceProcessSnapshot(
+    val pid: Long,
+    val command: String,
+    val user: String? = null
+)
+
+internal fun classifyCompetingProcessCommand(command: String): CompetingProcessKind? {
+    val normalized = command.lowercase()
+    return when {
+        normalized.contains("evomolior") &&
+            (
+                normalized.contains("appendix-b-full") ||
+                    normalized.contains(ACCEPTANCE_MANIFEST_ENV.lowercase())
+                ) -> CompetingProcessKind.ACCEPTANCE
+        (normalized.contains("gradle") || normalized.contains("gradledaemon")) &&
+            isProtectedGradleCompileOrTestCommand(normalized) ->
+            CompetingProcessKind.GRADLE_COMPILE_OR_TEST
+        else -> null
+    }
+}
+
+internal fun rejectCompetingProcesses(
+    processes: Sequence<AcceptanceProcessSnapshot>,
+    ignoredProcessIds: Set<Long>,
+    currentUser: String = System.getProperty("user.name")
+) {
+    processes
+        .filterNot { it.pid in ignoredProcessIds }
+        .forEach { process ->
+            if (process.command.isBlank() && process.user == currentUser) {
+                throw AcceptanceAdmissionException(
+                    "process_inventory_unavailable",
+                    "A same-owner process could not be inspected (pid=${process.pid})"
+                )
+            }
+            val kind = classifyCompetingProcessCommand(process.command) ?: return@forEach
+            throw AcceptanceAdmissionException(
+                kind.admissionCode,
+                "Conflicting process is already running (pid=${process.pid})"
+            )
+        }
+}
+
+internal fun collectInvocationProcessIds(
+    currentPid: Long,
+    parentPidOf: (Long) -> Long?
+): Set<Long> = buildSet {
+    var pid: Long? = currentPid
+    while (pid != null && add(pid)) {
+        pid = parentPidOf(pid)
+    }
+}
+
+internal fun rejectCompetingProcessesSafely(
+    invocationProcessIds: () -> Set<Long>,
+    processInventory: () -> List<AcceptanceProcessSnapshot>,
+    allowConcurrentAcceptance: Boolean = false
+) {
+    try {
+        val inventory = processInventory().asSequence().let { processes ->
+            if (allowConcurrentAcceptance) {
+                // Each acceptance run owns an independent repository-root lock. Keeping the
+                // process probe focused on Gradle work lets explicitly isolated Gate-D labs run
+                // concurrently while same-root launches still serialize on that lock.
+                processes.filter {
+                    classifyCompetingProcessCommand(it.command) != CompetingProcessKind.ACCEPTANCE
+                }
+            } else {
+                processes
+            }
+        }
+        rejectCompetingProcesses(
+            processes = inventory,
+            ignoredProcessIds = invocationProcessIds()
+        )
+    } catch (error: AcceptanceAdmissionException) {
+        throw error
+    } catch (error: Exception) {
+        throw AcceptanceAdmissionException(
+            "process_inventory_unavailable",
+            "Acceptance process inventory could not be inspected",
+            error
+        )
+    }
+}
+
+private fun currentInvocationProcessIds(): Set<Long> =
+    collectInvocationProcessIds(ProcessHandle.current().pid()) { pid ->
+        ProcessHandle.of(pid).orElse(null)
+            ?.parent()
+            ?.orElse(null)
+            ?.pid()
+    }
+
+private fun currentProcessInventory(): List<AcceptanceProcessSnapshot> =
     ProcessHandle.allProcesses().use { processes ->
-        processes.filter { it.pid() != currentPid }.forEach { process ->
+        processes.iterator().asSequence().map { process ->
             val info = process.info()
             val command = buildString {
                 append(info.command().orElse(""))
@@ -866,21 +1195,35 @@ private fun rejectCompetingProcesses() {
                 append(info.arguments().orElse(emptyArray()).joinToString(" "))
                 append(' ')
                 append(info.commandLine().orElse(""))
-            }.lowercase()
-            val competingAcceptance =
-                command.contains("evomolior") &&
-                    (command.contains("appendix-b-full") || command.contains(ACCEPTANCE_MANIFEST_ENV.lowercase()))
-            val gradleCompileOrTest =
-                (command.contains("gradle") || command.contains("gradledaemon")) &&
-                    isProtectedGradleCompileOrTestCommand(command)
-            if (competingAcceptance || gradleCompileOrTest) {
-                throw AcceptanceAdmissionException(
-                    if (competingAcceptance) "acceptance_jvm_running" else "gradle_compile_test_running",
-                    "Conflicting process is already running (pid=${process.pid()})"
-                )
             }
-        }
+            AcceptanceProcessSnapshot(
+                pid = process.pid(),
+                command = command,
+                user = info.user().orElse(null)
+            )
+        }.toList()
     }
+
+private fun rejectCompetingProcesses() {
+    rejectCompetingProcessesSafely(
+        invocationProcessIds = ::currentInvocationProcessIds,
+        processInventory = ::currentProcessInventory
+    )
+}
+
+/**
+ * Applies the admission process probe for an acceptance run with an independent repository root.
+ *
+ * The per-root [AppendixBAcceptanceRunLock] remains the authoritative same-root exclusion. A
+ * separate immutable root, JVM temp authority, Codex temp authority, and daemon port may therefore
+ * coexist with another acceptance laboratory; unrelated Gradle compile/test work remains blocked.
+ */
+internal fun rejectCompetingProcessesForAdmission() {
+    rejectCompetingProcessesSafely(
+        invocationProcessIds = ::currentInvocationProcessIds,
+        processInventory = ::currentProcessInventory,
+        allowConcurrentAcceptance = true
+    )
 }
 
 private fun verifyWritableVolume(path: Path, requiredFreeBytes: Long, label: String) {
@@ -1021,6 +1364,7 @@ private fun verifyScoringChild(distributionRoot: Path) = runBlocking {
         )
     ).apply {
         environment()["EVOMOLIOR_SCORING_WORKER_TOKEN"] = token
+        environment()["EVOMOLIOR_SCORING_WORKER_OWNER_PID"] = ProcessHandle.current().pid().toString()
         redirectOutput(stdout.toFile())
         redirectError(stderr.toFile())
     }.start()
@@ -1063,11 +1407,14 @@ private fun verifyScoringChild(distributionRoot: Path) = runBlocking {
 
 internal fun snapshotProtectedRepositoryFiles(
     repositoryRoot: Path,
-    distributionRoot: Path
+    distributionRoot: Path,
+    excludedRoots: List<Path> = emptyList()
 ): Map<String, String> {
+    val normalizedExcludedRoots = excludedRoots.map { it.toAbsolutePath().normalize() }
     val protectedRoots = listOf(
         repositoryRoot.resolve("evomolior"),
-        repositoryRoot.resolve("build-logic")
+        repositoryRoot.resolve("build-logic"),
+        repositoryRoot.resolve("scripts")
     )
     val explicit = listOf(
         repositoryRoot.resolve("build.gradle.kts"),
@@ -1106,6 +1453,9 @@ internal fun snapshotProtectedRepositoryFiles(
                             !value.startsWith("results/") &&
                             path.fileName.toString() != ".DS_Store" &&
                             !isAcceptanceDatabaseArtifact(path.fileName.toString()) &&
+                            normalizedExcludedRoots.none { excludedRoot ->
+                                path.toAbsolutePath().normalize().startsWith(excludedRoot)
+                            } &&
                             path.toAbsolutePath().normalize() != distributionRoot.toAbsolutePath().normalize()
                     }
                     .forEach(::add)

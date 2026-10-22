@@ -1,14 +1,23 @@
 package com.achulkov.evomolior.core.council
 
 import com.achulkov.evomolior.core.atlas.FinalOutputSpec
+import com.achulkov.evomolior.core.atlas.PhysicalDimension
+import com.achulkov.evomolior.core.atlas.ToolOpportunityType
 import com.achulkov.evomolior.core.config.AcceptanceProfile
 import com.achulkov.evomolior.core.contract.GroupTopologyKind
 import com.achulkov.evomolior.core.model.GroupProfileType
 import com.achulkov.evomolior.core.model.Role
+import com.achulkov.evomolior.core.repair.AggregationSemantics
+import com.achulkov.evomolior.core.repair.QuantitySpec
+import com.achulkov.evomolior.core.repair.TimeBasis
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -54,6 +63,151 @@ class AcceptanceProfileAuthorityTest {
 
         assertEquals(AcceptanceProfile.NORMAL, normal.acceptanceProfile)
         assertEquals(AcceptanceProfile.RUNTIME_USABILITY_SMOKE, smoke.acceptanceProfile)
+    }
+
+    @Test
+    fun `quantitative tool obligation is serialized and changes envelope authority hash`() {
+        val normal = envelope()
+        val obligation = QuantitativeToolObligation(
+            horizonTimeBasis = TimeBasis.HOUR,
+            horizonIntervalCount = 72,
+            allowedOpportunityTypes = setOf(ToolOpportunityType.CALCULATION),
+            requiredOpportunityId = "hourly_power_audit",
+            exactPromotionTestIds = setOf("runtime_boundary"),
+            maximumOpportunityRuntimeMillis = 8_000,
+            requiredFields = listOf(
+                QuantitativeToolFieldObligation(
+                    roleId = "hourly_power",
+                    fieldName = "hourly_power_kw",
+                    location = QuantitativeToolFieldLocation.OUTPUT,
+                    shape = QuantitativeToolFieldShape.HORIZON_SERIES,
+                    quantitySpec = QuantitySpec(
+                        dimension = PhysicalDimension(mapOf("power" to 1)),
+                        unitId = "kW",
+                        scaleToSi = 1_000.0,
+                        aggregation = AggregationSemantics.AVERAGE_OVER_INTERVALS,
+                        timeBasis = TimeBasis.HOUR
+                    )
+                )
+            )
+        )
+        val quantitative = normal.copy(quantitativeToolObligation = obligation)
+        val encoded = json.encodeToString(ExecutionEnvelope.serializer(), quantitative)
+
+        assertTrue(encoded.contains("\"quantitativeToolObligation\""))
+        assertTrue(encoded.contains("\"requiredOpportunityId\":\"hourly_power_audit\""))
+        assertTrue(encoded.contains("\"exactPromotionTestIds\":[\"runtime_boundary\"]"))
+        assertTrue(encoded.contains("\"maximumOpportunityRuntimeMillis\":8000"))
+        assertEquals(
+            quantitative,
+            json.decodeFromString(ExecutionEnvelope.serializer(), encoded)
+        )
+        assertNotEquals(
+            CouncilContractHashing.hashExecutionEnvelope(normal),
+            CouncilContractHashing.hashExecutionEnvelope(quantitative)
+        )
+    }
+
+    @Test
+    fun `quantitative tool obligation compiles copy-ready scalar and horizon field authority`() {
+        val obligation = QuantitativeToolObligation(
+            horizonTimeBasis = TimeBasis.HOUR,
+            horizonIntervalCount = 72,
+            allowedOpportunityTypes = setOf(ToolOpportunityType.CALCULATION),
+            requiredOpportunityId = "hourly_power_audit",
+            exactPromotionTestIds = linkedSetOf("unit_boundary", "runtime_boundary"),
+            maximumOpportunityRuntimeMillis = 8_000,
+            requiredFields = listOf(
+                QuantitativeToolFieldObligation(
+                    roleId = "sample_count",
+                    fieldName = "sample_count",
+                    location = QuantitativeToolFieldLocation.INPUT,
+                    shape = QuantitativeToolFieldShape.SCALAR,
+                    numericType = com.achulkov.evomolior.core.atlas.TypedFieldType.INTEGER,
+                    quantitySpec = QuantitySpec(
+                        dimension = PhysicalDimension(),
+                        unitId = "1",
+                        scaleToSi = 1.0,
+                        aggregation = AggregationSemantics.INSTANTANEOUS
+                    )
+                ),
+                QuantitativeToolFieldObligation(
+                    roleId = "hourly_power",
+                    fieldName = "hourly_power_kw",
+                    location = QuantitativeToolFieldLocation.OUTPUT,
+                    shape = QuantitativeToolFieldShape.HORIZON_SERIES,
+                    quantitySpec = QuantitySpec(
+                        dimension = PhysicalDimension(mapOf("power" to 1)),
+                        unitId = "kW",
+                        scaleToSi = 1_000.0,
+                        aggregation = AggregationSemantics.AVERAGE_OVER_INTERVALS,
+                        timeBasis = TimeBasis.HOUR
+                    )
+                )
+            )
+        )
+
+        val authority = obligation.compileCouncilToolOpportunityAuthority()
+        val scalar = authority.getValue("requiredInputs").jsonArray.single().jsonObject
+        val series = authority.getValue("requiredOutputs").jsonArray.single().jsonObject
+        val items = series.getValue("items").jsonObject
+
+        assertEquals(
+            listOf("runtime_boundary", "unit_boundary"),
+            authority.getValue("promotionTestIds").jsonArray.map {
+                it.jsonPrimitive.content
+            }
+        )
+        assertEquals("INTEGER", scalar.getValue("type").jsonPrimitive.content)
+        assertEquals(
+            "null",
+            scalar.getValue("quantitySpec").jsonObject
+                .getValue("timeBasis").jsonPrimitive.content
+        )
+        assertEquals("ARRAY", series.getValue("type").jsonPrimitive.content)
+        assertEquals(72, series.getValue("minimumItems").jsonPrimitive.content.toInt())
+        assertEquals(72, series.getValue("maximumItems").jsonPrimitive.content.toInt())
+        assertEquals("NUMBER_ITEMS", items.getValue("type").jsonPrimitive.content)
+        assertEquals(
+            "HOUR",
+            items.getValue("quantitySpec").jsonObject
+                .getValue("timeBasis").jsonPrimitive.content
+        )
+        assertFalse("roleId" in scalar)
+        assertFalse("numericType" in scalar)
+    }
+
+    @Test
+    fun `runtime usability smoke rejects an impossible quantitative obligation`() {
+        val quantitative = envelope().copy(
+            quantitativeToolObligation = QuantitativeToolObligation(
+                horizonTimeBasis = TimeBasis.HOUR,
+                horizonIntervalCount = 1,
+                requiredFields = listOf(
+                    QuantitativeToolFieldObligation(
+                        roleId = "hourly_power",
+                        fieldName = "hourly_power_kw",
+                        location = QuantitativeToolFieldLocation.OUTPUT,
+                        shape = QuantitativeToolFieldShape.HORIZON_SERIES,
+                        quantitySpec = QuantitySpec(
+                            dimension = PhysicalDimension(mapOf("power" to 1)),
+                            unitId = "kW",
+                            scaleToSi = 1_000.0,
+                            aggregation = AggregationSemantics.AVERAGE_OVER_INTERVALS,
+                            timeBasis = TimeBasis.HOUR
+                        )
+                    )
+                )
+            )
+        )
+
+        val failure = assertFailsWith<IllegalArgumentException> {
+            quantitative.copy(
+                acceptanceProfile = AcceptanceProfile.RUNTIME_USABILITY_SMOKE
+            )
+        }
+
+        assertTrue(failure.message.orEmpty().contains("forbids tool opportunities"))
     }
 
     private fun envelope(): ExecutionEnvelope = ExecutionEnvelope(

@@ -121,6 +121,7 @@ class StartingFieldCompiler {
             graderField = graderWithoutSeal,
             atlas = atlas,
             graderAtlas = graderAtlas,
+            receiverContract = receiver,
             envelope = envelope,
             report = report
         )

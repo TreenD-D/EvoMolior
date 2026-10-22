@@ -46,6 +46,7 @@ class EvoMoliorRunServiceResumeGraphPromptTest {
                 "group-1" to GroupProfileType.Factory
             )
         ).copy(
+            graderGroupCount = 0,
             deliverableSkeletonTreeJson = json.encodeToString(
                 DeliverableSkeletonTree.serializer(),
                 DeliverableSkeletonTree(
@@ -192,9 +193,14 @@ class EvoMoliorRunServiceResumeGraphPromptTest {
 
         withTimeout(10_000) {
             service.events.first { event ->
-                event is EvoMoliorEvent.RunCompleted && event.runId == runId
+                when (event) {
+                    is EvoMoliorEvent.RunCompleted -> event.runId == runId
+                    is EvoMoliorEvent.RunRecovered -> event.runId == runId
+                    is EvoMoliorEvent.RunAborted -> event.runId == runId
+                    else -> false
+                }
             }
-        }
+        }.also { assertTrue(it is EvoMoliorEvent.RunRecovered, "Unexpected terminal event: $it") }
         assertTrue(true)
     }
 }

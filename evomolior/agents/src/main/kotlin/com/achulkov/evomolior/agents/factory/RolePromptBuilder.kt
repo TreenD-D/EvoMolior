@@ -4,7 +4,6 @@ import com.achulkov.evomolior.core.atlas.ExactNodeEvaluationContext
 import com.achulkov.evomolior.core.atlas.NoveltyType
 import com.achulkov.evomolior.core.atlas.ToolExecutionPurpose
 import com.achulkov.evomolior.core.atlas.ToolImplementationMode
-import com.achulkov.evomolior.core.atlas.TypedToolSchemaCompiler
 
 import com.achulkov.evomolior.core.contract.AgentBootContext
 import com.achulkov.evomolior.core.contract.DeliverableSkeletonTree
@@ -26,12 +25,54 @@ import kotlinx.serialization.json.Json
  * 5. General EvoMolior instructions (norms, tool usage, death note reminder)
  */
 object RolePromptBuilder {
+    /** Header of the grader-authored automated test results appended to judge criteria. */
+    const val JUDGE_AUTOMATED_TEST_RESULTS_HEADER = "=== GRADER-AUTHORED AUTOMATED TEST RESULTS ==="
+
+    /** Criteria characters a RoundJudge prompt carries (previously a flat 2,500). */
+    const val ROUND_JUDGE_CRITERIA_MAX_CHARS = 8_000
+
+    /**
+     * Bounds RoundJudge criteria while always keeping the authored automated test results.
+     *
+     * The results are appended after the criteria digest, so a flat prefix cut dropped them first
+     * even though they are the most mechanical evidence the judge receives.
+     *
+     * @param criteriaContext Criteria digest, optionally followed by the test results section.
+     * @param maxChars Upper bound on the returned text.
+     */
+    fun boundedJudgeCriteria(criteriaContext: String, maxChars: Int = ROUND_JUDGE_CRITERIA_MAX_CHARS): String {
+        if (criteriaContext.length <= maxChars) return criteriaContext
+        val marker = "...[criteria truncated]\n"
+        val resultsStart = criteriaContext.indexOf(JUDGE_AUTOMATED_TEST_RESULTS_HEADER)
+        if (resultsStart < 0) return criteriaContext.take(maxChars - marker.length) + marker
+        val results = criteriaContext.substring(resultsStart).take(maxChars / 2)
+        val head = criteriaContext.substring(0, resultsStart)
+            .take((maxChars - results.length - marker.length).coerceAtLeast(0))
+        return head + marker + results
+    }
+
+    /** Characters of the previous round's accepted criteria baseline shown to criteria agents. */
+    const val GRADER_BASELINE_PROMPT_MAX_CHARS = 9_000
+
+    /** Total canon-snapshot characters a RoundJudge prompt may carry across all target groups. */
+    const val ROUND_JUDGE_SNAPSHOT_BUDGET_CHARS = 40_000
+
+    /** Floor per snapshot so many-group prompts still show each group's headline evidence. */
+    const val ROUND_JUDGE_MIN_SNAPSHOT_CHARS = 4_000
+
+    /**
+     * Characters retained per snapshot when [snapshotCount] groups share one RoundJudge prompt.
+     *
+     * @param snapshotCount Number of snapshots in the prompt.
+     */
+    fun roundJudgeSnapshotChars(snapshotCount: Int): Int =
+        maxOf(ROUND_JUDGE_MIN_SNAPSHOT_CHARS, ROUND_JUDGE_SNAPSHOT_BUDGET_CHARS / snapshotCount.coerceAtLeast(1))
+
     private val json = Json { ignoreUnknownKeys = true }
     private val authorityJson = Json {
         encodeDefaults = true
         explicitNulls = true
     }
-
     /**
      * Builds the full system prompt for an agent.
      *
@@ -160,6 +201,8 @@ object RolePromptBuilder {
         appendLine("- If you make any read-only call and learn nothing useful, write a PLAN_UPDATE explaining the blocker and next query/source to try.")
         appendLine("- If the run has one uploaded artifact and no source-acquisition contract, read the full artifact once, then write candidate-level decisions, extraction notes, or a table-completeness checklist from that artifact instead of repeating artifact discovery.")
         appendLine("- Durable contributions are: write_staging for a DOC/TOOL/PLAN_UPDATE, emit_fact for a KG claim, emit_constraint for schema learning, or execute_tool when a reusable tool already fits.")
+        appendLine("- If you infer a novel but unsupported idea, preserve it as structured HYPOTHESIS JSON with write_staging(type=\"HYPOTHESIS\", speculative=true). Include inferredFrom, assumptions, uncertainty, expectedImpact, a falsifiablePrediction, a minimalTestOrArtifact, confidence, sorted provenanceRefs, and a computed hypothesisHash.")
+        appendLine("- HYPOTHESIS entries propagate provisionally to successors for testing. They are not accepted evidence, cannot complete an assigned task, and cannot be used as a final receiver recommendation without a separate evidence-bound artifact.")
         appendLine("- If you add a claim, also emit at least one KG fact in the form subject -> relation -> object with domain and provenance.")
         appendLine("- If a repeated parsing, validation, extraction, or transformation step appears, either write_staging(type=\"TOOL\", ...) with a runnable tool proposal or write a PLAN_UPDATE headed TOOL ABSTENTION RATIONALE explaining why no tool is useful.")
         appendLine("- If no trustworthy KG fact can be emitted, write a PLAN_UPDATE headed KG ABSTENTION RATIONALE with the missing evidence or schema blocker.")
@@ -248,11 +291,18 @@ object RolePromptBuilder {
                 val skeleton = view.assignedToolSkeleton
                 appendLine()
                 appendLine("=== SEALED TOOL/SIMULATION OPPORTUNITY ===")
-                appendLine("Opportunity ID: ${opportunity.opportunityId}")
+                appendLine("Opportunity handle: T1")
+                appendLine(
+                    "T1 is a lifecycle-local capability. The runtime resolves it one-way to the " +
+                        "exact assigned node, historical opportunity commitment, schemas, and " +
+                        "public tests. Unknown, stale, or foreign handles fail closed."
+                )
                 appendLine(
                     "Type/mode/behavior: ${opportunity.opportunityType.name} / " +
                         "${opportunity.preferredImplementationMode.name} / ${opportunity.behavior.name}"
                 )
+                appendLine("Repeated question pattern: ${opportunity.repeatedQuestionPattern}")
+                appendLine("Promotion validation strategy: ${opportunity.validationStrategy}")
                 appendLine(
                     "Typed inputs: " +
                         opportunity.requiredInputs.joinToString(", ") {
@@ -287,22 +337,17 @@ object RolePromptBuilder {
                         "Reference semantics: " +
                             (opportunity.formulaDslReferenceSemantics?.name ?: "UNCOMMITTED")
                     )
-                    appendLine("Council-authored reference FORMULA_DSL program:")
                     appendLine(
-                        opportunity.formulaDslReferenceProgram?.let {
-                            authorityJson.encodeToString(it)
-                        }
-                            ?: "UNCOMMITTED"
-                    )
-                    appendLine(
-                        "The reference program commits semantic intent. Your candidate may be " +
-                            "algebraically equivalent and need not be byte-identical, but it must " +
-                            "satisfy the exact schemas, dimensions, promotion tests, and semantic " +
-                            "Critic review. Numeric literals are dimensionless."
+                        "The generated read-only contract and editable src/formula.json carry the " +
+                            "Council executable authority. Do not transcribe the program into a " +
+                            "payload; submit its generated workspace path."
                     )
                 }
                 appendLine(
-                    "Committed promotion tests: ${opportunity.promotionTestIds.sorted().joinToString(", ")}"
+                    "Runtime-owned public contract examples, when configured, are loaded from " +
+                        "contract/public-tests.json. Private promotion IDs and fixtures are never " +
+                        "materialized there. Supplemental cases receive independent runtime-owned " +
+                        "public IDs; their count is unrelated to private promotion authority."
                 )
                 appendLine(
                     "Execution bounds: maximumRuntimeMillis=${opportunity.maximumRuntimeMillis}; " +
@@ -337,67 +382,96 @@ object RolePromptBuilder {
                 appendLine(
                     "Required runtime language: ${opportunity.preferredImplementationMode.runtimeLanguage}."
                 )
-                appendLine("Exact generated inputSchema JSON:")
                 appendLine(
-                    skeleton?.inputSchemaJson
-                        ?: TypedToolSchemaCompiler.compile(opportunity.requiredInputs)
+                    "The runtime owns canonical typed-value bytes. It rejects non-finite values, " +
+                        "preserves INTEGER versus NUMBER from the sealed schemas, and rewrites " +
+                        "public and supplemental test values through the promotion-compatible " +
+                        "canonical encoder."
                 )
-                appendLine("Exact generated outputSchema JSON:")
-                appendLine(
-                    skeleton?.outputSchemaJson
-                        ?: TypedToolSchemaCompiler.compile(opportunity.requiredOutputs)
-                )
+                if (view.assignedToolRepairDiagnostics.isNotEmpty()) {
+                    appendLine()
+                    appendLine("=== PRIOR TYPED TOOL REPAIR DIAGNOSTICS ===")
+                    appendLine(
+                        "These delayed, bounded codes belong only to this assigned node and sealed " +
+                            "opportunity. Treat them as hypotheses to test, not as hidden fixture values."
+                    )
+                    view.assignedToolRepairDiagnostics.forEach { diagnostic ->
+                        appendLine(
+                            "- diagnosticId=${diagnostic.diagnosticId}; " +
+                                "createdRound=${diagnostic.createdRound}; " +
+                                "source=${diagnostic.source.name}; code=${diagnostic.code.name}; " +
+                                "remediationKey=${diagnostic.remediationKey}; " +
+                                "affectedPublicField=${diagnostic.affectedPublicField ?: "none"}"
+                        )
+                    }
+                    appendLine(
+                        "Your public tests prove local consistency only. Private promotion authority " +
+                            "is separate. Private fixtures and exact private outputs are never " +
+                            "disclosed. You may receive exact public contract/schema diagnostics, " +
+                            "public canonical-number diagnostics, public reference semantics and " +
+                            "quantity metadata, and bounded safe semantic repair codes from a " +
+                            "previous generation."
+                    )
+                    val approach = requireNotNull(view.assignedToolRepairApproach)
+                    appendLine()
+                    appendLine("=== SEALED TOOL REPAIR APPROACH ===")
+                    appendLine("Strategy: ${approach.strategy.name}")
+                    appendLine("Lineage attempt: ${approach.lineageAttempt}")
+                    appendLine("Approach commitment: ${approach.vectorHash}")
+                    appendLine(
+                        "Use this strategy before producing the candidate; the runtime binds this " +
+                            "sealed commitment into candidate and repair-attempt lineage."
+                    )
+                }
                 skeleton?.let { project ->
                     appendLine()
-                    appendLine("=== GENERATED TOOL PROJECT SKELETON ===")
-                    appendLine("Skeleton ID: ${project.skeletonId}")
+                    appendLine("=== GENERATED IMMUTABLE TOOL WORKSPACE ===")
                     appendLine("Skeleton hash: ${project.skeletonHash}")
                     appendLine(
                         "Opportunity commitment hash: ${project.opportunityCommitmentHash}"
                     )
                     appendLine("Implementation mode: ${project.implementationMode.name}")
-                    project.files.forEach { file ->
-                        appendLine()
-                        appendLine(
-                            "Generated file ${file.relativePath} " +
-                                "(executable=${file.executable}):"
-                        )
-                        appendLine(file.content)
-                    }
-                    val stagedSource = when (project.implementationMode) {
-                        ToolImplementationMode.SHELL -> "tool.sh"
-                        ToolImplementationMode.PYTHON -> "tool.py"
-                        ToolImplementationMode.FORMULA_DSL -> "formula.json"
-                        ToolImplementationMode.RULE_DSL -> "rules.json"
-                        ToolImplementationMode.SIMULATION_DSL -> "simulation.json"
-                    }
-                    appendLine()
+                    appendLine("Read-only runtime authority:")
+                    appendLine("- contract/tool-contract.json")
+                    appendLine("- contract/input-schema.json")
+                    appendLine("- contract/output-schema.json")
+                    appendLine("- contract/public-tests.json")
+                    appendLine("- contract/README.md")
+                    appendLine("Editable author files:")
+                    appendLine("- ${project.implementationMode.workspaceSourcePath}")
+                    appendLine("- tests/author-tests.json (optional supplemental cases)")
+                    appendLine("Runtime output:")
+                    appendLine("- artifacts/local-results.json")
                     appendLine(
-                        "Complete the generated $stagedSource implementation and stage its full " +
-                            "content as the TOOL code string. Fill promotion-tests.json cases and " +
-                            "stage those cases as tests; do not stage placeholder behavior."
+                        "Use tool_workspace(operation=\"LIST\") to inspect declared paths, " +
+                            "tool_workspace(operation=\"READ\", relativePath=...) to read the " +
+                            "generated contract/source, and tool_workspace(operation=\"WRITE\", " +
+                            "relativePath=..., content=...) to replace only AUTHOR_EDITABLE files."
+                    )
+                    appendLine(
+                        "Edit only the generated source and optional author tests. Any edit under " +
+                            "contract/ fails exact hash verification before model review."
                     )
                 }
                 appendLine(
-                    "Stage exactly one TOOL JSON object with fields opportunityId, name, domain, " +
-                        "language, inputSchema, outputSchema, code, and tests. opportunityId must " +
-                        "equal ${opportunity.opportunityId}; language must equal " +
-                        "${opportunity.preferredImplementationMode.runtimeLanguage}; copy both " +
-                        "generated schemas exactly."
+                    "Submit with write_staging(type=\"TOOL\", content=\"\", toolCandidate={...}). " +
+                        "toolCandidate must contain opportunityHandle=\"T1\", " +
+                        "sourceArtifactPath=\"${opportunity.preferredImplementationMode.workspaceSourcePath}\", " +
+                        "entryPoint=\"${opportunity.preferredImplementationMode.workspaceEntryPoint}\", " +
+                        "supplementalTestsPath=\"tests/author-tests.json\" when you authored one " +
+                        "or more additional public semantic cases, " +
+                        "declaredAssumptions, and consumedRepairDiagnosticIds."
                 )
                 appendLine(
-                    "tests must contain exactly one executable case per committed ID, using " +
-                        """{"testId":"<exact-id>","input":{...},"expectedOutput":{...}}""" +
-                        ". Every case requires exact input and expectedOutput values satisfying " +
-                        "the sealed schemas. Required IDs: " +
-                        opportunity.promotionTestIds.sorted().joinToString(", ")
+                    "Do not place opportunityId, inputSchema, outputSchema, committed public test " +
+                        "IDs, or a hand-built TOOL payload in model output. The runtime reads and " +
+                        "content-hashes generated files, resolves T1, and compiles the exact legacy " +
+                        "TOOL object consumed by deterministic preflight and private promotion."
                 )
                 appendLine(
-                    "Each expectedOutput must equal the executable's parsed JSON output exactly. " +
-                        "This includes rounding and key ordering inside any JSON encoded as a string. " +
-                        "write_staging runs deterministic TOOL preflight; if it rejects the candidate, " +
-                        "repair the returned expected/actual or schema/runtime defect and submit a " +
-                        "new candidate before ending."
+                    "write_staging runs deterministic TOOL wire compilation and preflight. If it " +
+                        "returns one wire error, repair that exact workspace/path/value defect and " +
+                        "submit a new candidate before ending."
                 )
                 appendLine(
                     "For constrained DSL implementations, static types are exact: INTEGER and " +
@@ -413,8 +487,8 @@ object RolePromptBuilder {
                         "literal value."
                 )
                 appendLine(
-                    "code must be a non-empty JSON string containing runnable implementation, not " +
-                        "a specification. The executable reads one JSON object from stdin and " +
+                    "The generated source must contain runnable implementation, not a " +
+                        "specification. The executable reads one JSON object from stdin and " +
                         "writes one JSON object matching outputSchema to stdout. The Critic will " +
                         "execute every test before promotion."
                 )
@@ -463,6 +537,31 @@ object RolePromptBuilder {
                 appendLine("  prediction=${shadow.falsifiablePrediction}")
                 appendLine("  minimalTest=${shadow.minimalTestOrArtifact}")
                 appendLine("  proposalHash=${shadow.proposalHash}")
+            }
+        }
+        if (view.provisionalHypotheses.isNotEmpty()) {
+            appendLine()
+            appendLine("=== PROVISIONAL NOVEL HYPOTHESES ===")
+            appendLine(
+                "These group-local ideas are preserved for testing. They are not accepted " +
+                    "evidence or final recommendations. Test them independently before citing " +
+                    "any consequence, and preserve falsification or evidence-bound results separately."
+            )
+            view.provisionalHypotheses.forEach { hypothesis ->
+                appendLine(
+                    "- hypothesisId=${hypothesis.hypothesisId}; round=${hypothesis.round}; " +
+                        "confidence=${hypothesis.confidence}"
+                )
+                appendLine("  title=${hypothesis.title}")
+                appendLine("  idea=${hypothesis.idea}")
+                appendLine("  inferredFrom=${hypothesis.inferredFrom}")
+                appendLine("  assumptions=${hypothesis.assumptions.joinToString("; ")}")
+                appendLine("  uncertainty=${hypothesis.uncertainty}")
+                appendLine("  expectedImpact=${hypothesis.expectedImpact}")
+                appendLine("  falsifiablePrediction=${hypothesis.falsifiablePrediction}")
+                appendLine("  minimalTestOrArtifact=${hypothesis.minimalTestOrArtifact}")
+                appendLine("  provenanceRefs=${hypothesis.provenanceRefs.joinToString(",")}")
+                appendLine("  hypothesisHash=${hypothesis.hypothesisHash}")
             }
         }
         view.groupFeedback?.let { feedback ->
@@ -558,6 +657,24 @@ object RolePromptBuilder {
             ToolImplementationMode.FORMULA_DSL,
             ToolImplementationMode.RULE_DSL,
             ToolImplementationMode.SIMULATION_DSL -> "dsl"
+        }
+
+    private val ToolImplementationMode.workspaceSourcePath: String
+        get() = when (this) {
+            ToolImplementationMode.SHELL -> "src/main.sh"
+            ToolImplementationMode.PYTHON -> "src/main.py"
+            ToolImplementationMode.FORMULA_DSL -> "src/formula.json"
+            ToolImplementationMode.RULE_DSL -> "src/rules.json"
+            ToolImplementationMode.SIMULATION_DSL -> "src/simulation.json"
+        }
+
+    private val ToolImplementationMode.workspaceEntryPoint: String
+        get() = when (this) {
+            ToolImplementationMode.SHELL -> "main.sh"
+            ToolImplementationMode.PYTHON -> "run_tool"
+            ToolImplementationMode.FORMULA_DSL -> "formula"
+            ToolImplementationMode.RULE_DSL -> "rules"
+            ToolImplementationMode.SIMULATION_DSL -> "simulation"
         }
 
     private fun renderStartingFieldContext(startingField: StartingField, role: Role): String = buildString {
@@ -933,6 +1050,12 @@ object RolePromptBuilder {
                 - First, optionally inspect the run via at most two quick read tool calls if needed:
                   one read_kb/read_kg call for the strongest group evidence and one read_run_artifact
                   call for source-pack or uploaded context verification.
+                  If the strongest KB document is returned in pages, continue it with
+                  read_kb(entryIds=[...], offset=...) until you have read it completely; those
+                  continuation pages do not count against the two-call limit.
+                - When the group already holds a substantial report for this objective, treat it as
+                  your baseline: correct, complete, and restructure it to meet the contract, but do
+                  not condense away supported content unless an explicit word limit requires it.
                 - Then write a staging entry with type="DOC".
                 - The DOC content must be the FULL file body only.
                 - Do not prepend wrappers, labels, or metadata headers.
@@ -1253,8 +1376,10 @@ object RolePromptBuilder {
         foundingBrief: String? = null,
         wipTaskDescription: String? = null,
         legacyContext: String? = null,
-        graderAtlasContext: String? = null
+        graderAtlasContext: String? = null,
+        baselineCriteria: String? = null
     ): String = buildString {
+        val revisingBaseline = !baselineCriteria.isNullOrBlank()
         when (graderRole) {
             "GraderResearcher" -> appendLine(CRITERIA_RESEARCHER_PROMPT)
             "GraderBuilder" -> appendLine(CRITERIA_BUILDER_PROMPT)
@@ -1317,14 +1442,30 @@ object RolePromptBuilder {
             appendLine(previousCriteria.take(1_500))
             appendLine()
         }
+        if (revisingBaseline) {
+            appendLine("=== ACCEPTED CRITERIA BASELINE FROM THE PREVIOUS ROUND (start here) ===")
+            appendLine(baselineCriteria.orEmpty().take(GRADER_BASELINE_PROMPT_MAX_CHARS))
+            appendLine()
+        }
         appendLine("=== YOUR TASK ===")
         if (graderRole == "GraderBuilder" && graderAtlasContext != null) {
-            appendLine(
-                "0. FIRST ACTION: call publish_grading_sheet with a valid, objective-specific " +
-                    "typed sheet. " +
-                    "Do this before write_staging, prose analysis, or the death note. If the tool " +
-                    "returns an error, correct the exact rejected fields and call it again."
-            )
+            if (revisingBaseline) {
+                appendLine(
+                    "0. FIRST ACTION: call publish_grading_sheet with an improved revision of the " +
+                        "baseline typed methodology: keep requirements and tests that still hold, " +
+                        "sharpen weak or generic ones, add coverage that failure telemetry or new " +
+                        "handles require, and bind only handles from the current matrix. Do this " +
+                        "before write_staging, prose analysis, or the death note. If the tool " +
+                        "returns an error, correct the exact rejected fields and call it again."
+                )
+            } else {
+                appendLine(
+                    "0. FIRST ACTION: call publish_grading_sheet with a valid, objective-specific " +
+                        "typed sheet. " +
+                        "Do this before write_staging, prose analysis, or the death note. If the tool " +
+                        "returns an error, correct the exact rejected fields and call it again."
+                )
+            }
             appendLine(
                 "   Use one concise requirement per sealed workerNodeHandle. Each requirement " +
                     "must map exactly one worker handle and be independently satisfiable from " +
@@ -1342,18 +1483,31 @@ object RolePromptBuilder {
                     "requirements."
             )
         }
-        appendLine("1. Study the run objective and each scoring dimension carefully.")
-        appendLine("2. For each dimension, develop deep, adversarial, measurable scoring criteria.")
-        appendLine("   Your criteria MUST include all of the following sections:")
-        appendLine("   - LOW / MEDIUM / HIGH evidence thresholds")
-        appendLine("   - EXCELLENT / EXCEEDS EXPECTATIONS threshold describing what a near-perfect deliverable adds beyond the minimum")
-        appendLine("   - concrete observable indicators in KB/KG/staging outputs")
-        appendLine("   - anti-patterns that should trigger score penalties")
-        appendLine("   - failure modes and deceptive signals that can look good but are weak")
-        appendLine("   - tie-breakers for comparing two close groups")
-        appendLine("   - at least one hard-to-fake signal of genuine quality")
-        appendLine("3. Write your criteria to staging: write_staging(type=\"PLAN_UPDATE\", content=...)")
-        appendLine("   Prefer one substantial criteria document per dimension.")
+        if (revisingBaseline) {
+            appendLine("1. Treat the accepted baseline as the current rubric: it passed Critic review and graded the previous round.")
+            appendLine("   Do not re-derive it from scratch; spend your effort on what should change.")
+            appendLine("2. Improve it: keep criteria that still discriminate well; sharpen vague thresholds, weak or")
+            appendLine("   keyword-only tests, and deceptive-signal checks; add criteria for gaps exposed by failure")
+            appendLine("   telemetry or your claimed task; retire criteria that no longer apply.")
+            appendLine("3. Stage exactly ONE consolidated write_staging(type=\"PLAN_UPDATE\", content=...) titled")
+            appendLine("   \"CRITERIA REVISION — generation ${roundIndex + 1}\" holding the complete current criteria for")
+            appendLine("   all dimensions, marking each item [KEPT], [CHANGED], or [NEW], and listing [RETIRED] items")
+            appendLine("   with reasons. Keep LOW/MEDIUM/HIGH/EXCELLENT thresholds, anti-patterns, tie-breakers, and")
+            appendLine("   hard-to-fake signals for every dimension. Do not restage unchanged per-dimension documents.")
+        } else {
+            appendLine("1. Study the run objective and each scoring dimension carefully.")
+            appendLine("2. For each dimension, develop deep, adversarial, measurable scoring criteria.")
+            appendLine("   Your criteria MUST include all of the following sections:")
+            appendLine("   - LOW / MEDIUM / HIGH evidence thresholds")
+            appendLine("   - EXCELLENT / EXCEEDS EXPECTATIONS threshold describing what a near-perfect deliverable adds beyond the minimum")
+            appendLine("   - concrete observable indicators in KB/KG/staging outputs")
+            appendLine("   - anti-patterns that should trigger score penalties")
+            appendLine("   - failure modes and deceptive signals that can look good but are weak")
+            appendLine("   - tie-breakers for comparing two close groups")
+            appendLine("   - at least one hard-to-fake signal of genuine quality")
+            appendLine("3. Write your criteria to staging: write_staging(type=\"PLAN_UPDATE\", content=...)")
+            appendLine("   Prefer one substantial criteria document per dimension.")
+        }
         appendLine("   Do not stop after drafting criteria in plain text. The criteria are invisible to judges unless you write_staging.")
         if (graderRole == "GraderBuilder") {
             appendLine("   Then publish the generation's typed methodology with publish_grading_sheet.")
@@ -1439,12 +1593,21 @@ object RolePromptBuilder {
         appendLine(dimensionDescriptions)
         appendLine()
         appendLine("=== GRADING CRITERIA (developed by criteria agents this round) ===")
-        appendLine(criteriaContext.take(2_500))
+        appendLine(boundedJudgeCriteria(criteriaContext))
         appendLine()
         appendLine("=== COMPETING GROUP CANON SNAPSHOTS (Round $roundIndex) ===")
+        val perSnapshotChars = roundJudgeSnapshotChars(allGroupSnapshots.size)
         for ((groupId, snapshot) in allGroupSnapshots) {
             appendLine("--- GROUP: $groupId ---")
-            appendLine(snapshot.take(2_000))
+            if (snapshot.length > perSnapshotChars) {
+                appendLine(snapshot.take(perSnapshotChars))
+                appendLine(
+                    "...[snapshot truncated: ${snapshot.length - perSnapshotChars} of " +
+                        "${snapshot.length} chars omitted]"
+                )
+            } else {
+                appendLine(snapshot)
+            }
             appendLine()
         }
         if (nodeEvaluationContexts.isNotEmpty()) {
@@ -1456,13 +1619,18 @@ object RolePromptBuilder {
                     appendLine()
             }
             appendLine(
-                "Call submit_node_grade exactly once for every context assignment. Grade only its " +
+                "Call submit_node_grade exactly once for every context assignment, passing only " +
+                    "assignmentId, verdict, scoreVector, and rationale. The runtime resolves the " +
+                    "immutable assignment and binds all packet, node, criteria, capture-policy, and " +
+                    "hash commitments server-side. Grade only its " +
                     "complete packet-bound evidence against its sealed node contract and mapped " +
                     "frozen requirements. Generic snapshots, broad criteria, dimensions, and " +
                     "weighted totals are not node-grade evidence."
             )
             appendLine(
-                "The runtime has already validated each immutable assignment and its copied commitments. " +
+                "Do not copy or submit assignmentHash, packetId, packetHash, nodeId, atlasHash, " +
+                    "nodePayloadHash, criteriaHash, or capturePolicyHash. " +
+                    "The runtime has already validated each immutable assignment and its commitments. " +
                     "Use VALID with a low score and hardFailure=true for weak, incomplete, or failing " +
                     "evidence that remains evaluable. Use ABSTAINED only when the exact frozen authority " +
                     "cannot be evaluated. INVALID is runtime-reserved and cannot be submitted by a judge."
@@ -1492,7 +1660,10 @@ object RolePromptBuilder {
         appendLine("- read_kb(entryIds?, query?, domain?, maxResults?, includeContent?): Load selected grader KB entries by ID only when needed (FREE)")
         appendLine("- write_death_note(summary, whatWorked, whatFailed, recommendations): MANDATORY last action")
         if (nodeEvaluationContexts.isNotEmpty()) {
-            appendLine("- submit_node_grade(...): Submit one complete packet-bound normalized node vector (FREE)")
+            appendLine(
+                "- submit_node_grade(assignmentId, verdict, scoreVector, rationale): Submit one " +
+                    "runtime-bound packet-grade vector (FREE)"
+            )
         }
         appendLine()
         appendLine("IMPORTANT: You MUST call submit_grading_score for every group × dimension combination.")
@@ -1646,9 +1817,12 @@ object RolePromptBuilder {
         - emit_fact(subject, relation, obj, confidence?, domain?, provenance?): Submit a KG fact — costs 1
           NOTE: use "obj" not "object". Domain is required. Example: domain="science".
         - write_staging(type, content, wipTaskRef?, speculative?): Submit work for Critic review — costs 1
-          Submission types: DOC, TOOL, FACT, PLAN_UPDATE, DISPATCH
+          Submission types: DOC, TOOL, FACT, PLAN_UPDATE, HYPOTHESIS, DISPATCH
           DOC payloads must be valid JSON tool arguments. Escape literal backslashes and quotes;
           avoid CSS/HTML escape tricks that create invalid JSON strings; keep content below 256KB.
+          HYPOTHESIS payloads must be strict JSON with status="PROPOSED", speculative=true, exact
+          current run/group/agent/round identity, and a valid hypothesisHash. They propagate
+          provisionally for later testing but are never accepted receiver evidence.
         - emit_constraint(constraintId, description, appliesToType, condition, violationPenalty?, rationale?): Propose KG constraint — costs 2
           If you are working on an assigned task, include the task ID as wipTaskRef via the staging write path.
         - execute_tool(toolName, argsJson, toolVersion?): Execute a registered tool from list_tools — costs 2-8

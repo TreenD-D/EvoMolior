@@ -3,6 +3,8 @@ package com.achulkov.evomolior.agents.factory
 import com.achulkov.evomolior.core.contract.CriticOutcome
 import com.achulkov.evomolior.core.contract.CriticReview
 import com.achulkov.evomolior.core.contract.GRADER_METHODOLOGY_DRAFT_SIGNATURE_PREFIX
+import com.achulkov.evomolior.core.repair.ToolRepairCode
+import com.achulkov.evomolior.core.repair.ToolSemanticVerdict
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -149,6 +151,86 @@ class CriticReviewAgentTest {
 
         assertTrue(!prompt.contains(tailMarker))
         assertTrue(prompt.contains("bounded critic view: 8000"))
+    }
+
+    @Test
+    fun `tool review prompt preserves deterministic promotion authority`() {
+        val agent = CriticReviewAgent(
+            openRouterApiKey = "sk-test",
+            criticModelId = "anthropic/claude-haiku-4.5"
+        )
+
+        val prompt = agent.buildPrompt(
+            sampleSubmission().copy(
+                type = "TOOL",
+                content = """{"opportunityId":"calculator","language":"dsl"}"""
+            )
+        )
+
+        assertTrue(prompt.contains("deterministic validation proved its exact sealed"))
+        assertTrue(prompt.contains("promotion boundary independently reruns"))
+        assertTrue(prompt.contains("private sealed"))
+        assertTrue(prompt.contains("Do not reject merely because private fixtures are unavailable"))
+        assertTrue(prompt.contains("unless you can name a concrete"))
+    }
+
+    @Test
+    fun `typed tool semantic prompt and parser expose only closed repair authority`() {
+        val agent = CriticReviewAgent(
+            openRouterApiKey = "sk-test",
+            criticModelId = "anthropic/claude-haiku-4.5"
+        )
+        val submission = sampleSubmission().copy(
+            type = "TOOL",
+            content = """{"code":"power_watts * duration_hours"}"""
+        )
+
+        val prompt = agent.buildToolSemanticPrompt(
+            submission,
+            "energy_kwh is public unit kWh; power_watts is public unit W."
+        )
+        val review = agent.parseToolSemanticResponse(
+            """
+            {
+              "verdict":"REJECT",
+              "publicFindings":[{
+                "code":"POWER_TO_ENERGY_UNIT_CONVERSION",
+                "affectedPublicField":"energy_kwh",
+                "remediationKey":"tool_repair.power_to_energy_unit_conversion"
+              }],
+              "safeRepairCodes":["POWER_TO_ENERGY_UNIT_CONVERSION"],
+              "privateRationaleCommitment":"${"a".repeat(64)}"
+            }
+            """.trimIndent()
+        )
+
+        assertTrue(prompt.contains("Private fixtures and exact private outputs are never disclosed"))
+        assertTrue(prompt.contains("Codes are hypotheses"))
+        assertEquals(ToolSemanticVerdict.REJECT, review.verdict)
+        assertEquals(
+            setOf(ToolRepairCode.POWER_TO_ENERGY_UNIT_CONVERSION),
+            review.safeRepairCodes
+        )
+        assertEquals(
+            "tool_repair.power_to_energy_unit_conversion",
+            review.publicFindings.single().remediationKey
+        )
+    }
+
+    @Test
+    fun `malformed semantic response fails closed without provider prose`() {
+        val agent = CriticReviewAgent(
+            openRouterApiKey = "sk-test",
+            criticModelId = "anthropic/claude-haiku-4.5"
+        )
+
+        val review = agent.parseToolSemanticResponse(
+            "private fixture /Users/alice expects 42.0"
+        )
+
+        assertEquals(ToolSemanticVerdict.DISPUTE, review.verdict)
+        assertTrue(review.publicFindings.isEmpty())
+        assertTrue(review.safeRepairCodes.isEmpty())
     }
 
     private fun sampleSubmission(): StagingSubmissionEntity = StagingSubmissionEntity(

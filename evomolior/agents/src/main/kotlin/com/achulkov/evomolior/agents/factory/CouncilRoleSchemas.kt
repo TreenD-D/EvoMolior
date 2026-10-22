@@ -7,13 +7,17 @@ import com.achulkov.evomolior.core.council.IncentiveDesignerOutput
 import com.achulkov.evomolior.core.council.KgArchitectOutput
 import com.achulkov.evomolior.core.council.ModelEcologistOutput
 import com.achulkov.evomolior.core.council.PromptArchitectOutput
+import com.achulkov.evomolior.core.council.QuantitativeToolObligation
 import com.achulkov.evomolior.core.council.SeedCuratorOutput
 import com.achulkov.evomolior.core.council.TaskAnatomistOutput
 import com.achulkov.evomolior.core.council.CouncilPromotionFixtureWireSchemaAuthority
 import com.achulkov.evomolior.core.council.CouncilSealedTestWireKind
 import com.achulkov.evomolior.core.council.CouncilSynthesisWireAuthority
+import com.achulkov.evomolior.core.council.compileCouncilToolOpportunityAuthority
 import com.achulkov.evomolior.core.config.AcceptanceProfile
 import com.achulkov.evomolior.core.model.Role
+import com.achulkov.evomolior.core.repair.AggregationSemantics
+import com.achulkov.evomolior.core.repair.TimeBasis
 import com.achulkov.evomolior.core.serialization.CouncilSynthesisContextualOutputSerializer
 import com.achulkov.evomolior.core.serialization.CouncilSynthesisProviderSchemaContract
 import com.achulkov.evomolior.core.serialization.TaskAnatomistContextualOutputSerializer
@@ -23,11 +27,15 @@ import kotlinx.serialization.json.ClassDiscriminatorMode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 /**
  * Generates strict OpenAI-compatible schemas from the authoritative Council serializers.
@@ -38,7 +46,8 @@ import kotlinx.serialization.json.jsonPrimitive
 internal object CouncilRoleSchemas {
     private val staticSchemas: Map<Role, LLMParams.Schema.JSON.Standard> by lazy {
         mapOf(
-            Role.CouncilTaskAnatomist to schema(TaskAnatomistOutput.serializer()),
+            Role.CouncilTaskAnatomist to
+                schema(TaskAnatomistOutput.serializer()).withBoundQuantitySemantics(),
             Role.CouncilIncentiveDesigner to schema(IncentiveDesignerOutput.serializer()),
             Role.CouncilEcologist to schema(EcologistOutput.serializer()),
             Role.CouncilPromptArchitect to schema(PromptArchitectOutput.serializer()),
@@ -54,9 +63,13 @@ internal object CouncilRoleSchemas {
     fun forRole(
         role: Role,
         synthesisAuthority: CouncilSynthesisWireAuthority? = null,
-        acceptanceProfile: AcceptanceProfile = AcceptanceProfile.NORMAL
+        acceptanceProfile: AcceptanceProfile = AcceptanceProfile.NORMAL,
+        quantitativeToolObligation: QuantitativeToolObligation? = null
     ): LLMParams.Schema.JSON.Standard {
         require(role.isCouncilRole) { "Role $role is not a Council role" }
+        require(quantitativeToolObligation == null || role == Role.CouncilTaskAnatomist) {
+            "Only Council Task Anatomist may receive quantitative tool schema authority"
+        }
         require(
             (role == Role.CouncilSynthesis) == (synthesisAuthority != null)
         ) {
@@ -70,7 +83,15 @@ internal object CouncilRoleSchemas {
             synthesisAuthority != null -> contextualSynthesisSchema(synthesisAuthority)
             role == Role.CouncilTaskAnatomist &&
                 acceptanceProfile != AcceptanceProfile.NORMAL ->
-                contextualTaskAnatomistSchema(acceptanceProfile)
+                contextualTaskAnatomistSchema(
+                    acceptanceProfile,
+                    quantitativeToolObligation
+                )
+            role == Role.CouncilTaskAnatomist && quantitativeToolObligation != null ->
+                staticSchemas.getValue(role).copy(
+                    schema = staticSchemas.getValue(role).schema
+                        .bindQuantitativeToolAuthority(quantitativeToolObligation)
+                )
             else -> staticSchemas.getValue(role)
         }
     }
@@ -111,7 +132,8 @@ internal object CouncilRoleSchemas {
     }
 
     private fun contextualTaskAnatomistSchema(
-        profile: AcceptanceProfile
+        profile: AcceptanceProfile,
+        quantitativeToolObligation: QuantitativeToolObligation?
     ): LLMParams.Schema.JSON.Standard {
         val serializer = TaskAnatomistContextualOutputSerializer(profile)
         val generated = schema(
@@ -119,7 +141,17 @@ internal object CouncilRoleSchemas {
             serializer = serializer
         )
         val contextual = generated.copy(
-            schema = generated.schema.bindTaskAnatomistProfile(serializer)
+            schema = generated.schema
+                .bindTaskAnatomistProfile(serializer)
+                .bindQuantitySemantics(
+                    requireQuantityDefinition =
+                        profile == AcceptanceProfile.APPENDIX_B_FULL
+                )
+                .let { schema ->
+                    quantitativeToolObligation?.let(
+                        schema::bindQuantitativeToolAuthority
+                    ) ?: schema
+                }
         )
         val schemaBytes = contextual.schema.toString().toByteArray(Charsets.UTF_8).size
         require(schemaBytes <= CODEX_OUTPUT_SCHEMA_MAX_BYTES) {
@@ -136,6 +168,84 @@ internal object CouncilRoleSchemas {
         classDiscriminatorMode = ClassDiscriminatorMode.POLYMORPHIC
     }
 }
+
+private fun LLMParams.Schema.JSON.Standard.withBoundQuantitySemantics():
+    LLMParams.Schema.JSON.Standard =
+    copy(schema = schema.bindQuantitySemantics(requireQuantityDefinition = true))
+
+private fun JsonObject.bindQuantitySemantics(
+    requireQuantityDefinition: Boolean
+): JsonObject {
+    val definitions = getValue("\$defs").jsonObject
+    var quantityDefinitionCount = 0
+    val updatedDefinitions = JsonObject(
+        definitions.mapValues { (serialName, element) ->
+            val definition = element.jsonObject
+            val properties = definition["properties"] as? JsonObject
+                ?: return@mapValues definition
+            if (properties.keys != QUANTITY_SPEC_FIELDS) {
+                return@mapValues definition
+            }
+            val required = definition["required"]
+                ?.jsonArray
+                ?.mapTo(linkedSetOf()) { it.jsonPrimitive.content }
+                ?: error("Generated quantity schema '$serialName' is missing required")
+            require(required == QUANTITY_SPEC_FIELDS) {
+                "Generated quantity schema '$serialName' changed required fields: $required"
+            }
+            require(
+                definition["additionalProperties"]?.jsonPrimitive?.content == "false"
+            ) {
+                "Generated quantity schema '$serialName' must remain closed"
+            }
+            quantityDefinitionCount += 1
+            JsonObject(
+                mapOf(
+                    "anyOf" to JsonArray(
+                        AggregationSemantics.entries.map { aggregation ->
+                            val timeBasisSchema =
+                                if (aggregation in INTERVAL_AGGREGATIONS) {
+                                    enumString(TimeBasis.entries.map(TimeBasis::name))
+                                } else {
+                                    JsonObject(mapOf("type" to JsonPrimitive("null")))
+                                }
+                            JsonObject(
+                                definition + (
+                                    "properties" to JsonObject(
+                                        properties + mapOf(
+                                            "aggregation" to enumString(
+                                                listOf(aggregation.name)
+                                            ),
+                                            QUANTITY_TIME_BASIS_FIELD to timeBasisSchema
+                                        )
+                                    )
+                                )
+                            )
+                        }
+                    )
+                )
+            )
+        }
+    )
+    require(
+        if (requireQuantityDefinition) {
+            quantityDefinitionCount > 0
+        } else {
+            quantityDefinitionCount == 0
+        }
+    ) {
+        "Generated Task Anatomist schema has unexpected quantity definition count: " +
+            quantityDefinitionCount
+    }
+    return JsonObject(this + ("\$defs" to updatedDefinitions))
+}
+
+private fun enumString(values: List<String>): JsonObject = JsonObject(
+    mapOf(
+        "type" to JsonPrimitive("string"),
+        "enum" to JsonArray(values.map(::JsonPrimitive))
+    )
+)
 
 private fun JsonObject.bindTaskAnatomistProfile(
     serializer: TaskAnatomistContextualOutputSerializer
@@ -196,6 +306,305 @@ private fun JsonObject.bindTaskAnatomistProfile(
     )
     return JsonObject(updatedRoot + ("\$defs" to updatedDefinitions))
         .pruneUnreachableDefinitions()
+}
+
+private fun JsonObject.bindQuantitativeToolAuthority(
+    obligation: QuantitativeToolObligation
+): JsonObject {
+    val definitions = getValue("\$defs").jsonObject
+    val authority = obligation.compileCouncilToolOpportunityAuthority()
+    val typedFieldBranches = definitions.typedFieldBranches()
+    val arrayItemBranches = typedFieldBranches
+        .getValue("ARRAY")
+        .getValue("properties")
+        .jsonObject
+        .getValue("items")
+        .jsonObject
+        .resolveReference(definitions)
+        .getValue("anyOf")
+        .jsonArray
+        .map { it.jsonObject.resolveReference(definitions) }
+        .associateBy(JsonObject::singleDiscriminator)
+    val opportunityEntry = definitions.entries.single { (_, element) ->
+        val properties = (element as? JsonObject)?.get("properties") as? JsonObject
+            ?: return@single false
+        setOf(
+            "opportunityId",
+            "requiredInputs",
+            "requiredOutputs",
+            "promotionTestIds",
+            "maximumRuntimeMillis"
+        ).all(properties::containsKey)
+    }
+    var opportunity = opportunityEntry.value.jsonObject
+    authority["opportunityId"]?.let { value ->
+        opportunity = opportunity.withProperty(
+            "opportunityId",
+            value.exactJsonValueSchema()
+        )
+    }
+    opportunity = opportunity.withExactQuantitativeFields(
+        propertyName = "requiredInputs",
+        authorities = authority.getValue("requiredInputs").jsonArray,
+        typedFieldBranches = typedFieldBranches,
+        arrayItemBranches = arrayItemBranches
+    )
+    opportunity = opportunity.withExactQuantitativeFields(
+        propertyName = "requiredOutputs",
+        authorities = authority.getValue("requiredOutputs").jsonArray,
+        typedFieldBranches = typedFieldBranches,
+        arrayItemBranches = arrayItemBranches
+    )
+    authority["promotionTestIds"]?.jsonArray?.let { testIds ->
+        val properties = opportunity.getValue("properties").jsonObject
+        val existing = properties.getValue("promotionTestIds").jsonObject
+        val exactTests = JsonObject(
+            existing + mapOf(
+                "minItems" to JsonPrimitive(testIds.size),
+                "maxItems" to JsonPrimitive(testIds.size),
+                "uniqueItems" to JsonPrimitive(true),
+                "items" to JsonObject(
+                    mapOf(
+                        "type" to JsonPrimitive("string"),
+                        "enum" to testIds
+                    )
+                )
+            )
+        )
+        opportunity = JsonObject(
+            opportunity + (
+                "properties" to JsonObject(
+                    properties + ("promotionTestIds" to exactTests)
+                )
+            )
+        )
+    }
+    authority["maximumRuntimeMillis"]?.jsonPrimitive?.longOrNull?.let { maximum ->
+        val properties = opportunity.getValue("properties").jsonObject
+        val existing = properties.getValue("maximumRuntimeMillis").jsonObject
+        opportunity = JsonObject(
+            opportunity + (
+                "properties" to JsonObject(
+                    properties + (
+                        "maximumRuntimeMillis" to
+                            JsonObject(existing + ("maximum" to JsonPrimitive(maximum)))
+                    )
+                )
+            )
+        )
+    }
+    val definitionUpdates = mutableMapOf<String, JsonElement>()
+    if (obligation.allowedOpportunityTypes.isNotEmpty()) {
+        val properties = opportunity.getValue("properties").jsonObject
+        val executionProperty = properties.getValue("execution").jsonObject
+        val executionReference = executionProperty["\$ref"]
+            ?.jsonPrimitive
+            ?.content
+            ?.substringAfterLast('/')
+        val executionUnion = executionProperty.resolveReference(definitions)
+        val branches = executionUnion.getValue("anyOf").jsonArray
+        val allowedNames = obligation.allowedOpportunityTypes.mapTo(linkedSetOf()) { it.name }
+        val allowedBranches = branches.filter { branch ->
+            branch.jsonObject.resolveReference(definitions).singleDiscriminator() in allowedNames
+        }
+        require(
+            allowedBranches.size == allowedNames.size &&
+                allowedBranches.mapTo(linkedSetOf()) { branch ->
+                    branch.jsonObject.resolveReference(definitions).singleDiscriminator()
+                } == allowedNames
+        ) {
+            "Generated Task execution schema cannot bind allowed opportunity types $allowedNames"
+        }
+        val boundExecution = JsonObject(
+            executionUnion + ("anyOf" to JsonArray(allowedBranches))
+        )
+        if (executionReference == null) {
+            opportunity = opportunity.withProperty("execution", boundExecution)
+        } else {
+            definitionUpdates[executionReference] = boundExecution
+        }
+    }
+    definitionUpdates[opportunityEntry.key] = opportunity
+    val updatedDefinitions = JsonObject(definitions + definitionUpdates)
+    return JsonObject(this + ("\$defs" to updatedDefinitions))
+        .pruneUnreachableDefinitions()
+}
+
+private fun JsonObject.typedFieldBranches(): Map<String, JsonObject> =
+    values.map(JsonElement::jsonObject)
+        .mapNotNull { definition ->
+            val properties = definition["properties"] as? JsonObject
+                ?: return@mapNotNull null
+            if (
+                !setOf("name", "description", "required", "validationRules")
+                    .all(properties::containsKey)
+            ) {
+                return@mapNotNull null
+            }
+            val discriminator = properties["type"]
+                ?.jsonObject
+                ?.get("enum")
+                ?.jsonArray
+                ?.singleOrNull()
+                ?.jsonPrimitive
+                ?.content
+                ?: return@mapNotNull null
+            discriminator.takeIf { it in setOf("INTEGER", "NUMBER", "ARRAY") }
+                ?.let { it to definition }
+        }
+        .toMap()
+
+private fun JsonObject.singleDiscriminator(): String =
+    getValue("properties")
+        .jsonObject
+        .getValue("type")
+        .jsonObject
+        .getValue("enum")
+        .jsonArray
+        .single()
+        .jsonPrimitive
+        .content
+
+private fun JsonObject.withExactQuantitativeFields(
+    propertyName: String,
+    authorities: JsonArray,
+    typedFieldBranches: Map<String, JsonObject>,
+    arrayItemBranches: Map<String, JsonObject>
+): JsonObject {
+    val properties = getValue("properties").jsonObject
+    val existing = properties.getValue(propertyName).jsonObject
+    require(existing["type"]?.jsonPrimitive?.content == "array") {
+        "Generated quantitative opportunity property '$propertyName' must be an array"
+    }
+    val exactBranches = authorities.map { element ->
+        element.jsonObject.toExactTypedFieldSchema(
+            typedFieldBranches,
+            arrayItemBranches
+        )
+    }
+    val exactItems = when (exactBranches.size) {
+        0 -> existing.getValue("items").jsonObject
+        1 -> exactBranches.single()
+        else -> JsonObject(mapOf("anyOf" to JsonArray(exactBranches)))
+    }
+    val exactArray = JsonObject(
+        existing + mapOf(
+            "minItems" to JsonPrimitive(authorities.size),
+            "maxItems" to JsonPrimitive(authorities.size),
+            "uniqueItems" to JsonPrimitive(true),
+            "items" to exactItems
+        )
+    )
+    return JsonObject(
+        this + (
+            "properties" to JsonObject(
+                properties + (propertyName to exactArray)
+            )
+        )
+    )
+}
+
+private fun JsonObject.toExactTypedFieldSchema(
+    typedFieldBranches: Map<String, JsonObject>,
+    arrayItemBranches: Map<String, JsonObject>
+): JsonObject {
+    val fieldType = getValue("type").jsonPrimitive.content
+    var schema = typedFieldBranches.getValue(fieldType)
+        .withProperty("name", getValue("name").exactJsonValueSchema())
+        .withProperty(
+            "description",
+            getValue("description").exactJsonValueSchema()
+        )
+        .withProperty("required", getValue("required").exactJsonValueSchema())
+        .withProperty(
+            "validationRules",
+            getValue("validationRules").exactJsonValueSchema()
+        )
+    return if (fieldType == "ARRAY") {
+        schema = schema
+            .withProperty(
+                "minimumItems",
+                getValue("minimumItems").exactJsonValueSchema()
+            )
+            .withProperty(
+                "maximumItems",
+                getValue("maximumItems").exactJsonValueSchema()
+            )
+        val itemAuthority = getValue("items").jsonObject
+        val itemType = itemAuthority.getValue("type").jsonPrimitive.content
+        var itemSchema = arrayItemBranches.getValue(itemType)
+        itemSchema = itemSchema
+            .withProperty(
+                "physicalDimension",
+                itemAuthority.getValue("physicalDimension").exactJsonValueSchema()
+            )
+            .withProperty(
+                "quantitySpec",
+                itemAuthority.getValue("quantitySpec").exactJsonValueSchema()
+            )
+        schema.withProperty("items", itemSchema)
+    } else {
+        schema
+            .withProperty(
+                "physicalDimension",
+                getValue("physicalDimension").exactJsonValueSchema()
+            )
+            .withProperty(
+                "quantitySpec",
+                getValue("quantitySpec").exactJsonValueSchema()
+            )
+    }
+}
+
+private fun JsonElement.exactJsonValueSchema(): JsonObject = when (this) {
+    JsonNull -> JsonObject(mapOf("type" to JsonPrimitive("null")))
+    is JsonPrimitive -> {
+        val type = when {
+            isString -> "string"
+            booleanOrNull != null -> "boolean"
+            longOrNull != null -> "integer"
+            doubleOrNull != null -> "number"
+            else -> error("Unsupported exact quantitative primitive '$this'")
+        }
+        JsonObject(
+            mapOf(
+                "type" to JsonPrimitive(type),
+                "enum" to JsonArray(listOf(this))
+            )
+        )
+    }
+    is JsonArray -> {
+        val itemSchemas = distinct().map(JsonElement::exactJsonValueSchema)
+        val items = when (itemSchemas.size) {
+            0 -> JsonObject(mapOf("type" to JsonPrimitive("string")))
+            1 -> itemSchemas.single()
+            else -> JsonObject(mapOf("anyOf" to JsonArray(itemSchemas)))
+        }
+        JsonObject(
+            mapOf(
+                "type" to JsonPrimitive("array"),
+                "items" to items,
+                "minItems" to JsonPrimitive(size),
+                "maxItems" to JsonPrimitive(size),
+                "uniqueItems" to JsonPrimitive(true)
+            )
+        )
+    }
+    is JsonObject -> {
+        val exactProperties = JsonObject(
+            entries.associate { (name, value) ->
+                name to value.exactJsonValueSchema()
+            }
+        )
+        JsonObject(
+            mapOf(
+                "type" to JsonPrimitive("object"),
+                "properties" to exactProperties,
+                "required" to JsonArray(keys.map(::JsonPrimitive)),
+                "additionalProperties" to JsonPrimitive(false)
+            )
+        )
+    }
 }
 
 private fun JsonObject.bindSynthesisAuthority(
@@ -733,6 +1142,20 @@ private val TASK_ANATOMIST_ORDINAL_NODE_FIELDS =
     TASK_ANATOMIST_NODE_FIELDS + "ordinal"
 
 private const val TASK_ANATOMIST_TYPED_NODES_FIELD = "nodesWithToolOpportunity"
+
+private val QUANTITY_SPEC_FIELDS = setOf(
+    "dimension",
+    "unitId",
+    "scaleToSi",
+    "aggregation",
+    "timeBasis"
+)
+private const val QUANTITY_TIME_BASIS_FIELD = "timeBasis"
+private val INTERVAL_AGGREGATIONS = setOf(
+    AggregationSemantics.PER_INTERVAL_RATE,
+    AggregationSemantics.SUM_OVER_INTERVALS,
+    AggregationSemantics.AVERAGE_OVER_INTERVALS
+)
 
 private val SEALED_TEST_FIELDS = setOf(
     "type",

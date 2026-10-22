@@ -6,11 +6,16 @@ import com.achulkov.evomolior.api.model.FinalOutputKind
 import com.achulkov.evomolior.api.model.FinalOutputValidationContract
 import com.achulkov.evomolior.api.model.RunConfig
 import com.achulkov.evomolior.api.model.RunAutoCompletionPolicy
+import com.achulkov.evomolior.api.model.AcceptanceDiagnosticMode
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
+import com.achulkov.evomolior.core.config.CodexRuntimePreset
 import com.achulkov.evomolior.api.model.requireAcceptanceFinalOutputSpec
 import com.achulkov.evomolior.api.service.FinalOutputContractValidator
 import com.achulkov.evomolior.api.service.FinalOutputValidationContext
 import com.achulkov.evomolior.api.service.GeneratedOutputFile
 import com.achulkov.evomolior.api.service.PersistedRunStateStore
+import com.achulkov.evomolior.api.service.RunOutcomeBundleInspector
+import com.achulkov.evomolior.api.service.RunOutcomePresentation
 import com.achulkov.evomolior.api.service.AcceptanceAdmissionArtifact
 import com.achulkov.evomolior.api.service.StartupActivationFlags
 import com.achulkov.evomolior.api.service.StartupRejectionArtifact
@@ -28,6 +33,10 @@ import com.achulkov.evomolior.core.config.CouncilExecutionPurpose
 import com.achulkov.evomolior.core.config.LlmBackend
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
 import com.achulkov.evomolior.core.config.RunObjectiveHeuristics
+import com.achulkov.evomolior.core.council.QuantitativeToolObligation
+import com.achulkov.evomolior.core.deliverable.AcceptanceStatus
+import com.achulkov.evomolior.core.deliverable.ExecutionCompletionStatus
+import com.achulkov.evomolior.core.deliverable.PrimaryArtifactValidationStatus
 import com.achulkov.evomolior.core.model.GroupProfileType
 import io.github.aakira.napier.DebugAntilog
 import io.github.aakira.napier.Napier
@@ -39,6 +48,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.channels.FileChannel
@@ -54,6 +64,7 @@ import java.time.Instant
 import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
+import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 @Serializable
@@ -84,7 +95,13 @@ internal data class CliPipelineStageConfig(
     val finalOutputKind: FinalOutputKind = FinalOutputKind.GENERIC_FILE,
     val finalOutput: CliPipelineFinalOutputSpec? = null,
     val councilExecutionPurpose: CouncilExecutionPurpose? = null,
-    val acceptanceProfile: AcceptanceProfile? = null
+    val acceptanceProfile: AcceptanceProfile? = null,
+    val acceptanceDiagnosticMode: AcceptanceDiagnosticMode? = null,
+    val codexReasoningEffort: CodexReasoningEffort? = null,
+    val codexRuntimePreset: CodexRuntimePreset? = null,
+    val quantitativeToolObligation: QuantitativeToolObligation? = null,
+    val ordinaryAgentTtlSeconds: Int? = null,
+    val graderGroupCount: Int? = null
 )
 
 @Serializable
@@ -115,7 +132,13 @@ internal data class CliStagePlan(
     val enforceProviderMonetaryCostCap: Boolean,
     val councilExecutionPurpose: CouncilExecutionPurpose = CouncilExecutionPurpose.STANDARD,
     val acceptanceProfile: AcceptanceProfile = AcceptanceProfile.NORMAL,
-    val autoCompletionPolicy: RunAutoCompletionPolicy? = null
+    val acceptanceDiagnosticMode: AcceptanceDiagnosticMode = AcceptanceDiagnosticMode.STRICT,
+    val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
+    val codexRuntimePreset: CodexRuntimePreset? = null,
+    val quantitativeToolObligation: QuantitativeToolObligation? = null,
+    val autoCompletionPolicy: RunAutoCompletionPolicy? = null,
+    val ordinaryAgentTtlSeconds: Int? = null,
+    val graderGroupCount: Int? = null
 )
 
 internal data class CliStageExecutionResult(
@@ -148,12 +171,63 @@ internal data class CliPipelineStageSummary(
     val publishedOutputRelativePath: String? = null
 )
 
+@Serializable
+internal data class CliPipelineResultsManifestV1(
+    val schemaVersion: String = SCHEMA_VERSION,
+    val entries: List<CliPipelineResultsManifestEntry>,
+    val manifestHash: String = "",
+) {
+    init {
+        require(schemaVersion == SCHEMA_VERSION && entries.isNotEmpty()) {
+            "Pipeline results manifest identity or entries are invalid"
+        }
+        require(entries == entries.sortedBy(CliPipelineResultsManifestEntry::path)) {
+            "Pipeline results manifest entries must be sorted"
+        }
+        require(entries.distinctBy(CliPipelineResultsManifestEntry::path).size == entries.size) {
+            "Pipeline results manifest paths must be unique"
+        }
+    }
+
+    internal fun withComputedHash(): CliPipelineResultsManifestV1 =
+        copy(manifestHash = pipelineResultsManifestHash(this))
+
+    internal fun hasValidHash(): Boolean =
+        manifestHash.matches(Regex("[0-9a-f]{64}")) &&
+            MessageDigest.isEqual(
+                manifestHash.encodeToByteArray(),
+                pipelineResultsManifestHash(this).encodeToByteArray(),
+            )
+
+    companion object {
+        const val SCHEMA_VERSION = "pipeline-results-manifest-v1"
+        const val PATH = "pipeline-results-manifest-v1.json"
+    }
+}
+
+@Serializable
+internal data class CliPipelineResultsManifestEntry(
+    val path: String,
+    val sizeBytes: Long,
+    val sha256: String,
+) {
+    init {
+        require(path.isSafePipelineArchivePath() && path != CliPipelineResultsManifestV1.PATH) {
+            "Pipeline results entry path is invalid"
+        }
+        require(sizeBytes >= 0L && sha256.matches(Regex("[0-9a-f]{64}"))) {
+            "Pipeline results entry size or hash is invalid"
+        }
+    }
+}
+
 private const val CODE_IMPROVEMENT_PLAN_RELATIVE_PATH = "improvements/code-improvement-plan.json"
 
 internal fun runCliPipeline(
     options: CliOptions,
     runtimeFactory: (File, CliOptions) -> CliRuntime,
-    acceptanceAdmissionController: AcceptanceAdmissionController = AcceptanceAdmissionController.NONE
+    acceptanceAdmissionController: AcceptanceAdmissionController = AcceptanceAdmissionController.NONE,
+    acceptanceAdmissionDiagnosticSink: (String) -> Unit = System.err::println
 ): CliRunResult = runBlocking {
     val pipelineRunId = options.runId ?: "cli-${UUID.randomUUID()}"
     val outputRoot = options.outputDir.toFile().absoluteFile
@@ -203,6 +277,14 @@ internal fun runCliPipeline(
             ?: options.councilExecutionPurpose,
         acceptanceProfile = configuredPrimary?.acceptanceProfile
             ?: options.acceptanceProfile,
+        acceptanceDiagnosticMode = configuredPrimary?.acceptanceDiagnosticMode
+            ?: options.acceptanceDiagnosticMode,
+        codexReasoningEffort = configuredPrimary?.codexReasoningEffort
+            ?: options.codexReasoningEffort,
+        codexRuntimePreset = configuredPrimary?.codexRuntimePreset ?: options.codexRuntimePreset,
+        quantitativeToolObligation = configuredPrimary?.quantitativeToolObligation,
+        ordinaryAgentTtlSeconds = configuredPrimary?.ordinaryAgentTtlSeconds,
+        graderGroupCount = configuredPrimary?.graderGroupCount ?: options.graderGroupCount,
         autoCompletionPolicy = if (configuredPrimary == null && options.rounds == null) {
             RunAutoCompletionPolicy(options.completionStabilityRounds)
         } else {
@@ -237,42 +319,19 @@ internal fun runCliPipeline(
             enforceProviderMonetaryCostCap = options.enforceProviderMonetaryCostCap,
             councilExecutionPurpose = stageConfig.councilExecutionPurpose
                 ?: CouncilExecutionPurpose.STANDARD,
-            acceptanceProfile = stageConfig.acceptanceProfile ?: AcceptanceProfile.NORMAL
+            acceptanceProfile = stageConfig.acceptanceProfile ?: AcceptanceProfile.NORMAL,
+            acceptanceDiagnosticMode = stageConfig.acceptanceDiagnosticMode
+                ?: AcceptanceDiagnosticMode.STRICT,
+            codexReasoningEffort = stageConfig.codexReasoningEffort
+                ?: options.codexReasoningEffort,
+            codexRuntimePreset = stageConfig.codexRuntimePreset ?: options.codexRuntimePreset,
+            quantitativeToolObligation = stageConfig.quantitativeToolObligation,
+            ordinaryAgentTtlSeconds = stageConfig.ordinaryAgentTtlSeconds,
+            graderGroupCount = stageConfig.graderGroupCount ?: options.graderGroupCount
         )
     }.orEmpty()
 
-    if (configuredExtraStages.isEmpty() &&
-        options.fast &&
-        RunObjectiveHeuristics.requestsBrowserDeliverable(options.prompt)
-    ) {
-        stagePlans += CliStagePlan(
-            id = "fast-follow-up",
-            prompt = buildDefaultFollowUpPrompt(options.prompt),
-            inputDir = options.inputDir,
-            outputDir = runOutputDir.toPath().resolve("stages").resolve("fast-follow-up"),
-            runId = "$pipelineRunId-fast-follow-up",
-            fast = true,
-            rounds = 1,
-            groupCount = options.groupCount,
-            maxAgentsPerGroup = options.maxAgentsPerGroup,
-            roundDurationMinutes = options.roundDurationMinutes,
-            budgetOverride = options.budgetOverride,
-            inheritsPreviousOutputs = true,
-            modelOverrides = emptyMap(),
-            finalOutputSpec = defaultFinalOutputSpec(
-                prompt = options.prompt,
-                preferredPath = if (RunObjectiveHeuristics.requestsBrowserDeliverable(options.prompt)) {
-                    "refined/final-article-refined.html"
-                } else {
-                    "derived/final-output.txt"
-                }
-            ),
-            finalOutputExplicit = false,
-            enforceProviderMonetaryCostCap = options.enforceProviderMonetaryCostCap
-        )
-    } else if (configuredExtraStages.isNotEmpty()) {
-        stagePlans += configuredExtraStages
-    }
+    stagePlans += configuredExtraStages
     try {
         stagePlans.forEach { stage ->
             validateStageAcceptanceProfile(stage, options.llmBackend)
@@ -300,6 +359,7 @@ internal fun runCliPipeline(
             pipelineRunOutput = runOutputDir.toPath()
         )
     } catch (error: AcceptanceAdmissionException) {
+        acceptanceAdmissionDiagnosticSink(error.ownerDiagnostic())
         persistCliStartupRejection(
             stage = stagePlans.singleOrNull { it.acceptanceProfile != AcceptanceProfile.NORMAL }
                 ?: stagePlans.first(),
@@ -330,7 +390,7 @@ internal fun runCliPipeline(
             )
         }
         val resolvedStagePlan = stagePlan.copy(inputDir = resolvedInputDir)
-        val result = loadCompletedStageResult(resolvedStagePlan)
+        val result = loadCompletedStageResult(resolvedStagePlan, options.llmBackend)
             ?: run {
                 if (resolvedStagePlan.outputDir != runOutputDir.toPath()) {
                     resolvedStagePlan.outputDir.toFile().deleteRecursively()
@@ -352,7 +412,7 @@ internal fun runCliPipeline(
                 stageOutputDir = result.stageOutputDir,
                 relativePath = CODE_IMPROVEMENT_PLAN_RELATIVE_PATH,
                 pipelineOutputDir = runOutputDir.toPath().resolve("outputs"),
-                fallbackWhenMissing = false
+                required = false
             )
         }
         result.publishedOutputRelativePath?.let { relativePath ->
@@ -433,6 +493,16 @@ private fun validateStageAcceptanceProfile(
     stage: CliStagePlan,
     llmBackend: LlmBackend
 ) {
+    validateCodexPreset(stage.codexRuntimePreset, llmBackend, stage.modelOverrides, stage.acceptanceProfile)
+    if (
+        stage.acceptanceDiagnosticMode ==
+        AcceptanceDiagnosticMode.FULL_SWEEP_NON_ACCEPTING &&
+        stage.acceptanceProfile == AcceptanceProfile.NORMAL
+    ) {
+        throw CliUsageException(
+            "Pipeline stage ${stage.id} diagnostic sweep requires a non-normal profile"
+        )
+    }
     if (stage.acceptanceProfile == AcceptanceProfile.NORMAL) return
     if (stage.councilExecutionPurpose != CouncilExecutionPurpose.APPENDIX_B_ACCEPTANCE) {
         throw CliUsageException(
@@ -506,18 +576,22 @@ private fun CliPipelineFinalOutputSpec.toRunFinalOutputSpec(): FinalOutputSpec =
     validation = validation
 )
 
-private fun loadCompletedStageResult(stage: CliStagePlan): CliStageExecutionResult? {
+private fun loadCompletedStageResult(
+    stage: CliStagePlan,
+    llmBackend: LlmBackend
+): CliStageExecutionResult? {
     val summaryFile = stage.outputDir.toFile().resolve("summary.json")
     if (!summaryFile.exists()) return null
-    val summary = runCatching {
-        cliJson.decodeFromString(CliRunSummary.serializer(), summaryFile.readText())
-    }.getOrNull() ?: return null
+    val summary = cliJson.decodeFromString(CliRunSummary.serializer(), summaryFile.readText())
     if (!summary.status.equals("COMPLETED", ignoreCase = true)) return null
+    require(summary.runId == stage.runId) { "Completed stage summary run ID differs from ${stage.runId}" }
+    requireReusableRequest(stage, summary, llmBackend)
+    requireNotNull(resolveStageArchive(stage.outputDir)) { "Completed stage ${stage.id} has no archive" }
     stage.finalOutputSpec?.let { outputSpec ->
         verifyPublishedStageOutput(
             stageOutputDir = stage.outputDir,
             outputSpec = outputSpec
-        ) ?: return null
+        ) ?: error("Completed stage ${stage.id} has no valid required output ${outputSpec.relativePath}")
     }
     Napier.i("EvoMolior CLI reusing completed stage ${stage.id} runId=${stage.runId}")
     return CliStageExecutionResult(
@@ -530,12 +604,48 @@ private fun loadCompletedStageResult(stage: CliStagePlan): CliStageExecutionResu
     )
 }
 
+/**
+ * Refuses to reuse a completed stage produced by a different request.
+ *
+ * Summaries written before request fingerprints existed fall back to comparing the prompt they
+ * recorded; their stored model overrides are resolved runtime assignments, not the requested
+ * overrides, so they cannot be compared, and nothing else was recorded.
+ *
+ * @param stage Stage about to run or be reused.
+ * @param summary Completed summary found in the stage output directory.
+ * @param llmBackend Backend selected for this invocation.
+ * @throws CliUsageException when the stored result belongs to a different request.
+ */
+private fun requireReusableRequest(stage: CliStagePlan, summary: CliRunSummary, llmBackend: LlmBackend) {
+    val mismatch = summary.requestFingerprint
+        ?.let { stored ->
+            val current = cliStageRequestFingerprint(stage, llmBackend)
+            "request fingerprint $stored differs from $current".takeIf { stored != current }
+        }
+        ?: run {
+            Napier.w(
+                "EvoMolior CLI completed stage ${stage.id} has no request fingerprint; " +
+                    "only its prompt can be compared before reuse"
+            )
+            "prompt differs".takeIf { summary.prompt != stage.prompt }
+        }
+    if (mismatch != null) {
+        throw CliUsageException(
+            "Completed stage ${stage.id} in ${stage.outputDir} was produced by a different request " +
+                "($mismatch: prompt, input files, output contract, or run configuration changed). " +
+                "Refusing to return it as this run's result; use a new -run-id or -output directory."
+        )
+    }
+}
+
 private suspend fun executeCliStage(
     stage: CliStagePlan,
     rootOptions: CliOptions,
     runtimeFactory: (File, CliOptions) -> CliRuntime,
     acceptanceLease: AcceptanceRunLeaseHandle? = null
 ): CliStageExecutionResult = coroutineScope {
+    // Bound to the inputs as they are when the run starts, before agents can read them.
+    val requestFingerprint = cliStageRequestFingerprint(stage, rootOptions.llmBackend)
     val runOutputDir = stage.outputDir.toFile().absoluteFile.apply { mkdirs() }
     val debugLogFile = if (rootOptions.debug || stage.fast) runOutputDir.resolve("debug-log.txt") else null
     runOutputDir.resolve("prompt.txt").writeText(stage.prompt)
@@ -563,6 +673,9 @@ private suspend fun executeCliStage(
         runId = stage.runId,
         councilExecutionPurpose = stage.councilExecutionPurpose,
         acceptanceProfile = stage.acceptanceProfile,
+        acceptanceDiagnosticMode = stage.acceptanceDiagnosticMode,
+        codexReasoningEffort = stage.codexReasoningEffort,
+        codexRuntimePreset = stage.codexRuntimePreset,
         acceptanceRunBoundaryVerifier = acceptanceLease
             ?: com.achulkov.evomolior.api.service.AcceptanceRunBoundaryVerifier.NONE
     )
@@ -600,6 +713,7 @@ private suspend fun executeCliStage(
 
     val objectiveProfile = buildCliObjectiveProfile(stage.prompt, stage.fast)
     val modelOverrides = when {
+        stage.codexRuntimePreset != null -> stage.modelOverrides
         rootOptions.llmBackend == LlmBackend.CODEX_CHATGPT -> {
             ModelSelectionConfig.codexChatGptRuntimeAssignments()
         }
@@ -629,13 +743,19 @@ private suspend fun executeCliStage(
         llmBackend = rootOptions.llmBackend,
         councilExecutionPurpose = stage.councilExecutionPurpose,
         acceptanceProfile = stage.acceptanceProfile,
+        acceptanceDiagnosticMode = stage.acceptanceDiagnosticMode,
+        codexReasoningEffort = stage.codexReasoningEffort,
+        codexRuntimePreset = stage.codexRuntimePreset,
+        quantitativeToolObligation = stage.quantitativeToolObligation,
         autoCompletionPolicy = stage.autoCompletionPolicy,
         modelOverrides = modelOverrides,
         contextArtifacts = allInputArtifacts,
         finalOutputSpec = stage.finalOutputSpec?.toRunFinalOutputSpec(),
         isTestRun = false,
         budgetOverride = stage.budgetOverride ?: objectiveProfile.budgetOverride,
-        enforceProviderMonetaryCostCap = stage.enforceProviderMonetaryCostCap
+        enforceProviderMonetaryCostCap = stage.enforceProviderMonetaryCostCap,
+        ordinaryAgentTtlSeconds = stage.ordinaryAgentTtlSeconds,
+        graderGroupCountOverride = stage.graderGroupCount
         )
     } catch (error: Exception) {
         fileAntilog?.close()
@@ -675,11 +795,20 @@ private suspend fun executeCliStage(
     }
 
     val completion = CompletableDeferred<EvoMoliorEvent>()
+    val storageLocations = RunStoragePreflight.locations(rootOptions)
+    val storageFloorBytes = runCatching { RunStoragePreflight.requiredFreeBytes() }.getOrDefault(0L)
     val eventCollector = launch(Dispatchers.Default) {
         runtime.engineService.events.collect { event ->
             when (event) {
                 is EvoMoliorEvent.RunStarted -> Napier.i("EvoMolior CLI run started runId=${event.runId}")
-                is EvoMoliorEvent.RoundStarted -> Napier.i("EvoMolior CLI round started round=${event.roundIndex}")
+                is EvoMoliorEvent.RoundStarted -> {
+                    Napier.i("EvoMolior CLI round started round=${event.roundIndex}")
+                    RunStoragePreflight.warnIfLow(
+                        storageLocations,
+                        storageFloorBytes,
+                        "round ${event.roundIndex} start"
+                    )
+                }
                 is EvoMoliorEvent.RoundCompleted -> {
                     acceptanceLease?.verifyStable("round-${event.result.roundIndex}-boundary")
                     Napier.i("EvoMolior CLI round completed round=${event.result.roundIndex}")
@@ -687,6 +816,22 @@ private suspend fun executeCliStage(
                 is EvoMoliorEvent.RunCompleted -> {
                     acceptanceLease?.verifyStable("run-completion")
                     Napier.i("EvoMolior CLI run completed runId=${event.runId} winner=${event.winnerId}")
+                    if (!completion.isCompleted) completion.complete(event)
+                }
+                is EvoMoliorEvent.RunCompletedProvisional -> {
+                    acceptanceLease?.verifyStable("run-completion-provisional")
+                    Napier.w(
+                        "EvoMolior CLI run completed provisionally runId=${event.runId} " +
+                            "reason=${event.reason}"
+                    )
+                    if (!completion.isCompleted) completion.complete(event)
+                }
+                is EvoMoliorEvent.RunRecovered -> {
+                    acceptanceLease?.verifyStable("run-recovery")
+                    Napier.w(
+                        "EvoMolior CLI run recovered without acceptance runId=${event.runId} " +
+                            "reason=${event.reason}"
+                    )
                     if (!completion.isCompleted) completion.complete(event)
                 }
                 is EvoMoliorEvent.RunAborted -> {
@@ -700,18 +845,43 @@ private suspend fun executeCliStage(
     }
 
     val startedAt = Instant.now()
+    var stageCancelled = false
     val completedEvent = try {
-        if (shouldResumePersistedRun) {
-            Napier.i("EvoMolior CLI resuming persisted runId=${stage.runId}")
-            runtime.engineService.resumePersistedRun(runConfig)
-        } else {
-            runtime.engineService.startRun(runConfig)
+        withCliRunShutdown(
+            abort = {
+                if (runtime.engineService.getState().activeRunId == stage.runId) {
+                    runtime.engineService.abortRun(stage.runId, "CLI stage cancelled or failed")
+                }
+            },
+        ) {
+            if (shouldResumePersistedRun) {
+                Napier.i("EvoMolior CLI resuming persisted runId=${stage.runId}")
+                runtime.engineService.resumePersistedRun(runConfig)
+            } else {
+                runtime.engineService.startRun(runConfig)
+            }
+            completion.await()
         }
-        completion.await()
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        stageCancelled = true
+        throw cancelled
     } catch (error: Exception) {
         val persistedRejection = StartupRejectionFileStore { runId ->
             dataRoot.resolve("evomolior/runs/$runId/control")
         }.read(stage.runId)
+        val terminalBundle = runCatching {
+            runtime.engineService.getResultsBundle(stage.runId)
+        }.onFailure(error::addSuppressed).getOrNull()
+        val terminalOutcome = terminalBundle?.let { bytes ->
+            runCatching { RunOutcomeBundleInspector.inspect(bytes) }
+                .onFailure(error::addSuppressed)
+                .getOrNull()
+                ?.takeIf {
+                    it.outcomeClass ==
+                        com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+                            .STARTUP_DIAGNOSTIC_PACKAGE
+                }
+        }
         fileAntilog?.close()
         return@coroutineScope rejectedStageResult(
             stage = stage,
@@ -719,18 +889,69 @@ private suspend fun executeCliStage(
             rootOutputDir = rootOptions.outputDir,
             modelOverrides = modelOverrides,
             error = error,
-            artifact = persistedRejection
+            artifact = persistedRejection,
+            terminalBundle = terminalBundle.takeIf { terminalOutcome != null },
+            terminalOutcome = terminalOutcome,
         )
     } finally {
-        eventCollector.cancelAndJoin()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            eventCollector.cancelAndJoin()
+            if (stageCancelled) fileAntilog?.close()
+        }
     }
 
     val durationMs = Duration.between(startedAt, Instant.now()).toMillis()
     val resultsBundle = runtime.engineService.getResultsBundle(stage.runId)
+    val outcomePresentation = runCatching {
+        runtime.engineService.getRunOutcomePresentation(stage.runId)
+    }.onFailure { error ->
+        Napier.w(
+            "EvoMolior CLI could not decode typed outcome for runId=${stage.runId}; " +
+                "preserving the terminal bundle as legacy-compatible output: ${error.message}"
+        )
+    }.getOrNull()
     val resultsBundleFile = resultsBundle?.let {
-        val file = runOutputDir.resolve("results.zip")
+        val file = runOutputDir.resolve(
+            when (outcomePresentation?.outcomeClass) {
+                com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+                    .ACCEPTED_DECISION_PACKAGE -> "results.zip"
+                com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+                    .PROVISIONAL_DECISION_PACKAGE -> "recovery-results.zip"
+                com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+                    .STARTUP_DIAGNOSTIC_PACKAGE -> "startup-diagnostic.zip"
+                null -> "terminal-results.zip"
+            }
+        )
         Files.write(file.toPath(), it)
         file
+    }
+    val eventTerminalOutcome = when (completedEvent) {
+        is EvoMoliorEvent.RunCompletedProvisional -> completedEvent.terminalOutcome
+        is EvoMoliorEvent.RunRecovered -> completedEvent.terminalOutcome
+        else -> null
+    }
+    val executionStatus = outcomePresentation?.executionStatus
+        ?: eventTerminalOutcome?.executionStatus
+        ?: if (completedEvent is EvoMoliorEvent.RunCompleted) {
+            ExecutionCompletionStatus.COMPLETED
+        } else {
+            null
+        }
+    val acceptanceStatus = outcomePresentation?.acceptanceStatus
+        ?: eventTerminalOutcome?.acceptanceStatus
+    val primaryArtifactPath = outcomePresentation
+        ?.let { presentation ->
+            materializePrimaryArtifact(
+                resultsBundle = resultsBundle,
+                presentation = presentation,
+                outputDirectory = runOutputDir.toPath(),
+            )
+        }
+    val summaryStatus = when {
+        executionStatus == ExecutionCompletionStatus.COMPLETED -> "COMPLETED"
+        completedEvent is EvoMoliorEvent.RunAborted -> "ABORTED"
+        completedEvent is EvoMoliorEvent.RunRecovered -> "RECOVERED"
+        else -> "UNKNOWN"
     }
 
     val summary = CliRunSummary(
@@ -743,13 +964,24 @@ private suspend fun executeCliStage(
         durationMs = durationMs,
         debugLogPath = debugLogFile?.absolutePath,
         resultsBundlePath = resultsBundleFile?.absolutePath,
-        status = when (completedEvent) {
-            is EvoMoliorEvent.RunCompleted -> "COMPLETED"
-            is EvoMoliorEvent.RunAborted -> "ABORTED"
-            else -> "UNKNOWN"
-        },
+        status = summaryStatus,
         winnerId = (completedEvent as? EvoMoliorEvent.RunCompleted)?.winnerId,
-        modelOverrides = modelOverrides
+        modelOverrides = modelOverrides,
+        terminalReason = when (completedEvent) {
+            is EvoMoliorEvent.RunCompletedProvisional -> completedEvent.reason
+            is EvoMoliorEvent.RunRecovered -> completedEvent.reason
+            is EvoMoliorEvent.RunAborted -> completedEvent.reason
+            else -> null
+        },
+        outcome = outcomePresentation,
+        executionStatus = executionStatus,
+        acceptanceStatus = acceptanceStatus,
+        primaryArtifactPath = primaryArtifactPath,
+        primaryArtifactValidationStatus =
+            outcomePresentation?.primaryArtifactValidationStatus
+                ?: eventTerminalOutcome?.primaryArtifactValidationStatus,
+        processExitCode = if (summaryStatus == "COMPLETED") 0 else 1,
+        requestFingerprint = requestFingerprint,
     )
 
     Files.writeString(
@@ -758,6 +990,12 @@ private suspend fun executeCliStage(
     )
 
     Napier.i("EvoMolior CLI wrote summary to ${runOutputDir.resolve("summary.json").absolutePath}")
+    outcomePresentation?.let { outcome ->
+        Napier.i(
+            "EvoMolior CLI outcome=${outcome.outcomeClass} " +
+                "manifest=${outcome.manifestHash} artifacts=${outcome.artifactPaths.size}"
+        )
+    }
     Napier.takeLogarithm(logAntilog)
     fileAntilog?.close()
 
@@ -771,13 +1009,47 @@ private suspend fun executeCliStage(
     )
 }
 
+private fun materializePrimaryArtifact(
+    resultsBundle: ByteArray?,
+    presentation: RunOutcomePresentation,
+    outputDirectory: Path,
+): String? {
+    val archivePath = presentation.primaryArtifactPath ?: return null
+    val bytes = resultsBundle ?: return null
+    val verified = RunOutcomeBundleInspector.inspect(bytes)
+    require(verified.runId == presentation.runId && verified.manifestHash == presentation.manifestHash &&
+        archivePath in verified.artifactPaths) { "Primary artifact does not match verified archive authority" }
+    publishStageSourceSidecars(bytes, outputDirectory, presentation.runId)
+    require(
+        archivePath.isNotBlank() &&
+            !archivePath.startsWith('/') &&
+            archivePath.split('/').none { it.isBlank() || it == "." || it == ".." }
+    ) { "Primary artifact archive path is unsafe: $archivePath" }
+    val artifactName = archivePath.substringAfterLast('/')
+    val target = outputDirectory.resolve("primary").resolve(artifactName)
+    ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+        while (true) {
+            val entry = zip.nextEntry ?: break
+            if (entry.name == archivePath) {
+                Files.createDirectories(target.parent)
+                Files.write(target, zip.readBytes())
+                return target.toAbsolutePath().toString()
+            }
+            zip.closeEntry()
+        }
+    }
+    return null
+}
+
 private fun rejectedStageResult(
     stage: CliStagePlan,
     runOutputDir: Path,
     rootOutputDir: Path,
     modelOverrides: Map<String, String>,
     error: Throwable,
-    artifact: StartupRejectionArtifact?
+    artifact: StartupRejectionArtifact?,
+    terminalBundle: ByteArray? = null,
+    terminalOutcome: RunOutcomePresentation? = null,
 ): CliStageExecutionResult {
     val persisted = persistCliStartupRejection(
         stage = stage,
@@ -785,7 +1057,9 @@ private fun rejectedStageResult(
         outputRoot = rootOutputDir,
         error = error,
         artifact = artifact,
-        modelOverrides = modelOverrides
+        modelOverrides = modelOverrides,
+        terminalBundle = terminalBundle,
+        terminalOutcome = terminalOutcome,
     )
     return CliStageExecutionResult(
         stageId = stage.id,
@@ -808,8 +1082,18 @@ internal fun persistCliStartupRejection(
     error: Throwable,
     artifact: StartupRejectionArtifact?,
     modelOverrides: Map<String, String>,
+    terminalBundle: ByteArray? = null,
+    terminalOutcome: RunOutcomePresentation? = null,
     publicCopyPublisher: (Path, Path) -> Unit = ::publishImmutableStartupRejectionCopy
 ): PersistedCliStartupRejection {
+    require((terminalBundle == null) == (terminalOutcome == null)) {
+        "Startup diagnostic bundle and typed outcome must be supplied together"
+    }
+    require(
+        terminalOutcome == null ||
+            terminalOutcome.outcomeClass ==
+            com.achulkov.evomolior.core.deliverable.RunOutcomeClass.STARTUP_DIAGNOSTIC_PACKAGE
+    ) { "Rejected CLI stage can attach only a startup diagnostic terminal outcome" }
     val outputDirectory = if (!Files.exists(preferredOutputDir) || Files.list(preferredOutputDir).use {
             !it.findAny().isPresent
         }
@@ -828,9 +1112,7 @@ internal fun persistCliStartupRejection(
         errors = listOf(
             StartupRejectionError(
                 kind = StartupRejectionErrorKind.ADMISSION,
-                message = error.message.orEmpty()
-                    .ifBlank { error::class.simpleName.orEmpty() }
-                    .take(StartupRejectionError.MAX_DIAGNOSTIC_CHARS)
+                message = "Startup admission was rejected before runtime activation."
             )
         ),
         declaredWorkerGroupCount = stage.groupCount ?: 2,
@@ -854,6 +1136,11 @@ internal fun persistCliStartupRejection(
         stored.toPath(),
         outputDirectory.resolve("startup-rejection.json")
     )
+    val terminalBundlePath = terminalBundle?.let { bytes ->
+        outputDirectory.resolve("startup-diagnostic.zip").also { path ->
+            Files.write(path, bytes)
+        }
+    }
     val summary = CliRunSummary(
         runId = stage.runId,
         prompt = stage.prompt,
@@ -863,10 +1150,21 @@ internal fun persistCliStartupRejection(
         completedAt = Instant.now().toString(),
         durationMs = 0,
         debugLogPath = null,
-        resultsBundlePath = null,
+        resultsBundlePath = terminalBundlePath?.toAbsolutePath()?.toString(),
         status = "REJECTED",
         winnerId = null,
-        modelOverrides = modelOverrides
+        modelOverrides = modelOverrides,
+        terminalReason = terminalOutcome
+            ?.startupDiagnostic
+            ?.issues
+            ?.joinToString(" ") { it.publicMessage }
+            ?: "Startup admission was rejected before runtime activation.",
+        outcome = terminalOutcome,
+        executionStatus = terminalOutcome?.executionStatus,
+        acceptanceStatus = terminalOutcome?.acceptanceStatus,
+        primaryArtifactPath = terminalOutcome?.primaryArtifactPath,
+        primaryArtifactValidationStatus = terminalOutcome?.primaryArtifactValidationStatus,
+        processExitCode = 1,
     )
     Files.writeString(
         outputDirectory.resolve("summary.json"),
@@ -1028,24 +1326,6 @@ private fun resolveStagePrompt(stageConfig: CliPipelineStageConfig, pipelineBase
     }
 }
 
-private fun buildDefaultFollowUpPrompt(primaryPrompt: String): String = """
-    Using the uploaded artifacts from the previous stage, produce one refined final deliverable
-    that better fulfills the original objective below.
-
-    Original objective:
-    $primaryPrompt
-
-    Requirements:
-    - inspect previous-stage artifacts via read_run_artifact
-    - preserve strong structure and improve weak areas
-    - do not compress, summarize, or shorten a prior deliverable that already satisfies the
-      objective; keep its substantive depth and expand only the weak parts
-    - preserve source-grounded evidence notes, evidence-traceability tables, metrics tables,
-      caveats, and explicit inference labels when they exist in the prior deliverable
-    - if a prior final deliverable exists, expand and refine it rather than starting over
-    - produce one polished operator-facing output file
-""".trimIndent()
-
 private fun defaultFinalOutputSpec(
     prompt: String,
     preferredPath: String
@@ -1085,13 +1365,9 @@ private fun preparePipelineStageInput(
         Files.createDirectories(previousStageDir)
         copyIfExists(previousStage.stageOutputDir.resolve("prompt.txt"), previousStageDir.resolve("prompt.txt"))
         copyIfExists(previousStage.stageOutputDir.resolve("summary.json"), previousStageDir.resolve("summary.json"))
-        copyIfExists(previousStage.stageOutputDir.resolve("results.zip"), previousStageDir.resolve("results.zip"))
-        previousStage.stageOutputDir.resolve("results.zip").toFile().takeIf { it.exists() }?.let { bundle ->
-            runCatching {
-                unzipPipelineBundle(bundle, previousStageDir.resolve("results-bundle"))
-            }.onFailure { err ->
-                Napier.w("CliPipeline: failed to expand previous-stage results bundle for $stageId: ${err.message}")
-            }
+        resolveStageArchive(previousStage.stageOutputDir)?.let { bundle ->
+            Files.copy(bundle.toPath(), previousStageDir.resolve(bundle.name), StandardCopyOption.REPLACE_EXISTING)
+            unzipPipelineBundle(bundle, previousStageDir.resolve("results-bundle"))
         }
     }
     return stageInputRoot
@@ -1112,130 +1388,205 @@ private fun applyCodeImprovementPlanIfPresent(
         }
 }
 
+/**
+ * Resolves only a stage-local archive, retaining its recorded outcome kind.
+ * Typed bundles must pass the shared outcome verifier and match the summary authority.
+ */
+private fun resolveStageArchive(stageOutputDir: Path): File? {
+    val summaryPath = stageOutputDir.resolve("summary.json")
+    val summary = if (Files.exists(summaryPath)) {
+        cliJson.decodeFromString(CliRunSummary.serializer(), Files.readString(summaryPath))
+    } else null
+    val expected = summary?.outcome
+    val expectedName = when (expected?.outcomeClass) {
+        com.achulkov.evomolior.core.deliverable.RunOutcomeClass.ACCEPTED_DECISION_PACKAGE -> "results.zip"
+        com.achulkov.evomolior.core.deliverable.RunOutcomeClass.PROVISIONAL_DECISION_PACKAGE -> "recovery-results.zip"
+        com.achulkov.evomolior.core.deliverable.RunOutcomeClass.STARTUP_DIAGNOSTIC_PACKAGE -> "startup-diagnostic.zip"
+        null -> null
+    }
+    // Old summaries store absolute paths. Use only their basename within this stage,
+    // so moved runs remain reusable without reading files outside the managed directory.
+    val recordedName = summary?.resultsBundlePath?.let { Path.of(it).fileName.toString() }
+    require(recordedName == null || recordedName in setOf(
+        "results.zip", "recovery-results.zip", "startup-diagnostic.zip", "terminal-results.zip"
+    )) { "Unsupported recorded stage archive: $recordedName" }
+    require(expectedName == null || recordedName == null || recordedName == expectedName) {
+        "Recorded stage archive kind differs from summary outcome"
+    }
+    val archive = stageOutputDir.resolve(recordedName ?: expectedName ?: "results.zip").toFile()
+    if (!archive.exists()) {
+        check(expected == null && recordedName == null) { "Missing recorded stage archive: ${archive.name}" }
+        return null
+    }
+    require(!Files.isSymbolicLink(archive.toPath())) { "Stage archive must not be a symbolic link" }
+    val hasTypedManifest = ZipFile(archive).use {
+        it.getEntry(com.achulkov.evomolior.api.service.RunManifestVerifier.OUTCOME_MANIFEST_PATH) != null
+    }
+    val hasLegacyRecoveryManifest = !hasTypedManifest && ZipFile(archive).use {
+        it.getEntry(com.achulkov.evomolior.api.service.RecoveryBundleManifest.MANIFEST_PATH) != null
+    }
+    if (hasLegacyRecoveryManifest) {
+        require(expected == null && summary != null && summary.winnerId == null &&
+            summary.acceptanceStatus != AcceptanceStatus.ACCEPTED &&
+            (summary.status == "RECOVERED" || summary.acceptanceStatus == AcceptanceStatus.PROVISIONAL)
+        ) {
+            "Legacy recovery cannot replace typed or accepted summary authority"
+        }
+        com.achulkov.evomolior.api.service.LegacyRecoveryBundleVerifier.verify(
+            archive.readBytes(), summary.runId,
+        )
+        return archive
+    }
+    if (expected != null || hasTypedManifest || archive.name == "recovery-results.zip" ||
+        archive.name == "startup-diagnostic.zip"
+    ) {
+        val verified = RunOutcomeBundleInspector.inspect(archive.readBytes())
+        requireNotNull(expected) { "Typed stage archive requires a typed summary outcome" }
+        require(
+            verified.runId == requireNotNull(summary).runId &&
+                verified.runId == expected.runId &&
+                verified.outcomeClass == expected.outcomeClass &&
+                verified.manifestHash == expected.manifestHash
+        ) { "Stage archive does not match summary manifest, outcome, or run ID" }
+    }
+    return archive
+}
+
 private fun publishStageOutput(
     stageOutputDir: Path,
     relativePath: String,
     pipelineOutputDir: Path,
-    fallbackWhenMissing: Boolean = true
+    required: Boolean = true
 ) {
-    val resultsZip = stageOutputDir.resolve("results.zip").toFile()
-    if (!resultsZip.exists()) {
-        if (fallbackWhenMissing) {
-            publishStaticFallbackStageOutput(stageOutputDir, relativePath, pipelineOutputDir, mediaType = null)
-        }
+    val resultsZip = resolveStageArchive(stageOutputDir)
+    if (resultsZip == null) {
+        check(!required) { "Missing stage archive for required output $relativePath" }
         return
     }
     var published = false
-    runCatching {
+    run {
         ZipFile(resultsZip).use { zip ->
-            val entry = zip.getEntry("outputs/$relativePath") ?: return@use
+            val archivePath = outputArchiveEntryCandidates(relativePath)
+                .firstOrNull { zip.getEntry(it) != null }
+                ?: return@use
             val target = resolvePublishedOutputTarget(
                 pipelineOutputDir = pipelineOutputDir,
                 relativePath = relativePath
-            ) ?: return
+            ) ?: error("Unsafe requested output path: $relativePath")
             Files.createDirectories(target.parent)
-            zip.getInputStream(entry).use { input ->
+            zip.getInputStream(requireNotNull(zip.getEntry(archivePath))).use { input ->
                 Files.write(target, input.readBytes())
             }
             published = true
         }
-    }.onFailure { err ->
-        Napier.w("CliPipeline: failed to publish stage output $relativePath: ${err.message}")
     }
-    if (!published && fallbackWhenMissing) {
-        publishStaticFallbackStageOutput(stageOutputDir, relativePath, pipelineOutputDir, mediaType = null)
-    }
+    if (published) publishStageSourceSidecars(resultsZip, pipelineOutputDir)
+    check(published || !required) { "Stage archive is missing required output $relativePath" }
 }
 
-private fun publishStaticFallbackStageOutput(
-    stageOutputDir: Path,
-    relativePath: String,
+/**
+ * Copies only manifest-verified advisory attachments; never rewrites historical ZIPs.
+ * @param archive Immutable stage archive.
+ * @param pipelineOutputDir Public output directory included in the pipeline manifest.
+ * @param expectedRunId Independent run identity; legacy recovery requires this or a stage summary.
+ */
+internal fun publishStageSourceSidecars(
+    archive: File,
     pipelineOutputDir: Path,
-    mediaType: String?
+    expectedRunId: String? = null,
 ) {
-    val target = resolvePublishedOutputTarget(pipelineOutputDir, relativePath) ?: return
-    val summary = Files.readString(stageOutputDir.resolve("summary.json").takeIf { Files.exists(it) } ?: return)
-    val claimLedger = readOutputFromResultsZip(stageOutputDir, "claim_ledger.jsonl")
-        ?: readOutputFromResultsZip(stageOutputDir, "final_answer.md")
-        ?: ""
-    val content = buildStaticFallbackOutput(relativePath, mediaType, summary, claimLedger)
-    Files.createDirectories(target.parent)
-    Files.writeString(target, content)
-    Napier.w("CliPipeline: published static fallback output $relativePath from summary.json and claim ledger")
+    val runId = expectedRunId ?: archive.parentFile.resolve("summary.json").takeIf(File::isFile)?.let {
+        cliJson.decodeFromString(CliRunSummary.serializer(), it.readText()).runId
+    }
+    publishStageSourceSidecars(archive.readBytes(), pipelineOutputDir, runId)
+}
+
+private fun publishStageSourceSidecars(bytes: ByteArray, pipelineOutputDir: Path, expectedRunId: String?) {
+    val sidecars = linkedMapOf<String, ByteArray>()
+    var hasOutcomeManifest = false
+    var hasLegacyRecoveryManifest = false
+    ZipInputStream(bytes.inputStream()).use { zip ->
+        while (true) {
+            val entry = zip.nextEntry ?: break
+            if (entry.name == com.achulkov.evomolior.api.service.RunManifestVerifier.OUTCOME_MANIFEST_PATH) {
+                hasOutcomeManifest = true
+            }
+            if (entry.name == com.achulkov.evomolior.api.service.RecoveryBundleManifest.MANIFEST_PATH) {
+                hasLegacyRecoveryManifest = true
+            }
+            if (!entry.isDirectory && entry.name.startsWith("source-checks/")) {
+                require(sidecars.put(entry.name, zip.readBytes()) == null) { "Duplicate source-check attachment" }
+            }
+            zip.closeEntry()
+        }
+    }
+    if (sidecars.isNotEmpty()) {
+        val verifiedPaths = if (
+            hasOutcomeManifest
+        ) {
+            RunOutcomeBundleInspector.inspect(bytes).also {
+                require(expectedRunId == null || it.runId == expectedRunId) { "Source-check run identity mismatch" }
+            }.artifactPaths.toSet()
+        } else if (hasLegacyRecoveryManifest) {
+            com.achulkov.evomolior.api.service.LegacyRecoveryBundleVerifier.verify(
+                bytes,
+                requireNotNull(expectedRunId) { "Legacy recovery publication requires independent run identity" },
+            ).committedBundleEntries.mapTo(mutableSetOf()) { it.path }
+        } else {
+            val verified = com.achulkov.evomolior.api.service.RunManifestVerifier.verify(
+                bytes, expectedRunId = expectedRunId,
+            )
+            require(verified.isValid) { "Source-check publication requires a verified archive manifest" }
+            requireNotNull(verified.manifest).entries.mapTo(mutableSetOf()) { it.path }
+        }
+        sidecars.toSortedMap().forEach { (name, content) ->
+            require(name in verifiedPaths) { "Uncommitted source-check attachment: $name" }
+            require(name.matches(Regex("source-checks/[0-9a-f]{64}\\.md"))) {
+                "Unsafe source-check attachment identifier: $name"
+            }
+            val target = requireNotNull(resolvePublishedOutputTarget(pipelineOutputDir, name)) {
+                "Unsafe source-check attachment path: $name"
+            }
+            require(generateSequence(target) { it.parent }.none(Files::isSymbolicLink)) {
+                "Source-check destination must not be a symbolic link"
+            }
+            Files.createDirectories(target.parent)
+            if (Files.exists(target)) {
+                require(Files.readAllBytes(target).contentEquals(content)) {
+                    "Source-check destination already contains different immutable content: $name"
+                }
+            } else {
+                Files.write(target, content, java.nio.file.StandardOpenOption.CREATE_NEW)
+            }
+        }
+    }
 }
 
 private fun readOutputFromResultsZip(stageOutputDir: Path, relativePath: String): String? {
-    val resultsZip = stageOutputDir.resolve("results.zip").toFile()
-    if (!resultsZip.exists()) return null
-    return runCatching {
+    val resultsZip = resolveStageArchive(stageOutputDir) ?: return null
+    return run {
         ZipFile(resultsZip).use { zip ->
-            val entry = zip.getEntry("outputs/$relativePath") ?: zip.getEntry(relativePath) ?: return@use null
+            val entry = outputArchiveEntryCandidates(relativePath).firstNotNullOfOrNull(zip::getEntry)
+                ?: zip.getEntry(relativePath) ?: return@use null
             zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
-        }
-    }.getOrNull()
-}
-
-private fun buildStaticFallbackOutput(
-    relativePath: String,
-    mediaType: String?,
-    summaryJson: String,
-    claimLedgerJsonl: String
-): String {
-    val extension = relativePath.substringAfterLast('.', "")
-    return when {
-        mediaType?.contains("html", ignoreCase = true) == true || extension.equals("html", ignoreCase = true) -> """
-            <!doctype html>
-            <html lang="en">
-            <head><meta charset="utf-8"><title>EvoMolior Static Fallback</title></head>
-            <body>
-            <main>
-            <h1>EvoMolior Static Fallback</h1>
-            <p>The requested final file was not present in the run archive. This deterministic fallback was generated from <code>summary.json</code> and <code>claim_ledger.jsonl</code>.</p>
-            <h2>Summary</h2>
-            <pre>${escapeHtml(summaryJson)}</pre>
-            <h2>Claim Ledger</h2>
-            <pre>${escapeHtml(claimLedgerJsonl.ifBlank { "No claim ledger entries were available." })}</pre>
-            </main>
-            </body>
-            </html>
-        """.trimIndent()
-        mediaType?.contains("json", ignoreCase = true) == true || extension.equals("json", ignoreCase = true) ->
-            cliJson.encodeToString(
-                mapOf(
-                    "fallback" to "static_summary_claim_ledger",
-                    "summary_json" to summaryJson,
-                    "claim_ledger_jsonl" to claimLedgerJsonl
-                )
-            )
-        else -> buildString {
-            appendLine("# EvoMolior Static Fallback")
-            appendLine()
-            appendLine("The requested final file was not present in the run archive. This deterministic fallback was generated from `summary.json` and `claim_ledger.jsonl`.")
-            appendLine()
-            appendLine("## Summary")
-            appendLine("```json")
-            appendLine(summaryJson)
-            appendLine("```")
-            appendLine()
-            appendLine("## Claim Ledger")
-            appendLine("```jsonl")
-            appendLine(claimLedgerJsonl.ifBlank { "No claim ledger entries were available." })
-            appendLine("```")
         }
     }
 }
 
-private fun escapeHtml(value: String): String = value
-    .replace("&", "&amp;")
-    .replace("<", "&lt;")
-    .replace(">", "&gt;")
-    .replace("\"", "&quot;")
-
 private fun inferArchivedPublishedOutputRelativePath(stageOutputDir: Path): String? {
-    val resultsZip = stageOutputDir.resolve("results.zip").toFile()
-    if (!resultsZip.exists()) return null
-    return runCatching {
+    val resultsZip = resolveStageArchive(stageOutputDir) ?: return null
+    return run {
         ZipFile(resultsZip).use { zip ->
+            if (zip.getEntry(com.achulkov.evomolior.api.service.RunManifestVerifier.OUTCOME_MANIFEST_PATH) != null) {
+                RunOutcomeBundleInspector.inspect(resultsZip.readBytes()).primaryArtifactPath
+                    ?.takeIf { it.startsWith("outputs/") }
+                    // Plans use the opt-in publication branch or an explicit final-output request.
+                    ?.takeUnless {
+                        it.removePrefix("outputs/").removePrefix("recovered/") ==
+                            CODE_IMPROVEMENT_PLAN_RELATIVE_PATH
+                    }
+                    ?.let { return@use it }
+            }
             val preferred = listOf(
                 "outputs/final-article.html",
                 "outputs/final-output.html",
@@ -1247,24 +1598,24 @@ private fun inferArchivedPublishedOutputRelativePath(stageOutputDir: Path): Stri
                     .map { it.name }
                     .filter { it.startsWith("outputs/") }
                     .filterNot { it.startsWith("outputs/assets/") }
+                    .filterNot { it.startsWith("outputs/recovered/assets/") }
                     .firstOrNull { it.endsWith(".html", ignoreCase = true) }
-        }?.removePrefix("outputs/")
-    }.getOrNull()
+        }?.removePrefix("outputs/")?.removePrefix("recovered/")
+    }
 }
 
 private fun publishStageAssetOutputs(
     stageOutputDir: Path,
     pipelineOutputDir: Path
 ) {
-    val resultsZip = stageOutputDir.resolve("results.zip").toFile()
-    if (!resultsZip.exists()) return
-    runCatching {
+    val resultsZip = resolveStageArchive(stageOutputDir) ?: return
+    run {
         ZipFile(resultsZip).use { zip ->
             zip.entries().asSequence()
                 .filter { !it.isDirectory }
-                .filter { it.name.startsWith("outputs/assets/") }
+                .filter { it.name.startsWith("outputs/assets/") || it.name.startsWith("outputs/recovered/assets/") }
                 .forEach { entry ->
-                    val relativePath = entry.name.removePrefix("outputs/")
+                    val relativePath = entry.name.removePrefix("outputs/").removePrefix("recovered/")
                     val target = resolvePublishedOutputTarget(
                         pipelineOutputDir = pipelineOutputDir,
                         relativePath = relativePath
@@ -1275,8 +1626,6 @@ private fun publishStageAssetOutputs(
                     }
                 }
         }
-    }.onFailure { err ->
-        Napier.w("CliPipeline: failed to publish stage asset outputs: ${err.message}")
     }
 }
 
@@ -1284,37 +1633,138 @@ private fun resolvePublishedOutputTarget(
     pipelineOutputDir: Path,
     relativePath: String
 ): Path? {
+    if (!relativePath.isSafePipelineArchivePath()) return null
     val normalizedRoot = pipelineOutputDir.toAbsolutePath().normalize()
     val normalizedTarget = normalizedRoot.resolve(relativePath).normalize()
     return normalizedTarget.takeIf { it.startsWith(normalizedRoot) }
 }
 
+private fun outputArchiveEntryCandidates(relativePath: String): List<String> =
+    listOf(
+        "outputs/$relativePath",
+        "outputs/recovered/$relativePath",
+    )
+
 private fun writePipelineResultsZip(runOutputDir: Path) {
-    val zipBytes = ByteArrayOutputStream()
-    ZipOutputStream(zipBytes).use { zip ->
-        val outputsRoot = runOutputDir.resolve("outputs").toFile()
-        if (outputsRoot.exists()) {
-            outputsRoot.walkTopDown()
-                .filter { it.isFile }
-                .filter {
-                    isPublishablePipelineOutput(it.relativeTo(outputsRoot).invariantSeparatorsPath)
-                }
-                .sortedBy { it.relativeTo(outputsRoot).invariantSeparatorsPath }
-                .forEach { file ->
-                    zip.putNextEntry(ZipEntry("outputs/${file.relativeTo(outputsRoot).invariantSeparatorsPath}"))
-                    zip.write(file.readBytes())
-                    zip.closeEntry()
-                }
+    val payload = linkedMapOf<String, ByteArray>()
+    val outputsRoot = runOutputDir.resolve("outputs").toFile()
+    if (outputsRoot.exists()) {
+        outputsRoot.walkTopDown()
+            .filter { it.isFile }
+            .filter {
+                isPublishablePipelineOutput(it.relativeTo(outputsRoot).invariantSeparatorsPath)
+            }
+            .sortedBy { it.relativeTo(outputsRoot).invariantSeparatorsPath }
+            .forEach { file ->
+                payload["outputs/${file.relativeTo(outputsRoot).invariantSeparatorsPath}"] =
+                    file.readBytes()
+            }
+    }
+    val pipelineSummary = runOutputDir.resolve("pipeline-summary.json").toFile()
+    if (pipelineSummary.exists()) {
+        payload["pipeline-summary.json"] = pipelineSummary.readBytes()
+    }
+    val manifest = CliPipelineResultsManifestV1(
+        entries = payload.entries
+            .map { (path, bytes) ->
+                CliPipelineResultsManifestEntry(
+                    path = path,
+                    sizeBytes = bytes.size.toLong(),
+                    sha256 = sha256Hex(bytes),
+                )
+            }
+            .sortedBy(CliPipelineResultsManifestEntry::path),
+    ).withComputedHash()
+    val allEntries = payload.toMutableMap().apply {
+        put(
+            CliPipelineResultsManifestV1.PATH,
+            pipelineResultsJson.encodeToString(
+                CliPipelineResultsManifestV1.serializer(),
+                manifest,
+            ).encodeToByteArray(),
+        )
+    }
+    val archiveBytes = ByteArrayOutputStream().use { output ->
+        ZipOutputStream(output).use { zip ->
+            allEntries.toSortedMap().forEach { (path, bytes) ->
+                zip.putNextEntry(ZipEntry(path).apply { time = PIPELINE_ZIP_EPOCH_1980_MS })
+                zip.write(bytes)
+                zip.closeEntry()
+            }
         }
-        val pipelineSummary = runOutputDir.resolve("pipeline-summary.json").toFile()
-        if (pipelineSummary.exists()) {
-            zip.putNextEntry(ZipEntry("pipeline-summary.json"))
-            zip.write(pipelineSummary.readBytes())
+        output.toByteArray()
+    }
+    verifyPipelineResultsZip(archiveBytes)
+    val target = runOutputDir.resolve("pipeline-results.zip")
+    val temporary = runOutputDir.resolve("pipeline-results.zip.tmp")
+    try {
+        Files.write(temporary, archiveBytes)
+        verifyPipelineResultsZip(Files.readAllBytes(temporary))
+        Files.move(
+            temporary,
+            target,
+            StandardCopyOption.REPLACE_EXISTING,
+            StandardCopyOption.ATOMIC_MOVE,
+        )
+        verifyPipelineResultsZip(Files.readAllBytes(target))
+    } finally {
+        Files.deleteIfExists(temporary)
+    }
+}
+
+internal fun verifyPipelineResultsZip(bytes: ByteArray): CliPipelineResultsManifestV1 {
+    val files = linkedMapOf<String, ByteArray>()
+    ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+        while (true) {
+            val entry = zip.nextEntry ?: break
+            require(
+                !entry.isDirectory &&
+                    entry.name.isSafePipelineArchivePath() &&
+                    files.put(entry.name, zip.readBytes()) == null
+            ) { "Pipeline results ZIP contains an invalid or duplicate entry ${entry.name}" }
             zip.closeEntry()
         }
     }
-    Files.write(runOutputDir.resolve("pipeline-results.zip"), zipBytes.toByteArray())
+    val manifest = pipelineResultsJson.decodeFromString(
+        CliPipelineResultsManifestV1.serializer(),
+        requireNotNull(files[CliPipelineResultsManifestV1.PATH]).decodeToString(),
+    )
+    require(manifest.hasValidHash()) { "Pipeline results manifest hash is invalid" }
+    val payload = files - CliPipelineResultsManifestV1.PATH
+    require(payload.keys == manifest.entries.mapTo(linkedSetOf()) { it.path }) {
+        "Pipeline results ZIP has unattested or missing payload entries"
+    }
+    manifest.entries.forEach { entry ->
+        val content = payload.getValue(entry.path)
+        require(
+            content.size.toLong() == entry.sizeBytes &&
+                sha256Hex(content) == entry.sha256
+        ) { "Pipeline results entry authority mismatch for ${entry.path}" }
+    }
+    return manifest
 }
+
+private fun pipelineResultsManifestHash(
+    manifest: CliPipelineResultsManifestV1
+): String = sha256Hex(
+    pipelineResultsJson.encodeToString(
+        CliPipelineResultsManifestV1.serializer(),
+        manifest.copy(manifestHash = ""),
+    ).encodeToByteArray()
+)
+
+private fun String.isSafePipelineArchivePath(): Boolean =
+    isNotBlank() &&
+        !startsWith("/") &&
+        replace('\\', '/').split('/').none { it.isBlank() || it == ".." }
+
+private val pipelineResultsJson = kotlinx.serialization.json.Json {
+    encodeDefaults = true
+    explicitNulls = true
+    ignoreUnknownKeys = false
+}
+
+private const val PIPELINE_ZIP_EPOCH_1980_MS = 315_532_800_000L
 
 internal fun isPublishablePipelineOutput(relativePath: String): Boolean =
     relativePath
@@ -1331,18 +1781,22 @@ internal fun verifyPublishedStageOutput(
     outputSpec: CliPipelineFinalOutputSpec,
     publishedOutputDir: Path? = null
 ): Path? {
-    val resultsZip = stageOutputDir.resolve("results.zip").toFile()
-    if (!resultsZip.exists()) return null
+    val resultsZip = resolveStageArchive(stageOutputDir) ?: return null
 
-    val expectedEntry = "outputs/${outputSpec.relativePath}"
-    val content = runCatching {
+    val archived = runCatching {
         ZipFile(resultsZip).use { zip ->
-            val entry = zip.getEntry(expectedEntry) ?: return null
-            zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { reader ->
+            val archivePath = outputArchiveEntryCandidates(outputSpec.relativePath)
+                .firstOrNull { zip.getEntry(it) != null }
+                ?: return@use null
+            archivePath to zip.getInputStream(
+                requireNotNull(zip.getEntry(archivePath))
+            ).bufferedReader(Charsets.UTF_8).use { reader ->
                 reader.readText()
             }
         }
     }.getOrNull() ?: return null
+    val archivePath = archived.first
+    val content = archived.second
 
     val output = GeneratedOutputFile(
         relativePath = outputSpec.relativePath,
@@ -1362,10 +1816,12 @@ internal fun verifyPublishedStageOutput(
     runCatching {
         FinalOutputContractValidator.requireValid(output, finalOutputSpec, validationContext)
     }.onFailure { error ->
-        Napier.w("CliPipeline: rejected published output $expectedEntry: ${error.message}")
+        Napier.w("CliPipeline: rejected published output $archivePath: ${error.message}")
     }.getOrElse { return null }
 
-    val publishedFile = publishedOutputDir?.resolve(outputSpec.relativePath)
+    val publishedFile = publishedOutputDir?.let {
+        resolvePublishedOutputTarget(it, outputSpec.relativePath)
+    }
     if (publishedOutputDir != null) {
         if (publishedFile == null || !Files.exists(publishedFile)) return null
 

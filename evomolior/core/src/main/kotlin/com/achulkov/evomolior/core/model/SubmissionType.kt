@@ -32,6 +32,9 @@ enum class SubmissionType(val description: String) {
     /** An update to the group's Plan Registry from the Planner or Meta-Planner. */
     PLAN_UPDATE("Plan Registry update"),
 
+    /** A structured, explicitly provisional novel hypothesis for later testing. */
+    HYPOTHESIS("Provisional novel hypothesis"),
+
     /**
      * A cross-group dispatch sent via the Dispatch Relay.
      * Reviewed by Critic before entering the relay queue.

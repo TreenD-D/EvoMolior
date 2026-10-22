@@ -17,6 +17,14 @@ import kotlin.test.assertTrue
 
 class CodexAuthCommandTest {
     @Test
+    fun `explicit external Codex home controls auth file location`() {
+        assertEquals(java.nio.file.Path.of("/external/codex/auth.json"),
+            CodexAuthCommand.defaultAuthPath("/external/codex", "/home/user"))
+        assertEquals(java.nio.file.Path.of("/home/user/.codex/auth.json"),
+            CodexAuthCommand.defaultAuthPath(null, "/home/user"))
+    }
+
+    @Test
     fun `gptauth status runs login status and prints safe metadata only`() {
         val authPath = createTempFile("codex-auth-", ".json")
         authPath.writeText(

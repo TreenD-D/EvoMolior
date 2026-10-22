@@ -57,6 +57,15 @@ interface CostLedgerDao {
 
     @Query(
         """
+        SELECT * FROM cost_ledger_entries
+        WHERE runId = :runId AND kind = 'PUBLICATION_CLOSED'
+        LIMIT 1
+        """
+    )
+    suspend fun publicationClosure(runId: String): CostLedgerEntryEntity?
+
+    @Query(
+        """
         SELECT COALESCE(SUM(knownTotalUsd), 0.0) FROM cost_ledger_entries
         WHERE runId = :runId AND kind = 'FINALIZED'
         """
@@ -127,6 +136,7 @@ interface CostLedgerDao {
         entry: CostLedgerEntryEntity,
         cumulativeCapUsd: Double?
     ): Boolean {
+        if (publicationClosure(entry.runId) != null) return false
         if (reservation(entry.reservationId) != null || terminal(entry.reservationId) != null) {
             return false
         }
@@ -138,6 +148,15 @@ interface CostLedgerDao {
                 reservedMaximumUsd
             if (nextTotal > cumulativeCapUsd) return false
         }
+        insert(entry)
+        return true
+    }
+
+    /** Atomically closes publication only after all reservations settle, blocking future reserve. */
+    @Transaction
+    suspend fun closeForPublication(entry: CostLedgerEntryEntity): Boolean {
+        if (publicationClosure(entry.runId) != null) return true
+        if (activeReservationCount(entry.runId) != 0L) return false
         insert(entry)
         return true
     }

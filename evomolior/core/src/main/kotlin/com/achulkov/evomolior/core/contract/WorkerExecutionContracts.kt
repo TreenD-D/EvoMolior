@@ -21,6 +21,12 @@ import com.achulkov.evomolior.core.atlas.ToolExecutionPurpose
 import com.achulkov.evomolior.core.atlas.ToolOpportunity
 import com.achulkov.evomolior.core.atlas.ToolOpportunityCommitment
 import com.achulkov.evomolior.core.atlas.ToolProjectSkeleton
+import com.achulkov.evomolior.core.atlas.ToolProjectSkeletonCompiler
+import com.achulkov.evomolior.core.repair.QuantitySpec
+import com.achulkov.evomolior.core.repair.ApproachVector
+import com.achulkov.evomolior.core.repair.ToolRepairCode
+import com.achulkov.evomolior.core.repair.ToolRepairRemediationDictionary
+import com.achulkov.evomolior.core.repair.ToolRepairSource
 import kotlinx.serialization.Serializable
 import kotlin.time.Instant
 
@@ -152,6 +158,47 @@ data class WorkerToolCard(
     }
 }
 
+/** Bounded typed repair projection for the exact assigned tool opportunity. */
+@Serializable
+data class WorkerToolRepairDiagnostic(
+    val diagnosticId: String,
+    val runId: String,
+    val groupId: AtlasGroupId,
+    val opportunityId: String,
+    val opportunityCommitmentHash: String,
+    val authoringNodeId: NodeId,
+    val source: ToolRepairSource,
+    val code: ToolRepairCode,
+    val createdRound: Int,
+    val visibleFromRound: Int,
+    val affectedPublicField: String? = null,
+    val publicQuantitySpec: QuantitySpec? = null,
+    val remediationKey: String = ToolRepairRemediationDictionary.keyFor(code),
+    val diagnosticHash: String
+) {
+    init {
+        require(
+            diagnosticId.isNotBlank() &&
+                runId.isNotBlank() &&
+                groupId.value.isNotBlank() &&
+                opportunityId.isNotBlank() &&
+                opportunityCommitmentHash.isNotBlank() &&
+                authoringNodeId.value.isNotBlank()
+        ) {
+            "Worker tool-repair diagnostic authority fields must not be blank"
+        }
+        require(createdRound >= 0 && visibleFromRound > createdRound) {
+            "Worker tool-repair diagnostic must be delayed to a later round"
+        }
+        require(remediationKey == ToolRepairRemediationDictionary.keyFor(code)) {
+            "Worker repair diagnostics must use checked-in remediation dictionary keys"
+        }
+        require(diagnosticHash.matches(Regex("[0-9a-f]{64}"))) {
+            "Worker tool-repair diagnostic hash is invalid"
+        }
+    }
+}
+
 /** Bounded predecessor note reference; note content remains retrieval-controlled. */
 @Serializable
 data class WorkerDeathNoteRef(
@@ -194,10 +241,16 @@ data class WorkerView(
     val assignedNode: RevealedNodeCard?,
     val groupFeedback: GroupFeedbackPacket?,
     val assignedToolSkeleton: ToolProjectSkeleton? = null,
+    val assignedToolOpportunityOriginAtlasHash: String? = null,
+    val assignedToolOpportunityCommitmentHash: String? = null,
+    val assignedToolRepairDiagnostics: List<WorkerToolRepairDiagnostic> = emptyList(),
+    val assignedToolRepairApproach: ApproachVector? = null,
     val allowedKnowledgeRefs: List<WorkerArtifactRef> = emptyList(),
     val availableToolCards: List<WorkerToolCard> = emptyList(),
     val predecessorNotes: List<WorkerDeathNoteRef> = emptyList(),
     val visibleShadowNodes: List<VisibleShadowNodeCard> = emptyList(),
+    /** Group-local hypotheses promoted only as provisional artifacts. */
+    val provisionalHypotheses: List<ProvisionalNovelHypothesis> = emptyList(),
     val forbiddenKnowledgeClasses: Set<VisibilityClass> = setOf(
         VisibilityClass.RECEIVER_PRIVATE,
         VisibilityClass.COUNCIL_PRIVATE,
@@ -213,19 +266,97 @@ data class WorkerView(
             val assignedOpportunity = requireNotNull(assignedNode?.toolOpportunity) {
                 "Assigned tool skeleton requires an assigned Atlas tool opportunity"
             }
+            val originAtlasHash = assignedToolOpportunityOriginAtlasHash
+                ?: visibleAtlasSkeleton.atlasHash
             val commitment = ToolOpportunityCommitment(
                 runId = runId,
-                atlasHash = visibleAtlasSkeleton.atlasHash,
+                atlasHash = originAtlasHash,
                 nodeId = requireNotNull(assignedNode).nodeId,
                 opportunity = assignedOpportunity
             ).withComputedHash()
+            val expectedSkeleton = ToolProjectSkeletonCompiler.compile(commitment)
             require(
-                skeleton.hasValidHash() &&
-                    skeleton.opportunityCommitmentHash == commitment.commitmentHash &&
-                    skeleton.implementationMode == assignedOpportunity.preferredImplementationMode
+                assignedToolOpportunityCommitmentHash == null ||
+                    assignedToolOpportunityCommitmentHash == commitment.commitmentHash
+            ) {
+                "Assigned tool opportunity commitment hash does not match its origin authority"
+            }
+            require(
+                skeleton == expectedSkeleton
             ) {
                 "Assigned tool skeleton must match the exact assigned Atlas opportunity"
             }
+        }
+        require(
+            assignedToolOpportunityOriginAtlasHash == null ||
+                assignedToolOpportunityCommitmentHash != null
+        ) {
+            "Origin-version tool authority requires its commitment hash"
+        }
+        require(
+            (
+                assignedToolOpportunityOriginAtlasHash == null &&
+                    assignedToolOpportunityCommitmentHash == null
+                ) ||
+                assignedToolSkeleton != null
+        ) {
+            "Assigned tool opportunity authority requires an assigned tool skeleton"
+        }
+        require(
+            assignedToolRepairDiagnostics.isEmpty() ||
+                assignedToolSkeleton != null
+        ) {
+            "Tool-repair diagnostics require an assigned tool opportunity"
+        }
+        require(assignedToolRepairDiagnostics.size <= 3) {
+            "Worker tool-repair diagnostics exceed the bounded worker context"
+        }
+        require(assignedToolRepairDiagnostics.all { diagnostic ->
+            val publicFields = assignedNode?.toolOpportunity
+                ?.let { it.requiredInputs + it.requiredOutputs }
+                ?.associateBy { it.name }
+                .orEmpty()
+            val affectedField = diagnostic.affectedPublicField?.let(publicFields::get)
+            diagnostic.runId == runId &&
+                diagnostic.groupId == groupId &&
+                diagnostic.authoringNodeId == assignedNode?.nodeId &&
+                diagnostic.opportunityId == assignedNode?.toolOpportunity?.opportunityId &&
+                diagnostic.opportunityCommitmentHash ==
+                assignedToolSkeleton?.opportunityCommitmentHash &&
+                diagnostic.visibleFromRound <= round &&
+                diagnostic.createdRound < round &&
+                (
+                    diagnostic.affectedPublicField == null ||
+                        affectedField != null
+                    ) &&
+                (
+                    diagnostic.publicQuantitySpec == null ||
+                        affectedField?.quantitySpec == diagnostic.publicQuantitySpec
+                    )
+        }) {
+            "Worker tool-repair diagnostics must match the exact prior assigned opportunity"
+        }
+        require(
+            assignedToolRepairDiagnostics.map(WorkerToolRepairDiagnostic::diagnosticId)
+                .distinct().size == assignedToolRepairDiagnostics.size
+        ) {
+            "Worker tool-repair diagnostics must have unique submissions"
+        }
+        require(
+            (assignedToolRepairDiagnostics.isEmpty() &&
+                assignedToolRepairApproach == null) ||
+                (
+                    assignedToolRepairDiagnostics.isNotEmpty() &&
+                        assignedToolRepairApproach != null &&
+                        assignedToolRepairApproach.hasValidHash() &&
+                        assignedToolRepairApproach.runId == runId &&
+                        assignedToolRepairApproach.groupId == groupId.value &&
+                        assignedToolRepairApproach.opportunityId ==
+                        assignedNode?.toolOpportunity?.opportunityId &&
+                        assignedToolRepairApproach.round == round
+                    )
+        ) {
+            "Worker tool-repair diagnostics require one exact sealed approach vector"
         }
         require(availableToolCards.isEmpty() || assignedNode != null) {
             "Promoted tool cards require an assigned Atlas node"
@@ -238,6 +369,22 @@ data class WorkerView(
                 availableToolCards.size
         ) {
             "Worker tool cards must be unique and scoped to the exact assigned node"
+        }
+        require(
+            provisionalHypotheses.map(ProvisionalNovelHypothesis::hypothesisId).distinct().size ==
+                provisionalHypotheses.size &&
+                provisionalHypotheses.map(ProvisionalNovelHypothesis::hypothesisId) ==
+                provisionalHypotheses.map(ProvisionalNovelHypothesis::hypothesisId).sorted()
+        ) {
+            "Worker provisional hypotheses must be unique and deterministically ordered"
+        }
+        require(provisionalHypotheses.all { hypothesis ->
+            hypothesis.runId == runId &&
+                hypothesis.groupId == groupId &&
+                hypothesis.round <= round &&
+                hypothesis.hasValidHash()
+        }) {
+            "Worker provisional hypotheses must be same-run/group, historical, and hash-valid"
         }
     }
 
@@ -349,6 +496,13 @@ enum class AgentLifecycleClassification {
     DAEMON
 }
 
+/** Typed lifecycle duty carried independently from the worker's [Role]. */
+@Serializable
+enum class AgentLifecycleDuty {
+    NONE,
+    ARTIFACT_OWNER
+}
+
 /** Immutable registration of one successfully launched agent lifecycle. */
 @Serializable
 data class AgentLifecycleRegistration(
@@ -360,7 +514,10 @@ data class AgentLifecycleRegistration(
     val generation: Int,
     val classification: AgentLifecycleClassification,
     val registeredAt: Instant,
-    val registrationHash: String = ""
+    val registrationHash: String = "",
+    val duty: AgentLifecycleDuty = AgentLifecycleDuty.NONE,
+    val workspaceId: String? = null,
+    val workspaceSourceHash: String? = null,
 ) {
     init {
         require(
@@ -368,7 +525,29 @@ data class AgentLifecycleRegistration(
                 groupId.value.isNotBlank() && agentId.value.isNotBlank() && role.isNotBlank()
         ) { "Agent lifecycle registration identity must not be blank" }
         require(generation >= 0) { "Agent lifecycle generation must not be negative" }
+        require((workspaceId == null) == (workspaceSourceHash == null)) {
+            "Workspace identity must contain both an id and a source hash"
+        }
+        require(workspaceId == null || workspaceId.isNotBlank()) {
+            "Workspace identity must not contain a blank id"
+        }
+        require(workspaceSourceHash == null || workspaceSourceHash.isNotBlank()) {
+            "Workspace identity must not contain a blank source hash"
+        }
+        if (duty == AgentLifecycleDuty.ARTIFACT_OWNER) {
+            require(role.equals("Builder", ignoreCase = true)) {
+                "Artifact-owner duty is reserved for Builder lifecycles"
+            }
+        }
     }
+
+    /** Alias used by artifact-specific callers without duplicating serialized state. */
+    val artifactWorkspaceId: String?
+        get() = workspaceId
+
+    /** Alias used by artifact-specific callers without duplicating serialized state. */
+    val artifactWorkspaceSourceHash: String?
+        get() = workspaceSourceHash
 
     /** Returns this registration with its deterministic self-hash. */
     fun withComputedHash(): AgentLifecycleRegistration =

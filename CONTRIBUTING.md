@@ -44,6 +44,28 @@ Run focused engine tests:
 Use module-specific tests while iterating. Provider-backed tests must remain opt-in and must never
 print or persist credentials.
 
+## Repository and Disk Hygiene
+
+Keep run outputs, databases, downloaded models, packaged distributions, and caches out of Git.
+Ignore rules cover generated directories at any depth and common archive/model formats;
+the Gradle wrapper JAR remains trackable.
+
+Before committing, run:
+
+```bash
+bash scripts/check_repository_hygiene.sh
+bash scripts/test_repository_hygiene.sh
+```
+
+CI rejects ignored paths that were force-added and any indexed file larger than 10 MiB.
+Git ignore rules cannot express a size limit, so the index check enforces that part of the policy.
+Required large source assets need an explicit storage/policy decision, not `git add -f`.
+
+Use lifecycle-managed temporary directories in tests and keep scratch work under a known ignored
+root. Repeated test workspaces and copied acceptance distributions can be much larger than source.
+Do not delete `runs`, `results`, provider output, or continuation archives as cache cleanup.
+Check active processes and distinguish disposable fixtures from evidence before deleting anything.
+
 ## Pull Requests
 
 - Keep changes focused and explain the product behavior they alter.

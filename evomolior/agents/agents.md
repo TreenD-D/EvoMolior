@@ -32,7 +32,9 @@ RPC bridge to the same agent-scoped typed registry; it does not use Koog-native 
 - Side-effecting tools supply typed staging-size, network, process, and message metadata before
   mutation. This avoids deriving security decisions from rendered Koog argument strings.
 - `FetchSourceTool` composes run approval with role-aware `AllowlistProxy` restrictions immediately
-  before fetch. Implicit redirects are disabled and destination URLs require a new approved call.
+  before fetch. The HTTP client never follows redirects itself; the tool re-runs that policy,
+  audit, and constitutional interception for each redirect hop (at most five) before any request
+  reaches it, and reports blocked destinations so they can be approved explicitly.
 - Native grader agents and RoundJudge use the same structured constitutional tool/action boundary;
   their decisions are written only to the isolated grader event log.
 - Criteria agents, target graders, and RoundJudge list and execute promoted tools only from their

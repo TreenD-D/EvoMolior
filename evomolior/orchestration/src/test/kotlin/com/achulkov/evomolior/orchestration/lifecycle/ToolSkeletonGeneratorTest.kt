@@ -1,7 +1,12 @@
 package com.achulkov.evomolior.orchestration.lifecycle
 
 import com.achulkov.evomolior.core.atlas.NodeId
+import com.achulkov.evomolior.core.atlas.FormulaDslReferenceSemantics
 import com.achulkov.evomolior.core.atlas.SimulationRecordBindings
+import com.achulkov.evomolior.core.atlas.ToolDslExpression
+import com.achulkov.evomolior.core.atlas.ToolDslKind
+import com.achulkov.evomolior.core.atlas.ToolDslOutput
+import com.achulkov.evomolior.core.atlas.ToolDslProgram
 import com.achulkov.evomolior.core.atlas.ToolImplementationMode
 import com.achulkov.evomolior.core.atlas.ToolBehavior
 import com.achulkov.evomolior.core.atlas.ToolOpportunity
@@ -10,6 +15,7 @@ import com.achulkov.evomolior.core.atlas.ToolOpportunityType
 import com.achulkov.evomolior.core.atlas.TypedField
 import com.achulkov.evomolior.core.atlas.TypedFieldType
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -124,7 +130,19 @@ class ToolSkeletonGeneratorTest {
                 )
             } else {
                 null
-            }
+            },
+            formulaDslReferenceSemantics =
+                FormulaDslReferenceSemantics.DIMENSIONAL_ANALYSIS_V1
+                    .takeIf { mode == ToolImplementationMode.FORMULA_DSL },
+            formulaDslReferenceProgram = ToolDslProgram(
+                kind = ToolDslKind.FORMULA,
+                outputs = listOf(
+                    ToolDslOutput(
+                        field = "result",
+                        expression = ToolDslExpression.Literal(JsonPrimitive(0.0))
+                    )
+                )
+            ).takeIf { mode == ToolImplementationMode.FORMULA_DSL }
         )
     )
 }

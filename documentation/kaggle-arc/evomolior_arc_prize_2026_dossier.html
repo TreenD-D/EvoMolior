@@ -1,0 +1,2397 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Source-grounded ARC Prize 2026 feasibility dossier and starter implementation for EvoMolior.">
+<title>EvoMolior × ARC Prize 2026 — Research Dossier & Submission Starters</title>
+<style>
+:root {
+  --bg:#081018; --panel:#0d1924; --panel2:#102231; --text:#e9f2f7; --muted:#9fb3c3;
+  --line:#294052; --cyan:#50d6ff; --teal:#55e0bd; --amber:#ffc56b; --red:#ff7f91;
+  --blue:#75a7ff; --violet:#c39cff; --green:#75e38a; --shadow:0 14px 45px rgba(0,0,0,.25);
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+  --sans:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+}
+html[data-theme="light"] { --bg:#f3f7fa; --panel:#fff; --panel2:#eef5f8; --text:#10202c; --muted:#536b7c; --line:#cbd9e2; --shadow:0 12px 35px rgba(20,45,60,.10); }
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body { margin:0; background:var(--bg); color:var(--text); font-family:var(--sans); line-height:1.62; }
+a { color:var(--cyan); text-underline-offset:3px; }
+a:hover { color:var(--teal); }
+code,pre { font-family:var(--mono); }
+code { color:var(--teal); }
+pre { margin:0; padding:1.1rem; overflow:auto; font-size:.83rem; line-height:1.55; background:#061019; color:#d9edf6; border:1px solid var(--line); border-radius:10px; max-height:520px; }
+.skip { position:absolute; left:-9999px; }
+.skip:focus { left:1rem; top:1rem; z-index:99; background:var(--panel); padding:.7rem 1rem; }
+.topbar { position:sticky; top:0; z-index:20; backdrop-filter:blur(14px); background:color-mix(in srgb,var(--bg) 86%,transparent); border-bottom:1px solid var(--line); }
+.topbar-inner { max-width:1500px; margin:auto; display:flex; align-items:center; gap:1rem; padding:.7rem 1.25rem; }
+.brand { font-weight:800; letter-spacing:.02em; white-space:nowrap; }
+.brand span { color:var(--cyan); }
+.topnav { display:flex; gap:.8rem; overflow:auto; flex:1; scrollbar-width:none; }
+.topnav a { color:var(--muted); text-decoration:none; font-size:.86rem; white-space:nowrap; padding:.35rem .5rem; border-radius:6px; }
+.topnav a:hover { background:var(--panel2); color:var(--text); }
+.actions { display:flex; gap:.45rem; }
+button,.button { border:1px solid var(--line); background:var(--panel2); color:var(--text); border-radius:8px; padding:.52rem .72rem; cursor:pointer; font:inherit; font-size:.84rem; text-decoration:none; display:inline-flex; align-items:center; gap:.35rem; }
+button:hover,.button:hover { border-color:var(--cyan); color:var(--cyan); }
+.hero { max-width:1500px; margin:auto; padding:5.2rem 1.4rem 3rem; display:grid; grid-template-columns:minmax(0,1.6fr) minmax(300px,.8fr); gap:2.2rem; align-items:center; }
+.eyebrow { color:var(--teal); text-transform:uppercase; letter-spacing:.16em; font-size:.75rem; font-weight:800; }
+h1 { font-size:clamp(2.5rem,6vw,5.7rem); letter-spacing:-.055em; line-height:.98; margin:.7rem 0 1.2rem; max-width:1100px; }
+.lede { font-size:clamp(1rem,2vw,1.28rem); color:var(--muted); max-width:900px; }
+.hero-callout { background:linear-gradient(145deg,var(--panel),var(--panel2)); border:1px solid var(--line); border-radius:18px; padding:1.3rem; box-shadow:var(--shadow); }
+.hero-callout h2 { margin-top:0; font-size:1.05rem; }
+.verdict { font-size:1.22rem; font-weight:800; color:var(--green); }
+.layout { max-width:1500px; margin:auto; display:grid; grid-template-columns:255px minmax(0,1fr); gap:2.2rem; padding:0 1.4rem 5rem; }
+aside { position:sticky; top:72px; height:calc(100vh - 90px); overflow:auto; padding:.8rem; border-right:1px solid var(--line); }
+aside h2 { font-size:.75rem; text-transform:uppercase; letter-spacing:.14em; color:var(--muted); }
+aside a { display:block; color:var(--muted); text-decoration:none; padding:.38rem .55rem; border-left:2px solid transparent; font-size:.86rem; }
+aside a:hover { color:var(--text); border-left-color:var(--cyan); background:var(--panel); }
+main { min-width:0; }
+section { padding:4rem 0 1.5rem; scroll-margin-top:70px; }
+section > h2 { font-size:clamp(1.8rem,3.5vw,3rem); letter-spacing:-.035em; margin:0 0 1rem; }
+section > h3,article h3 { margin-top:2rem; font-size:1.35rem; }
+.kicker { color:var(--cyan); font-weight:800; font-size:.78rem; letter-spacing:.13em; text-transform:uppercase; }
+.grid2,.grid3,.grid4 { display:grid; gap:1rem; }
+.grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.grid3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.grid4 { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:1.15rem; box-shadow:var(--shadow); }
+.card h3,.card h4 { margin:.1rem 0 .6rem; }
+.card p:last-child { margin-bottom:0; }
+.metric { font-size:2rem; font-weight:900; letter-spacing:-.04em; }
+.metric.cyan { color:var(--cyan); } .metric.amber { color:var(--amber); } .metric.green { color:var(--green); }
+.muted { color:var(--muted); }
+.small { font-size:.86rem; }
+.badge { display:inline-flex; padding:.18rem .5rem; border:1px solid var(--line); border-radius:999px; font-size:.72rem; font-weight:750; letter-spacing:.03em; }
+.badge.arc3 { color:var(--cyan); } .badge.arc2 { color:var(--amber); } .badge.both { color:var(--teal); }
+.badge.evidence { color:var(--green); } .badge.inference { color:var(--violet); } .badge.warning { color:var(--red); }
+.callout { border-left:4px solid var(--cyan); background:var(--panel2); padding:1rem 1.15rem; border-radius:0 12px 12px 0; margin:1.2rem 0; }
+.callout.warning { border-color:var(--amber); } .callout.danger { border-color:var(--red); } .callout.success { border-color:var(--green); }
+.table-wrap { overflow:auto; border:1px solid var(--line); border-radius:12px; }
+table { width:100%; border-collapse:collapse; background:var(--panel); font-size:.88rem; }
+th,td { padding:.72rem .78rem; text-align:left; vertical-align:top; border-bottom:1px solid var(--line); }
+th { position:sticky; top:0; background:var(--panel2); color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-size:.7rem; }
+tr:last-child td { border-bottom:0; }
+ul.compact,ol.compact { padding-left:1.25rem; }
+ul.compact li,ol.compact li { margin:.35rem 0; }
+.flow { display:flex; flex-wrap:wrap; align-items:center; gap:.55rem; margin:1rem 0; }
+.flow .node { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:.68rem .8rem; font-weight:700; font-size:.84rem; }
+.flow .arrow { color:var(--cyan); font-weight:900; }
+.scorebar { height:9px; background:var(--panel2); border-radius:9px; overflow:hidden; margin:.45rem 0 .7rem; }
+.scorebar > span { display:block; height:100%; background:linear-gradient(90deg,var(--cyan),var(--teal)); }
+details { border:1px solid var(--line); border-radius:12px; background:var(--panel); margin:.8rem 0; }
+summary { cursor:pointer; padding:.85rem 1rem; font-weight:800; }
+details > div { padding:0 1rem 1rem; }
+.code-head { display:flex; justify-content:space-between; align-items:center; gap:.6rem; padding:.55rem .7rem; background:var(--panel2); border:1px solid var(--line); border-bottom:0; border-radius:10px 10px 0 0; }
+.code-head + pre { border-radius:0 0 10px 10px; }
+.pill-row { display:flex; flex-wrap:wrap; gap:.45rem; }
+.pill { padding:.32rem .55rem; background:var(--panel2); border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:.78rem; }
+.compare { display:grid; grid-template-columns:1fr auto 1fr; gap:1rem; align-items:stretch; }
+.compare .versus { display:flex; align-items:center; font-weight:900; color:var(--muted); }
+.arc-grid { display:grid; gap:2px; width:min(100%,520px); background:#1f2b35; padding:5px; border:1px solid var(--line); border-radius:8px; image-rendering:pixelated; }
+.arc-cell { aspect-ratio:1; min-width:8px; }
+.grid-pair { display:grid; grid-template-columns:repeat(2,minmax(240px,1fr)); gap:1rem; }
+.grid-pair h4 { margin:.2rem 0 .5rem; }
+.timeline { position:relative; padding-left:1.4rem; }
+.timeline:before { content:""; position:absolute; left:.35rem; top:.3rem; bottom:.3rem; width:2px; background:var(--line); }
+.timeline-item { position:relative; margin:0 0 1.1rem; }
+.timeline-item:before { content:""; position:absolute; left:-1.36rem; top:.45rem; width:.7rem; height:.7rem; background:var(--cyan); border-radius:50%; box-shadow:0 0 0 4px var(--bg); }
+.mobile-note { display:none; }
+.filters { display:flex; flex-wrap:wrap; gap:.6rem; margin:1rem 0; }
+.filters input,.filters select { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:.55rem .7rem; font:inherit; }
+.footer { max-width:1500px; margin:auto; padding:2rem 1.4rem 4rem; color:var(--muted); border-top:1px solid var(--line); }
+@media (max-width:1050px) { .layout { grid-template-columns:1fr; } aside { display:none; } .grid4 { grid-template-columns:repeat(2,1fr); } .hero { grid-template-columns:1fr; padding-top:3.2rem; } }
+@media (max-width:720px) { .grid2,.grid3,.grid4,.grid-pair,.compare { grid-template-columns:1fr; } .compare .versus { justify-content:center; } .topnav { display:none; } .hero { padding-inline:1rem; } .layout { padding-inline:1rem; } th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6) { display:none; } .mobile-note { display:block; color:var(--muted); margin-top:.35rem; font-size:.78rem; } h1 { font-size:3rem; } }
+@media print { .topbar,aside,.actions,.filters,button { display:none!important; } body { background:#fff; color:#111; font-size:10pt; } .hero,.layout,.footer { max-width:none; display:block; padding:1rem; } section { page-break-before:auto; padding:1rem 0; } .card,details,table { box-shadow:none; background:#fff; color:#111; } a { color:#111; text-decoration:underline; } pre { max-height:none; white-space:pre-wrap; background:#f5f5f5; color:#111; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">Evo<span>Molior</span> × ARC 2026</div>
+    <nav class="topnav" aria-label="Primary">
+      <a href="#decision">Decision</a><a href="#compare">Compare</a><a href="#arc3">ARC-AGI-3</a><a href="#arc2">ARC-AGI-2</a><a href="#evomolior">EvoMolior</a><a href="#proposals">Proposals</a><a href="#prompts">Prompts</a><a href="#roadmap">Roadmap</a><a href="#sources">Sources</a>
+    </nav>
+    <div class="actions"><button id="themeBtn" title="Toggle theme">◐</button><button onclick="window.print()">Print</button></div>
+  </div>
+</header>
+
+<div class="hero">
+  <div>
+    <div class="eyebrow">Research frozen 23 July 2026 · extensive source-grounded dossier</div>
+    <h1>Turn scattered ARC research into two compact Kaggle solvers.</h1>
+    <p class="lede">A detailed review of ARC Prize 2026 ARC-AGI-3 and ARC-AGI-2, public discussions, open data, notebooks, solution lineages and current papers—translated into an evidence-first EvoMolior workflow, one original holdout per track, and submission-ready starter code.</p>
+    <div class="pill-row"><span class="pill">No internet at evaluation</span><span class="pill">Open-source eligibility</span><span class="pill">Exact pass@2</span><span class="pill">RHAE action efficiency</span><span class="pill">Public-score ≠ private proof</span></div>
+  </div>
+  <div class="hero-callout">
+    <h2>Bottom line</h2>
+    <div class="verdict">Proceed—with a split architecture.</div>
+    <p><strong>Use EvoMolior outside Kaggle</strong> to harvest evidence, audit code, generate holdouts, schedule ablations and preserve negative results. <strong>Distil the winning mechanisms</strong> into a small offline agent for ARC-AGI-3 and a bounded program/test-time-adaptation portfolio for ARC-AGI-2.</p>
+    <a class="button" href="evomolior_arc_prize_2026_starter_pack.zip">Starter pack ZIP</a>
+    <a class="button" href="#proposals">See both designs</a>
+  </div>
+</div>
+
+<div class="layout">
+<aside aria-label="Contents">
+  <h2>Contents</h2>
+  <a href="#decision">1. Executive decision</a>
+  <a href="#boundary">2. Evidence & naming boundary</a>
+  <a href="#compare">3. Competition comparison</a>
+  <a href="#arc3">4. ARC-AGI-3 deep review</a>
+  <a href="#arc2">5. ARC-AGI-2 deep review</a>
+  <a href="#evomolior">6. EvoMolior fit</a>
+  <a href="#proposals">7. Submission proposals</a>
+  <a href="#holdouts">8. Original holdouts</a>
+  <a href="#prompts">9. Prompt pack</a>
+  <a href="#experiments">10. Experiment plan</a>
+  <a href="#roadmap">11. Roadmap</a>
+  <a href="#checklists">12. Kaggle checklists</a>
+  <a href="#sources">13. Sources</a>
+</aside>
+
+<main id="main">
+<section id="decision">
+  <div class="kicker">Executive decision</div>
+  <h2>Yes, EvoMolior is useful—but the society should be the laboratory, not automatically the submitted runtime.</h2>
+  <div class="grid4">
+    <div class="card"><div class="metric green">9/10</div><h3>Research synthesis</h3><p class="muted">Strong fit for source gathering, provenance, contradiction handling and code archaeology.</p></div>
+    <div class="card"><div class="metric cyan">9/10</div><h3>Experiment orchestration</h3><p class="muted">Specialised roles, critic gates, durable memory and blind scoring map directly to ablations.</p></div>
+    <div class="card"><div class="metric amber">6/10</div><h3>ARC-AGI-3 runtime</h3><p class="muted">Useful only after distillation; a full society can waste wall-clock and model context.</p></div>
+    <div class="card"><div class="metric amber">5/10</div><h3>ARC-AGI-2 runtime</h3><p class="muted">Heavy agents are unlikely to beat compact exact search/TTT under fixed Kaggle resources without strong compression.</p></div>
+  </div>
+  <div class="callout success"><strong>Recommended portfolio:</strong> allocate the near-term engineering push to ARC-AGI-3 until Milestone #2 on 30 September, while reproducing and instrumenting ARC-AGI-2 baselines in parallel. After the milestone, rebalance toward the 2 November final deadline. <span class="badge inference">[I] strategy</span></div>
+  <div class="grid2">
+    <article class="card">
+      <span class="badge arc3">ARC-AGI-3</span>
+      <h3>EvoWorld-3</h3>
+      <p><strong>Verified Hypothesis Ledger Agent:</strong> legal-action guards, rare-object probes, state-action frontier graph, compact causal summaries, one-step prediction and replay verification. Add a small local model only when the symbolic controller plateaus.</p>
+      <div class="scorebar"><span style="width:76%"></span></div><p class="small muted">Best immediate demonstration path: visible learning and action-efficiency gains on original mutations.</p>
+    </article>
+    <article class="card">
+      <span class="badge arc2">ARC-AGI-2</span>
+      <h3>EvoARC-2</h3>
+      <p><strong>Diverse Program Portfolio:</strong> independent object/pixel/geometry/neural hypotheses, exact execution gates, DSL-coverage routing, bounded test-time adaptation and two structurally different guesses.</p>
+      <div class="scorebar"><span style="width:83%"></span></div><p class="small muted">Best long-run research fit: EvoMolior can search and evaluate the heterogeneous design space.</p>
+    </article>
+  </div>
+</section>
+
+<section id="boundary">
+  <div class="kicker">Grounding and uncertainty</div>
+  <h2>What is source-supported, what is inferred, and what is original here.</h2>
+  <div class="grid3">
+    <div class="card"><span class="badge evidence">Evidence</span><h3>Official facts</h3><p>Rules, dates, formats, metric definitions, dataset sizes and starter contracts are taken from ARC Prize/Kaggle/official repositories. Source IDs begin with <code>O</code>.</p></div>
+    <div class="card"><span class="badge warning">Dated snapshots</span><h3>Leaderboard/notebook data</h3><p>Scores and runtimes are snapshots from 23 July 2026. They are partial-public signals, not private-set validation. Source IDs begin with <code>K</code>.</p></div>
+    <div class="card"><span class="badge inference">Proposal</span><h3>Original synthesis</h3><p>EvoWorld-3, EvoARC-2, both synthetic holdouts, prompts, schemas, scoring plans and starter code are newly composed implementation proposals.</p></div>
+  </div>
+  <div class="callout warning"><strong>Naming mismatch:</strong> the supplied project document calls the system <em>EvoKammer</em>; the request calls it <em>EvoMolior</em>. This report uses EvoMolior as the intended/current name while mapping capabilities from the supplied EvoKammer material. No EvoMolior source repository or API contract was supplied, so code-level integration claims remain assumptions.</div>
+  <p>The attached material supports a society built around specialised Researchers, Planners, Critics, Archivists, Connectors, Outliers and Graders; durable KB/KG/staging/event-log substrates; critic-gated writes; dead-end memory; blind scoring; budget ledgers; sandboxing and reproducible artifacts. It also warns about deterministic file emission, tool-call reliability, score-shape conformance, context limits and critic latency. Those strengths and caveats drive the architecture below.</p>
+</section>
+
+<section id="compare">
+  <div class="kicker">Competition map</div>
+  <h2>These are fundamentally different optimization problems.</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Dimension</th><th>ARC-AGI-3</th><th>ARC-AGI-2</th><th>Implication for EvoMolior</th></tr></thead>
+    <tbody>
+      <tr><td>Problem type</td><td>Interactive, turn-based, no instructions</td><td>Static few-shot grid transformation</td><td>Keep distinct runtime stacks; share only research, abstractions and evaluation infrastructure.</td></tr>
+      <tr><td>What earns score</td><td>Completion plus action efficiency versus humans (RHAE)</td><td>Exact grid match; either of exactly two attempts</td><td>ARC-3 values information per action; ARC-2 values candidate coverage and exactness.</td></tr>
+      <tr><td>Observation/action</td><td>64×64, 16 colors; five keys, optional coordinate select and undo</td><td>1–30×1–30 grids, symbols 0–9; emit output grid</td><td>ARC-3 needs causal state; ARC-2 needs relational program induction.</td></tr>
+      <tr><td>Public data</td><td>25 public, 55 semi-private, 55 fully private environments</td><td>1,000 public train, 120 public eval; 120 semi-private and 120 private described in guide</td><td>Build mutation holdouts; do not use public evaluation feedback as a tuning loop.</td></tr>
+      <tr><td>Submission</td><td>Official starter packages <code>agent/my_agent.py</code> into a notebook/parquet artifact</td><td>Kaggle notebook writes JSON with two outputs per test input</td><td>Make schema/runtime validation first-class.</td></tr>
+      <tr><td>Research bottleneck</td><td>Exploration, world-model accuracy, goal inference, transfer</td><td>Representation/DSL coverage, search, TTT, candidate selection</td><td>Assign different EvoMolior societies and graders.</td></tr>
+      <tr><td>Main proxy trap</td><td>Public game completion or local success may not predict hidden RHAE</td><td>Public notebook score can reward overfit ensembles and correlated guesses</td><td>Use original family mutations and sealed task splits.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="grid4" style="margin-top:1rem">
+    <div class="card"><div class="metric cyan">$850K</div><p>ARC-AGI-3 total announced prizes.</p></div>
+    <div class="card"><div class="metric amber">$700K</div><p>ARC-AGI-2 total announced prizes.</p></div>
+    <div class="card"><div class="metric green">69 days</div><p>From research freeze to ARC-AGI-3 Milestone #2.</p></div>
+    <div class="card"><div class="metric green">102 days</div><p>From research freeze to final submissions.</p></div>
+  </div>
+</section>
+
+<section id="arc3">
+  <div class="kicker">Deep review · ARC-AGI-3</div>
+  <h2>An online system-identification problem disguised as small games.</h2>
+  <div class="callout"><strong>Official target:</strong> interact with novel environments without instructions, efficiently explore, build predictive models, infer goals, and plan/execute. The metric squares action efficiency, so repeated no-ops and meandering are punished sharply.</div>
+  <div class="grid3">
+    <div class="card"><h3>Environment</h3><ul class="compact"><li>Series of levels; state changes synchronously after actions.</li><li>64×64 grid; 16 possible colors; transitions may include frame sequences.</li><li>Five simple key actions, coordinate selection, and optional undo.</li></ul></div>
+    <div class="card"><h3>RHAE</h3><p><code>level = min(1.15, (human_actions / ai_actions)²)</code></p><p>Later levels receive higher weights. Internal reasoning/tool calls do not count as environment actions, but they still consume runtime and memory.</p></div>
+    <div class="card"><h3>Development loop</h3><ul class="compact"><li>Python 3.12.</li><li>Edit only <code>agent/my_agent.py</code>.</li><li><code>make play-local</code> then <code>make submit</code>.</li><li>Local engine is the recommended high-throughput test mode.</li></ul></div>
+  </div>
+
+  <h3>Public solution evidence: what appears to matter</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>System</th><th>Mechanisms</th><th>Useful lesson</th><th>Boundary</th></tr></thead>
+    <tbody>
+      <tr><td><strong>The Duck</strong><br><code>O15/K01/K02</code></td><td>Qwen 3.6 27B FP8; Python REPL; image + ASCII + segmentation; recent-history eviction.</td><td>A generic lightweight harness and flexible representations can outperform a large hand-built tool layer.</td><td>Milestone/public results; model and runtime are substantial. “Tools hurt” is not universal.</td></tr>
+      <tr><td><strong>Reki</strong><br><code>O15/K03</code></td><td>Vision policy, JSON action, 1–4 step plan queue, reflection memory, rare-color click prior, dead signatures, legal guards.</td><td>Structured output repair and cheap no-op suppression are high-leverage and easy to ablate.</td><td>Heuristics may overfit visual affordances; test on inert rare objects.</td></tr>
+      <tr><td><strong>Forge</strong><br><code>O15/K04</code></td><td>Configurable generator/arbiter/confidence machinery around a similar VLM policy.</td><td>Profile-driven ablation is excellent engineering practice.</td><td>The best run disabled much extra machinery: complexity must earn its keep.</td></tr>
+      <tr><td><strong>Graph exploration</strong><br><code>P01/K05</code></td><td>Frame segmentation, salience, directed state graph, shortest path to untested state-action pairs.</td><td>Explicit state coverage is a strong model-free baseline and diagnostic.</td><td>State hashing/abstraction can alias or explode; public-preview results do not prove 2026 hidden performance.</td></tr>
+      <tr><td><strong>StochasticGoose</strong><br><code>O16/C02/K06</code></td><td>CNN predicts which actions change the frame.</td><td>Learning “what causes information” can beat random exploration without understanding the full goal.</td><td>Frame change is only a proxy; animations and harmful changes can mislead.</td></tr>
+      <tr><td><strong>Executable world model</strong><br><code>P02/P03</code></td><td>Persistent Python model, simplification, replay verification and planning.</td><td>Falsifiable models and replay checks directly target false global theories.</td><td>Verification costs resources; recent public-set saturation is explicitly not held-out proof.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Failure modes that should become tests, not prose</h3>
+  <div class="grid3">
+    <div class="card"><span class="badge warning">F1</span><h3>True local effect, false world model</h3><p>The agent notices a change but generalizes the wrong causal rule. Test one-step prediction, counterfactual actions and falsifier retention.</p></div>
+    <div class="card"><span class="badge warning">F2</span><h3>Wrong abstraction from familiar games</h3><p>The system imports a chess/platformer/menu story instead of describing observable mechanics. Require representation-neutral hypotheses and evidence spans.</p></div>
+    <div class="card"><span class="badge warning">F3</span><h3>Solved the level, did not learn the game</h3><p>A win does not constrain later policy. Force a post-win consolidation step and measure next-level first-attempt efficiency.</p></div>
+  </div>
+
+  <h3>Current public landscape—snapshot, not a target function</h3>
+  <p>On 23 July, Kaggle’s public leaderboard snapshot showed 1.86, 1.61 and 1.60 at the top. Public notebooks ranged from compact 0.09–0.46 baselines through Forge’s 0.86 milestone artifact and a later Duck v7 snapshot at 1.23. These values are useful for pipeline sanity and rough ordering only; the leaderboard is partial and the official recap warns local public-game checks can be a poor proxy.</p>
+  <div class="callout danger"><strong>Do not optimize to “frame changed.”</strong> Optimize a hierarchy: legal action → non-no-op information → causal prediction → goal progress → efficient level completion → transfer. A state change that corrupts inventory or creates a loop may be worse than a reversible no-op.</div>
+</section>
+
+<section id="arc2">
+  <div class="kicker">Deep review · ARC-AGI-2</div>
+  <h2>An exact program-induction problem with two chances—and a brutal coverage bottleneck.</h2>
+  <div class="callout"><strong>Official target:</strong> reach 85% on the private evaluation set within Kaggle efficiency limits. Every test input receives exactly two predicted grids; either exact match earns the point. Partial pixel correctness earns nothing in competition scoring.</div>
+  <div class="grid3">
+    <div class="card"><h3>Data</h3><ul class="compact"><li>1,000 public training tasks.</li><li>120 public evaluation tasks.</li><li>Separate semi-private and fully private tiers.</li><li>Typical task: ~3 demonstrations and 1–2 test inputs.</li></ul></div>
+    <div class="card"><h3>Why direct prompting is weak</h3><p>The official guide reports direct LLM prompting below 5%. Stronger lines use discrete program search, DSL synthesis, synthetic augmentation, active/test-time adaptation and ensembles.</p></div>
+    <div class="card"><h3>Correct unit of search</h3><p>Not “the final grid” alone. Search over an executable hypothesis that reproduces every demonstration, then apply it to test inputs. Treat any failed train pair as a hard counterexample.</p></div>
+  </div>
+
+  <h3>What 2025 winners and 2026 research imply</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Lineage</th><th>Reported result</th><th>Mechanism</th><th>Design implication</th></tr></thead>
+    <tbody>
+      <tr><td>NVARC</td><td>24.03% private in 2025</td><td>Multi-stage synthetic data and test-time neural refinement, with ARChitect/TRM lineage.</td><td>Reproduce first; instrument data generation, seed variance and routing rather than blindly stacking models.</td></tr>
+      <tr><td>ARChitects</td><td>16.53% private in 2025</td><td>2D masked diffusion, recursive inference and self-scoring.</td><td>Native 2D inductive bias and per-task refinement remain central.</td></tr>
+      <tr><td>MindsAI</td><td>12.64% private in 2025</td><td>Test-time training, augmentation and tokenizer dropout.</td><td>Robustness to representation/tokenization can matter as much as scale.</td></tr>
+      <tr><td>Refinement loop</td><td>Official 2025 theme</td><td>Generate → execute/verify → mutate/refine per task.</td><td>This is a natural EvoMolior society pattern, but the loop must compile to bounded runtime.</td></tr>
+      <tr><td>Modality-driven search</td><td>Paper reports 72.9% semi-private at $38.99/task</td><td>Independent text, image and code candidates; holistic comparison.</td><td>Protect hypothesis diversity. Treat the number as author-reported and too expensive for direct Kaggle transfer.</td></tr>
+      <tr><td>Structural early stopping</td><td>Paper reports major compute savings</td><td>Grid descriptors predict doomed trajectories and reveal zero-step DSL failures.</td><td>Route coverage failures to a different solver family; do not merely increase beam width.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>2026 Kaggle public artifacts—useful operational signals</h3>
+  <div class="grid2">
+    <div class="card"><h3>Score/runtime snapshots</h3><ul class="compact"><li>NVARC reproduction: 30.97, 27m06s, L4×4.</li><li>“Failed in AIMO”: 33.89, 26m11s, L4×4.</li><li>BlackCat guard: best 28.89.</li><li>NVARC improved derivative: 18.19, 33m06s.</li></ul><p class="small muted">These scores are public/partial and notebook versions can change.</p></div>
+    <div class="card"><h3>Submission reliability warning</h3><p>A discussion reports a notebook that completed in about 15 minutes with no error yet scored 0.0. The practical lesson is unambiguous: validate keys, test-row counts, integer grids and both attempt fields against the live sample before spending a submission.</p></div>
+  </div>
+
+  <h3>Two attempts should be a portfolio, not a duplicate</h3>
+  <div class="compare">
+    <div class="card"><h3>Attempt 1</h3><p>Lowest-complexity exact-fit symbolic/object program, or the best calibrated neural/TTT candidate when symbolic coverage is absent.</p></div>
+    <div class="versus">+</div>
+    <div class="card"><h3>Attempt 2</h3><p>A different representation and failure family: e.g. neural versus symbolic, object-centric versus pixel-centric, or a different invariant—not a temperature variant that emits the same grid.</p></div>
+  </div>
+  <div class="callout danger"><strong>Leakage discipline:</strong> the official repository explicitly says not to look at public evaluation tasks or repeatedly tune using their score. Build task-family splits and generated mutations from training data; keep a sealed evaluator controlled by an Archivist/Grader role.</div>
+</section>
+
+<section id="evomolior">
+  <div class="kicker">Project fit</div>
+  <h2>Map EvoMolior’s durable society to a reproducible ARC research factory.</h2>
+  <div class="flow" aria-label="EvoMolior research pipeline">
+    <div class="node">Official/Kaggle/papers/code</div><div class="arrow">→</div>
+    <div class="node">Evidence & license ledger</div><div class="arrow">→</div>
+    <div class="node">Competing role groups</div><div class="arrow">→</div>
+    <div class="node">Critic-gated experiments</div><div class="arrow">→</div>
+    <div class="node">Blind holdout grading</div><div class="arrow">→</div>
+    <div class="node">Compact offline distillation</div>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>EvoMolior/EvoKammer capability</th><th>ARC use</th><th>Required hardening</th></tr></thead>
+    <tbody>
+      <tr><td>Researchers + Connectors</td><td>Mine official docs, Kaggle notebooks, papers and code; connect repeated mechanisms across sources.</td><td>Deduplicate claims; store exact source/version/date; separate copied mechanism from inferred value.</td></tr>
+      <tr><td>Critics + staging</td><td>Reject unsupported leaderboard generalizations and candidates that fail demonstrations.</td><td>Schema validators, deterministic retries and executable counterexamples.</td></tr>
+      <tr><td>Archivists + dead ends</td><td>Preserve failed prompts, unexpressible DSL transitions, no-op signatures and runtime crashes.</td><td>Content-addressed artifacts and clear deprecation states.</td></tr>
+      <tr><td>Outliers + competing groups</td><td>Protect different representations: pixel, object, graph, code, neural and causal.</td><td>Blind grading must reward complementary solves, not stylistic novelty.</td></tr>
+      <tr><td>Graders + blind scoring</td><td>ARC-2 pass@2/compute; ARC-3 RHAE, no-op and transfer metrics.</td><td>Never expose sealed holdout answers to proposer groups.</td></tr>
+      <tr><td>Budget ledger</td><td>Route expensive VLM/TTT only to tasks/states where expected value exceeds cost.</td><td>Wall-clock/GPU memory/action budget must be captured automatically.</td></tr>
+      <tr><td>Durable KB/KG/event log</td><td>Claims, method dependencies, experiment lineage, licenses and failures survive disposable agents.</td><td>Compact summaries for Kaggle; do not serialize the whole research history into inference context.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Recommended society topology</h3>
+  <div class="grid3">
+    <div class="card"><h3>Group A · Evidence</h3><p>Official Spec Cartographer, Source Scout, License Auditor. Produces immutable facts and rule-change alerts.</p></div>
+    <div class="card"><h3>Group B · Mechanisms</h3><p>Code Archaeologist, Reproduction Engineer, Representation Researcher. Produces runnable baseline components.</p></div>
+    <div class="card"><h3>Group C · Falsification</h3><p>Failure Analyst, Adversarial Task Generator, Blind Grader. Produces counterexamples and ablations.</p></div>
+  </div>
+  <div class="callout warning"><strong>Critical architectural rule:</strong> multi-agent outside, compact solver inside. The submitted code may contain a model or multiple solver branches, but it should not pay for broad web research, repetitive agent debate or unbounded context at evaluation time.</div>
+</section>
+
+<section id="proposals">
+  <div class="kicker">Composed submissions</div>
+  <h2>Two concrete architectures, each backed by an original holdout.</h2>
+
+  <article class="card" style="margin-bottom:1.2rem">
+    <span class="badge arc3">Proposal A · ARC-AGI-3</span>
+    <h3>EvoWorld-3 — Verified Hypothesis Ledger Agent</h3>
+    <p><strong>Thesis:</strong> combine the low-cost mechanisms that repeatedly survive public evidence—legal guards, no-op suppression, salience, graph frontiers and compact reflection—with explicit falsifiers and transfer checks that address the official failure modes.</p>
+    <div class="grid3">
+      <div><h4>Perception</h4><ul class="compact"><li>Canonical frame hash and delta.</li><li>Connected components, color rarity and motion.</li><li>Separate static layout from controllable entities.</li></ul></div>
+      <div><h4>World model</h4><ul class="compact"><li>State-action graph.</li><li>Action-effect beta counts.</li><li>Hypothesis fields: rule, evidence, prediction, falsifier, confidence.</li></ul></div>
+      <div><h4>Policy</h4><ul class="compact"><li>Reversible information gain.</li><li>Frontier path planning.</li><li>Goal-progress probes after causal confidence.</li></ul></div>
+    </div>
+    <p><strong>Decision hierarchy:</strong> invalid/illegal filter → death/reset handling → detect previous effect → update/falsify ledger → exploit known goal path if confident → test highest-value frontier → rare-color coordinate probe → deterministic fallback.</p>
+    <p><strong>Optional local model:</strong> a compact VLM/LLM receives only cropped components, deltas and the ledger when the controller is uncertain. Its output is constrained to legal structured actions and must compete against the symbolic policy in an arbiter ablation.</p>
+    <div class="code-head"><strong>Drop-in starter: <code>arc3/agent_my_agent.py</code></strong><button class="copy" data-target="arc3code">Copy</button></div>
+    <pre id="arc3code">&quot;&quot;&quot;EvoWorld-3: verified-hypothesis-ledger starter for ARC-AGI-3.
+
+Drop this file into the official ARC-AGI-3 Kaggle Starter as agent/my_agent.py.
+It is a compact, offline scaffold—not a claimed competitive solution. The design
+combines four public lessons:
+  1. obey legal-action constraints and repair invalid plans;
+  2. prefer actions/clicks that have produced state changes;
+  3. track a directed state-action graph and avoid repeated no-ops; and
+  4. preserve a compact causal ledger across levels instead of full transcripts.
+
+The implementation deliberately uses introspection when reading frame grids so it
+can fail safely if the framework representation changes. Test it against the live
+starter before submission and adapt _extract_grid() to the installed arcengine.
+&quot;&quot;&quot;
+from __future__ import annotations
+
+import math
+from collections import Counter, defaultdict
+from typing import Any, Iterable
+
+from arcengine import FrameData, GameAction, GameState
+from agents.agent import Agent
+
+
+class MyAgent(Agent):
+    MAX_ACTIONS = 140
+
+    def __init__(self, *args: Any, **kwargs: Any) -&gt; None:
+        super().__init__(*args, **kwargs)
+        self.previous_state: tuple[tuple[int, ...], ...] | None = None
+        self.previous_action_key: str | None = None
+        self.last_level_count = 0
+        self.noop_streak = 0
+        self.state_visits: Counter[tuple[tuple[int, ...], ...]] = Counter()
+        self.state_action_trials: Counter[tuple[tuple[tuple[int, ...], ...], str]] = Counter()
+        self.action_changes: Counter[str] = Counter()
+        self.action_trials: Counter[str] = Counter()
+        self.clicked_signatures: Counter[tuple[int, int, int]] = Counter()
+        self.level_summaries: list[dict[str, Any]] = []
+        self.step_index = 0
+
+    @property
+    def name(self) -&gt; str:
+        return f&#x27;{super().name}.evoworld3-ledger-v0.{self.MAX_ACTIONS}&#x27;
+
+    def is_done(self, frames: list[FrameData], latest_frame: FrameData) -&gt; bool:
+        return latest_frame.state is GameState.WIN
+
+    @staticmethod
+    def _as_grid(value: Any) -&gt; tuple[tuple[int, ...], ...] | None:
+        if hasattr(value, &#x27;tolist&#x27;):
+            value = value.tolist()
+        if isinstance(value, dict):
+            for key in (&#x27;frame&#x27;, &#x27;grid&#x27;, &#x27;observation&#x27;, &#x27;pixels&#x27;, &#x27;data&#x27;):
+                if key in value:
+                    result = MyAgent._as_grid(value[key])
+                    if result is not None:
+                        return result
+            return None
+        if not isinstance(value, (list, tuple)) or not value:
+            return None
+        rows = []
+        for row in value:
+            if hasattr(row, &#x27;tolist&#x27;):
+                row = row.tolist()
+            if not isinstance(row, (list, tuple)) or not row:
+                return None
+            try:
+                rows.append(tuple(int(x) for x in row))
+            except (TypeError, ValueError):
+                return None
+        if len({len(row) for row in rows}) != 1:
+            return None
+        return tuple(rows)
+
+    @classmethod
+    def _extract_grid(cls, latest_frame: FrameData) -&gt; tuple[tuple[int, ...], ...] | None:
+        for attr in (&#x27;frame&#x27;, &#x27;grid&#x27;, &#x27;observation&#x27;, &#x27;pixels&#x27;, &#x27;data&#x27;):
+            if hasattr(latest_frame, attr):
+                result = cls._as_grid(getattr(latest_frame, attr))
+                if result is not None:
+                    return result
+        try:
+            if hasattr(latest_frame, &#x27;model_dump&#x27;):
+                return cls._as_grid(latest_frame.model_dump())
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _difference(a: tuple[tuple[int, ...], ...] | None,
+                    b: tuple[tuple[int, ...], ...] | None) -&gt; int:
+        if a is None or b is None or len(a) != len(b) or len(a[0]) != len(b[0]):
+            return int(a != b)
+        return sum(x != y for ra, rb in zip(a, b) for x, y in zip(ra, rb))
+
+    @staticmethod
+    def _action_key(action: GameAction) -&gt; str:
+        return getattr(action, &#x27;name&#x27;, None) or str(getattr(action, &#x27;value&#x27;, action))
+
+    @staticmethod
+    def _legal_actions(latest_frame: FrameData) -&gt; list[GameAction]:
+        raw = getattr(latest_frame, &#x27;available_actions&#x27;, None)
+        legal: list[GameAction] = []
+        if raw:
+            for value in raw:
+                if isinstance(value, GameAction):
+                    legal.append(value)
+                    continue
+                for action in GameAction:
+                    if value in (getattr(action, &#x27;name&#x27;, None), getattr(action, &#x27;value&#x27;, None), str(action)):
+                        legal.append(action)
+                        break
+        if not legal:
+            legal = [action for action in GameAction if action is not GameAction.RESET]
+        # Preserve order while deduplicating enum values.
+        seen = set()
+        result = []
+        for action in legal:
+            key = MyAgent._action_key(action)
+            if key not in seen and action is not GameAction.RESET:
+                result.append(action)
+                seen.add(key)
+        return result
+
+    def _record_transition(self, state: tuple[tuple[int, ...], ...] | None) -&gt; None:
+        if self.previous_state is None or self.previous_action_key is None:
+            return
+        changed = self._difference(self.previous_state, state) &gt; 0
+        self.action_trials[self.previous_action_key] += 1
+        if changed:
+            self.action_changes[self.previous_action_key] += 1
+            self.noop_streak = 0
+        else:
+            self.noop_streak += 1
+
+    def _consolidate_level(self, levels_completed: int) -&gt; None:
+        if levels_completed &lt;= self.last_level_count:
+            return
+        best_actions = sorted(
+            self.action_trials,
+            key=lambda key: (self.action_changes[key] / max(1, self.action_trials[key]), self.action_changes[key]),
+            reverse=True,
+        )[:4]
+        self.level_summaries.append({
+            &#x27;level&#x27;: levels_completed,
+            &#x27;high_effect_actions&#x27;: best_actions,
+            &#x27;states_seen&#x27;: len(self.state_visits),
+            &#x27;no_op_streak_at_win&#x27;: self.noop_streak,
+        })
+        # Preserve global action-effect priors, but clear level-specific graph state.
+        self.state_visits.clear()
+        self.state_action_trials.clear()
+        self.clicked_signatures.clear()
+        self.previous_state = None
+        self.previous_action_key = None
+        self.noop_streak = 0
+        self.last_level_count = levels_completed
+
+    def _rare_click(self, grid: tuple[tuple[int, ...], ...], action: GameAction) -&gt; GameAction:
+        counts = Counter(value for row in grid for value in row)
+        candidates = []
+        for r, row in enumerate(grid):
+            for c, color in enumerate(row):
+                if color == 0:
+                    continue
+                signature = (r, c, color)
+                # Rare colors and never-tried coordinates are information-rich.
+                score = 4.0 / max(1, counts[color])
+                score += 2.0 / (1 + self.clicked_signatures[signature])
+                # Mild center preference avoids repeatedly clicking borders/background frames.
+                center_r, center_c = (len(grid) - 1) / 2, (len(row) - 1) / 2
+                distance = abs(r - center_r) + abs(c - center_c)
+                score += 0.1 / (1 + distance)
+                candidates.append((score, -r, -c, r, c, color))
+        if candidates:
+            _, _, _, r, c, color = max(candidates)
+        else:
+            r = len(grid) // 2
+            c = len(grid[0]) // 2
+            color = grid[r][c]
+        self.clicked_signatures[(r, c, color)] += 1
+        action.set_data({&#x27;x&#x27;: int(c), &#x27;y&#x27;: int(r)})
+        action.reasoning = {
+            &#x27;policy&#x27;: &#x27;rare-color information probe&#x27;,
+            &#x27;coordinate&#x27;: [int(c), int(r)],
+            &#x27;color&#x27;: int(color),
+            &#x27;noop_streak&#x27;: self.noop_streak,
+        }
+        return action
+
+    def _simple_action_score(self, state: tuple[tuple[int, ...], ...], action: GameAction) -&gt; float:
+        key = self._action_key(action)
+        local_trials = self.state_action_trials[(state, key)]
+        global_trials = self.action_trials[key]
+        global_effect = self.action_changes[key] / max(1, global_trials)
+        novelty = 3.0 / (1 + local_trials)
+        learned_effect = 1.5 * global_effect
+        exploration_bonus = 0.35 / math.sqrt(1 + global_trials)
+        undo = getattr(GameAction, &#x27;ACTION7&#x27;, None)
+        undo_penalty = -1.0 if undo is not None and action is undo and self.noop_streak &lt; 3 else 0.0
+        return novelty + learned_effect + exploration_bonus + undo_penalty
+
+    def choose_action(self, frames: list[FrameData], latest_frame: FrameData) -&gt; GameAction:
+        self.step_index += 1
+        if latest_frame.state in (GameState.NOT_PLAYED, GameState.GAME_OVER):
+            self.previous_state = None
+            self.previous_action_key = None
+            action = GameAction.RESET
+            action.reasoning = &#x27;reset initial/dead state&#x27;
+            return action
+
+        levels_completed = int(getattr(latest_frame, &#x27;levels_completed&#x27;, 0) or 0)
+        self._consolidate_level(levels_completed)
+        state = self._extract_grid(latest_frame)
+        self._record_transition(state)
+
+        legal = self._legal_actions(latest_frame)
+        if not legal:
+            action = GameAction.RESET
+            action.reasoning = &#x27;no legal actions exposed; safe reset&#x27;
+            return action
+
+        if state is None:
+            # Framework shape changed: remain valid and deterministic rather than crash.
+            action = min(legal, key=self._action_key)
+            if action.is_complex():
+                action.set_data({&#x27;x&#x27;: 32, &#x27;y&#x27;: 32})
+            action.reasoning = &#x27;frame grid unavailable; deterministic legal fallback&#x27;
+            self.previous_action_key = self._action_key(action)
+            return action
+
+        self.state_visits[state] += 1
+        complex_actions = [action for action in legal if action.is_complex()]
+        simple_actions = [action for action in legal if not action.is_complex()]
+
+        # Use coordinate selection early, after repeated no-ops, or when simple actions
+        # have already been tested from this state.
+        all_simple_tested = simple_actions and all(
+            self.state_action_trials[(state, self._action_key(action))] &gt; 0 for action in simple_actions
+        )
+        if complex_actions and (self.step_index &lt;= 2 or self.noop_streak &gt;= 2 or all_simple_tested):
+            action = self._rare_click(state, complex_actions[0])
+        elif simple_actions:
+            action = max(simple_actions, key=lambda a: (self._simple_action_score(state, a), self._action_key(a)))
+            action.reasoning = {
+                &#x27;policy&#x27;: &#x27;state-action frontier&#x27;,
+                &#x27;state_visits&#x27;: self.state_visits[state],
+                &#x27;local_trials&#x27;: self.state_action_trials[(state, self._action_key(action))],
+                &#x27;global_effect_rate&#x27;: self.action_changes[self._action_key(action)] / max(1, self.action_trials[self._action_key(action)]),
+                &#x27;noop_streak&#x27;: self.noop_streak,
+                &#x27;levels_remembered&#x27;: len(self.level_summaries),
+            }
+        else:
+            action = self._rare_click(state, complex_actions[0])
+
+        key = self._action_key(action)
+        self.state_action_trials[(state, key)] += 1
+        self.previous_state = state
+        self.previous_action_key = key
+        return action
+</pre>
+  </article>
+
+  <article class="card">
+    <span class="badge arc2">Proposal B · ARC-AGI-2</span>
+    <h3>EvoARC-2 — Diverse Program Portfolio with Equivariant Two-Guess Selection</h3>
+    <p><strong>Thesis:</strong> turn EvoMolior’s competing groups into genuinely independent candidate generators, then use exact train execution and structural diversity—not persuasive reasoning—to select two outputs.</p>
+    <div class="grid3">
+      <div><h4>Candidate families</h4><ul class="compact"><li>Typed object/geometry DSL.</li><li>Pixel/dihedral/color programs.</li><li>Native 2D neural/TTT branch.</li><li>Code or textual hypothesis branch, offline only.</li></ul></div>
+      <div><h4>Hard gates</h4><ul class="compact"><li>Exact every demonstration.</li><li>Output shape/color validity.</li><li>Equivariance under task-consistent transforms.</li><li>Runtime and memory cap.</li></ul></div>
+      <div><h4>Ranking</h4><ul class="compact"><li>Minimum description length.</li><li>Mutation stability.</li><li>Family calibration.</li><li>Attempt-2 marginal diversity.</li></ul></div>
+    </div>
+    <p><strong>Routing rule:</strong> before expanding search, test whether the DSL has any valid first transition. Zero-step coverage failures move to neural/code/object alternatives. Structurally doomed trajectories stop early and return budget to hard but viable tasks.</p>
+    <div class="code-head"><strong>Submission writer: <code>arc2/solver_submission.py</code></strong><button class="copy" data-target="arc2code">Copy</button></div>
+    <pre id="arc2code">#!/usr/bin/env python3
+&quot;&quot;&quot;EvoARC-2: an offline, standard-library ARC-AGI-2 submission starter.
+
+This is a *research baseline*, not a claimed leaderboard solution. It implements:
+  * a small portfolio of executable candidate programs;
+  * exact verification on every training pair;
+  * two-output selection with a preference for different solver families;
+  * strict submission validation; and
+  * a self-test on the original Contextual Symbolic Relay holdout in this pack.
+
+Kaggle entry point:
+    python solver_submission.py
+
+Local validation:
+    python solver_submission.py --self-test \
+      --challenge ../synthetic/arc2_contextual_symbolic_relay_challenge.json \
+      --solution ../synthetic/arc2_contextual_symbolic_relay_solution.json
+&quot;&quot;&quot;
+from __future__ import annotations
+
+import argparse
+import copy
+import glob
+import json
+import os
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Iterable, Sequence
+
+Grid = list[list[int]]
+Transform = Callable[[Grid], Grid]
+
+
+def is_grid(value: object) -&gt; bool:
+    if not isinstance(value, list) or not value or not all(isinstance(row, list) for row in value):
+        return False
+    widths = {len(row) for row in value}
+    if len(widths) != 1 or 0 in widths or len(value) &gt; 30 or next(iter(widths)) &gt; 30:
+        return False
+    return all(isinstance(x, int) and 0 &lt;= x &lt;= 9 for row in value for x in row)
+
+
+def exact(a: Grid, b: Grid) -&gt; bool:
+    return a == b
+
+
+def pixel_score(a: Grid, b: Grid) -&gt; float:
+    if not is_grid(a) or not is_grid(b) or len(a) != len(b) or len(a[0]) != len(b[0]):
+        return 0.0
+    total = len(a) * len(a[0])
+    return sum(x == y for ra, rb in zip(a, b) for x, y in zip(ra, rb)) / total
+
+
+def identity(g: Grid) -&gt; Grid:
+    return copy.deepcopy(g)
+
+
+def hflip(g: Grid) -&gt; Grid:
+    return [list(reversed(row)) for row in g]
+
+
+def vflip(g: Grid) -&gt; Grid:
+    return list(reversed(copy.deepcopy(g)))
+
+
+def rot90(g: Grid) -&gt; Grid:
+    return [list(row) for row in zip(*reversed(g))]
+
+
+def rot180(g: Grid) -&gt; Grid:
+    return rot90(rot90(g))
+
+
+def rot270(g: Grid) -&gt; Grid:
+    return rot90(rot180(g))
+
+
+def transpose(g: Grid) -&gt; Grid:
+    return [list(row) for row in zip(*g)]
+
+
+def crop_bbox(g: Grid) -&gt; Grid:
+    cells = [(r, c) for r, row in enumerate(g) for c, value in enumerate(row) if value != 0]
+    if not cells:
+        return [[0]]
+    r0, r1 = min(r for r, _ in cells), max(r for r, _ in cells)
+    c0, c1 = min(c for _, c in cells), max(c for _, c in cells)
+    return [row[c0:c1 + 1] for row in g[r0:r1 + 1]]
+
+
+def crop_right_of_separator(g: Grid) -&gt; Grid:
+    h, w = len(g), len(g[0])
+    candidates = []
+    for c in range(w - 1):
+        col = [g[r][c] for r in range(h)]
+        if len(set(col)) == 1 and col[0] != 0:
+            candidates.append(c)
+    if not candidates:
+        raise ValueError(&#x27;no separator column&#x27;)
+    c = candidates[-1]
+    out = [row[c + 1:] for row in g]
+    if not is_grid(out):
+        raise ValueError(&#x27;empty crop&#x27;)
+    return out
+
+
+def infer_color_map(train: Sequence[dict]) -&gt; dict[int, int] | None:
+    mapping: dict[int, int] = {}
+    for pair in train:
+        inp, out = pair[&#x27;input&#x27;], pair[&#x27;output&#x27;]
+        if len(inp) != len(out) or len(inp[0]) != len(out[0]):
+            return None
+        for a, b in zip((x for row in inp for x in row), (x for row in out for x in row)):
+            if a in mapping and mapping[a] != b:
+                return None
+            mapping[a] = b
+    return mapping
+
+
+def contextual_symbolic_relay(g: Grid) -&gt; Grid:
+    &quot;&quot;&quot;Solve the original holdout family included with this pack.
+
+    Layout: a 4-column legend, one constant separator column, then a workspace.
+    The two colored legend markers encode a displacement vector. The marker color
+    present in the workspace is the source; the other is the target. Move the
+    source object by the vector, recolor it to the target, crop the legend, and
+    preserve unrelated objects.
+    &quot;&quot;&quot;
+    h, w = len(g), len(g[0])
+    if w &lt; 7:
+        raise ValueError(&#x27;too narrow&#x27;)
+    sep = None
+    for c in range(1, w - 1):
+        col = [g[r][c] for r in range(h)]
+        if len(set(col)) == 1 and col[0] != 0:
+            sep = c
+            break
+    if sep is None or sep &lt; 2:
+        raise ValueError(&#x27;separator not found&#x27;)
+    legend = [row[:sep] for row in g]
+    workspace = [row[sep + 1:] for row in g]
+    markers = [(r, c, legend[r][c]) for r in range(h) for c in range(sep) if legend[r][c] != 0]
+    by_color: dict[int, list[tuple[int, int]]] = {}
+    for r, c, color in markers:
+        by_color.setdefault(color, []).append((r, c))
+    if len(by_color) != 2 or any(len(v) != 1 for v in by_color.values()):
+        raise ValueError(&#x27;expected exactly two unique legend markers&#x27;)
+    counts = Counter(value for row in workspace for value in row)
+    colors = list(by_color)
+    present = [color for color in colors if counts[color] &gt; 0]
+    if len(present) != 1:
+        raise ValueError(&#x27;source color is ambiguous&#x27;)
+    source = present[0]
+    target = colors[0] if colors[1] == source else colors[1]
+    sr, sc = by_color[source][0]
+    tr, tc = by_color[target][0]
+    dy, dx = tr - sr, tc - sc
+    source_cells = [(r, c) for r, row in enumerate(workspace) for c, value in enumerate(row) if value == source]
+    if not source_cells:
+        raise ValueError(&#x27;source object absent&#x27;)
+    out = copy.deepcopy(workspace)
+    for r, c in source_cells:
+        out[r][c] = 0
+    for r, c in source_cells:
+        nr, nc = r + dy, c + dx
+        if not (0 &lt;= nr &lt; len(out) and 0 &lt;= nc &lt; len(out[0])):
+            raise ValueError(&#x27;displacement exits grid&#x27;)
+        out[nr][nc] = target
+    return out
+
+
+@dataclass(frozen=True)
+class Program:
+    name: str
+    family: str
+    complexity: int
+    fn: Transform
+
+    def apply(self, grid: Grid) -&gt; Grid:
+        out = self.fn(copy.deepcopy(grid))
+        if not is_grid(out):
+            raise ValueError(f&#x27;{self.name} produced an invalid grid&#x27;)
+        return out
+
+
+def candidate_programs(task: dict) -&gt; list[Program]:
+    programs = [
+        Program(&#x27;identity&#x27;, &#x27;geometric&#x27;, 1, identity),
+        Program(&#x27;hflip&#x27;, &#x27;geometric&#x27;, 2, hflip),
+        Program(&#x27;vflip&#x27;, &#x27;geometric&#x27;, 2, vflip),
+        Program(&#x27;rot90&#x27;, &#x27;geometric&#x27;, 2, rot90),
+        Program(&#x27;rot180&#x27;, &#x27;geometric&#x27;, 2, rot180),
+        Program(&#x27;rot270&#x27;, &#x27;geometric&#x27;, 2, rot270),
+        Program(&#x27;transpose&#x27;, &#x27;geometric&#x27;, 2, transpose),
+        Program(&#x27;crop_bbox&#x27;, &#x27;object&#x27;, 3, crop_bbox),
+        Program(&#x27;crop_right_of_separator&#x27;, &#x27;layout&#x27;, 3, crop_right_of_separator),
+        Program(&#x27;contextual_symbolic_relay&#x27;, &#x27;relational&#x27;, 6, contextual_symbolic_relay),
+    ]
+    train = task.get(&#x27;train&#x27;, [])
+    if train and all(pair.get(&#x27;output&#x27;) == train[0].get(&#x27;output&#x27;) for pair in train):
+        constant = copy.deepcopy(train[0][&#x27;output&#x27;])
+        programs.append(Program(&#x27;constant_output&#x27;, &#x27;memorized-shape&#x27;, 5, lambda _g, x=constant: copy.deepcopy(x)))
+    mapping = infer_color_map(train)
+    if mapping is not None:
+        programs.append(Program(
+            &#x27;global_color_map&#x27;, &#x27;color&#x27;, 3,
+            lambda g, m=mapping: [[m.get(value, value) for value in row] for row in g],
+        ))
+    return programs
+
+
+def score_program(program: Program, train: Sequence[dict]) -&gt; tuple[int, float]:
+    exact_count = 0
+    pixels = 0.0
+    for pair in train:
+        try:
+            prediction = program.apply(pair[&#x27;input&#x27;])
+        except Exception:
+            return -1, -1.0
+        exact_count += int(exact(prediction, pair[&#x27;output&#x27;]))
+        pixels += pixel_score(prediction, pair[&#x27;output&#x27;])
+    return exact_count, pixels / max(1, len(train))
+
+
+def ranked_programs(task: dict) -&gt; list[Program]:
+    train = task.get(&#x27;train&#x27;, [])
+    scored = []
+    for program in candidate_programs(task):
+        exact_count, pixels = score_program(program, train)
+        if exact_count &gt;= 0:
+            scored.append((exact_count, pixels, -program.complexity, program.name, program))
+    scored.sort(reverse=True, key=lambda item: item[:4])
+    return [item[-1] for item in scored]
+
+
+def fallback_outputs(inp: Grid) -&gt; list[Grid]:
+    outputs = [identity(inp)]
+    try:
+        outputs.append(crop_bbox(inp))
+    except Exception:
+        pass
+    zero = [[0 for _ in row] for row in inp]
+    outputs.append(zero)
+    return outputs
+
+
+def select_two_outputs(task: dict, test_input: Grid) -&gt; tuple[Grid, Grid, list[str]]:
+    train_len = len(task.get(&#x27;train&#x27;, []))
+    candidates: list[tuple[Grid, Program, bool]] = []
+    for program in ranked_programs(task):
+        exact_count, _ = score_program(program, task.get(&#x27;train&#x27;, []))
+        try:
+            out = program.apply(test_input)
+        except Exception:
+            continue
+        candidates.append((out, program, exact_count == train_len))
+
+    chosen: list[tuple[Grid, str, str]] = []
+    # First: simplest exact program, otherwise best approximate program.
+    for out, program, is_exact in candidates:
+        if is_exact:
+            chosen.append((out, program.name, program.family))
+            break
+    if not chosen and candidates:
+        out, program, _ = candidates[0]
+        chosen.append((out, program.name, program.family))
+
+    # Second: prefer an exact program from a different family and a different output.
+    for out, program, is_exact in candidates:
+        if chosen and out == chosen[0][0]:
+            continue
+        if is_exact and (not chosen or program.family != chosen[0][2]):
+            chosen.append((out, program.name, program.family))
+            break
+    # Then any distinct candidate.
+    if len(chosen) &lt; 2:
+        for out, program, _ in candidates:
+            if all(out != existing[0] for existing in chosen):
+                chosen.append((out, program.name, program.family))
+                break
+    # Finally deterministic fallbacks.
+    if len(chosen) &lt; 2:
+        for index, out in enumerate(fallback_outputs(test_input)):
+            if all(out != existing[0] for existing in chosen):
+                chosen.append((out, f&#x27;fallback_{index}&#x27;, &#x27;fallback&#x27;))
+            if len(chosen) == 2:
+                break
+    if len(chosen) == 1:
+        chosen.append((copy.deepcopy(chosen[0][0]), &#x27;duplicate_last_resort&#x27;, &#x27;fallback&#x27;))
+    if not chosen:
+        zero = [[0 for _ in row] for row in test_input]
+        chosen = [(zero, &#x27;zero&#x27;, &#x27;fallback&#x27;), (copy.deepcopy(zero), &#x27;zero_duplicate&#x27;, &#x27;fallback&#x27;)]
+    return chosen[0][0], chosen[1][0], [chosen[0][1], chosen[1][1]]
+
+
+def build_submission(challenges: dict) -&gt; tuple[dict, dict]:
+    submission: dict = {}
+    provenance: dict = {}
+    for task_id, task in challenges.items():
+        task_predictions = []
+        task_provenance = []
+        for test_pair in task.get(&#x27;test&#x27;, []):
+            attempt_1, attempt_2, names = select_two_outputs(task, test_pair[&#x27;input&#x27;])
+            task_predictions.append({&#x27;attempt_1&#x27;: attempt_1, &#x27;attempt_2&#x27;: attempt_2})
+            task_provenance.append({&#x27;attempt_1_program&#x27;: names[0], &#x27;attempt_2_program&#x27;: names[1]})
+        submission[task_id] = task_predictions
+        provenance[task_id] = task_provenance
+    validate_submission(challenges, submission)
+    return submission, provenance
+
+
+def validate_submission(challenges: dict, submission: dict) -&gt; None:
+    if set(challenges) != set(submission):
+        missing = set(challenges) - set(submission)
+        extra = set(submission) - set(challenges)
+        raise ValueError(f&#x27;task key mismatch: missing={missing}, extra={extra}&#x27;)
+    for task_id, task in challenges.items():
+        rows = submission[task_id]
+        if not isinstance(rows, list) or len(rows) != len(task.get(&#x27;test&#x27;, [])):
+            raise ValueError(f&#x27;{task_id}: expected one submission row per test input&#x27;)
+        for index, row in enumerate(rows):
+            if set(row) != {&#x27;attempt_1&#x27;, &#x27;attempt_2&#x27;}:
+                raise ValueError(f&#x27;{task_id}[{index}]: expected exactly attempt_1/attempt_2&#x27;)
+            for key in (&#x27;attempt_1&#x27;, &#x27;attempt_2&#x27;):
+                if not is_grid(row[key]):
+                    raise ValueError(f&#x27;{task_id}[{index}].{key}: invalid grid&#x27;)
+
+
+def find_first(patterns: Iterable[str]) -&gt; str | None:
+    for pattern in patterns:
+        hits = sorted(glob.glob(pattern, recursive=True))
+        if hits:
+            return hits[0]
+    return None
+
+
+def locate_competition_file() -&gt; str:
+    explicit = os.environ.get(&#x27;ARC_AGI2_CHALLENGES&#x27;)
+    if explicit:
+        return explicit
+    patterns = [
+        &#x27;/kaggle/input/arc-prize-2026-arc-agi-2/arc-agi_evaluation_challenges.json&#x27;,
+        &#x27;/kaggle/input/competitions/arc-prize-2026-arc-agi-2/arc-agi_evaluation_challenges.json&#x27;,
+        &#x27;/kaggle/input/**/arc-agi_evaluation_challenges.json&#x27;,
+    ]
+    path = find_first(patterns)
+    if not path:
+        raise FileNotFoundError(&#x27;Could not find arc-agi_evaluation_challenges.json; set ARC_AGI2_CHALLENGES.&#x27;)
+    return path
+
+
+def score_against_solution(submission: dict, solution: dict) -&gt; tuple[int, int]:
+    solved = 0
+    total = 0
+    for task_id, rows in solution.items():
+        for i, expected_row in enumerate(rows):
+            expected = expected_row[&#x27;output&#x27;]
+            pred = submission[task_id][i]
+            solved += int(pred[&#x27;attempt_1&#x27;] == expected or pred[&#x27;attempt_2&#x27;] == expected)
+            total += 1
+    return solved, total
+
+
+def main() -&gt; None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(&#x27;--challenge&#x27;, help=&#x27;Challenge JSON; defaults to Kaggle competition input.&#x27;)
+    parser.add_argument(&#x27;--solution&#x27;, help=&#x27;Optional local solution JSON for scoring.&#x27;)
+    parser.add_argument(&#x27;--output&#x27;, default=&#x27;/kaggle/working/submission.json&#x27;)
+    parser.add_argument(&#x27;--provenance&#x27;, default=&#x27;/kaggle/working/program_provenance.json&#x27;)
+    parser.add_argument(&#x27;--self-test&#x27;, action=&#x27;store_true&#x27;)
+    args = parser.parse_args()
+
+    challenge_path = args.challenge or locate_competition_file()
+    challenges = json.loads(Path(challenge_path).read_text())
+    submission, provenance = build_submission(challenges)
+
+    output_path = Path(args.output)
+    provenance_path = Path(args.provenance)
+    if args.self_test and args.output == &#x27;/kaggle/working/submission.json&#x27;:
+        output_path = Path(&#x27;submission.selftest.json&#x27;)
+        provenance_path = Path(&#x27;program_provenance.selftest.json&#x27;)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    provenance_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(submission, separators=(&#x27;,&#x27;, &#x27;:&#x27;)))
+    provenance_path.write_text(json.dumps(provenance, indent=2))
+    print(f&#x27;Wrote {output_path} with {len(submission)} tasks&#x27;)
+
+    if args.solution:
+        solution = json.loads(Path(args.solution).read_text())
+        solved, total = score_against_solution(submission, solution)
+        print(f&#x27;Local exact pass@2: {solved}/{total} = {solved / max(1, total):.3f}&#x27;)
+        if args.self_test and solved != total:
+            raise SystemExit(&#x27;Self-test failed&#x27;)
+
+
+if __name__ == &#x27;__main__&#x27;:
+    main()
+</pre>
+  </article>
+</section>
+
+<section id="holdouts">
+  <div class="kicker">One original evaluation task per track</div>
+  <h2>Research should be judged on tasks it did not design around.</h2>
+  <div class="callout success">Both tasks below are original and intentionally not copied from ARC Prize data. They are starting points for a mutation generator, not substitutes for official evaluation.</div>
+
+  <article class="card">
+    <span class="badge arc3">Interactive holdout</span>
+    <h3>Switch–Lock Relay</h3>
+    <p>Three levels isolate matching key/door mechanics, decoy inventory plus ACTION5, and cross-level transfer through a key converter. The mutation suite rotates layouts, permutes colors, inserts inert salient objects and can remap controls. This directly tests whether a system converts a win into a reusable causal model.</p>
+    <div class="grid3">
+      <div><h4>L1 · Match</h4><pre>###########
+#P..a.....#
+#..#####..#
+#..A...G..#
+###########</pre></div>
+      <div><h4>L2 · Drop decoy</h4><pre>#############
+#P.r........#
+###.#########
+#..a........#
+#..A...G....#
+#############</pre></div>
+      <div><h4>L3 · Convert</h4><pre>#############
+#P.a........#
+###.#########
+#..C........#
+#..B...G....#
+#############</pre></div>
+    </div>
+    <p><strong>Metrics:</strong> solved levels, weighted RHAE-style score, no-op rate, actions until first useful transition, predictor accuracy, hypothesis revisions, post-win transfer, runtime and state-memory size.</p>
+    <details><summary>Environment JSON</summary><div><div class="code-head"><strong>arc3_switch_lock_relay.json</strong><button class="copy" data-target="arc3json">Copy</button></div><pre id="arc3json">{
+  &quot;name&quot;: &quot;Switch–Lock Relay&quot;,
+  &quot;status&quot;: &quot;Original synthetic holdout; not an ARC Prize environment&quot;,
+  &quot;purpose&quot;: &quot;Evaluate exploration memory, action-effect learning, inventory mechanics, transfer and action efficiency.&quot;,
+  &quot;actions&quot;: {
+    &quot;1&quot;: &quot;up&quot;,
+    &quot;2&quot;: &quot;down&quot;,
+    &quot;3&quot;: &quot;left&quot;,
+    &quot;4&quot;: &quot;right&quot;,
+    &quot;5&quot;: &quot;drop held key&quot;
+  },
+  &quot;symbols&quot;: {
+    &quot;#&quot;: &quot;wall&quot;,
+    &quot;.&quot;: &quot;floor&quot;,
+    &quot;P&quot;: &quot;player start&quot;,
+    &quot;G&quot;: &quot;goal&quot;,
+    &quot;a&quot;: &quot;green key&quot;,
+    &quot;r&quot;: &quot;red key&quot;,
+    &quot;b&quot;: &quot;blue key&quot;,
+    &quot;A&quot;: &quot;green door&quot;,
+    &quot;R&quot;: &quot;red door&quot;,
+    &quot;B&quot;: &quot;blue door&quot;,
+    &quot;C&quot;: &quot;converter: green key becomes blue key&quot;
+  },
+  &quot;levels&quot;: [
+    {
+      &quot;id&quot;: &quot;L1-match&quot;,
+      &quot;learning_target&quot;: &quot;Pick a key; a door opens only for the matching key.&quot;,
+      &quot;grid&quot;: [
+        &quot;###########&quot;,
+        &quot;#P..a.....#&quot;,
+        &quot;#..#####..#&quot;,
+        &quot;#..A...G..#&quot;,
+        &quot;###########&quot;
+      ]
+    },
+    {
+      &quot;id&quot;: &quot;L2-drop-decoy&quot;,
+      &quot;learning_target&quot;: &quot;Inventory holds one key; discard a decoy with ACTION5 before collecting the useful key.&quot;,
+      &quot;grid&quot;: [
+        &quot;#############&quot;,
+        &quot;#P.r........#&quot;,
+        &quot;###.#########&quot;,
+        &quot;#..a........#&quot;,
+        &quot;#..A...G....#&quot;,
+        &quot;#############&quot;
+      ]
+    },
+    {
+      &quot;id&quot;: &quot;L3-convert&quot;,
+      &quot;learning_target&quot;: &quot;A converter changes the held green key into the blue key required by the next door.&quot;,
+      &quot;grid&quot;: [
+        &quot;#############&quot;,
+        &quot;#P.a........#&quot;,
+        &quot;###.#########&quot;,
+        &quot;#..C........#&quot;,
+        &quot;#..B...G....#&quot;,
+        &quot;#############&quot;
+      ]
+    }
+  ],
+  &quot;holdout_mutations&quot;: [
+    &quot;rotate or reflect layouts while preserving mechanics&quot;,
+    &quot;permute all key/door colors&quot;,
+    &quot;move converter and decoy while preserving reachability&quot;,
+    &quot;change action-to-direction mapping after level 1&quot;,
+    &quot;add visually salient but inert objects&quot;
+  ]
+}</pre></div></details>
+    <details><summary>Standalone BFS/evaluation simulator</summary><div><div class="code-head"><strong>arc3_switch_lock_relay.py</strong><button class="copy" data-target="arc3sim">Copy</button></div><pre id="arc3sim">#!/usr/bin/env python3
+&quot;&quot;&quot;Standalone evaluator for the original Switch–Lock Relay holdout.
+
+This simulator is intentionally independent of ARC Prize game files. It lets an
+EvoMolior research run test causal memory, transfer and action efficiency without
+reading or tuning on official evaluation environments.
+&quot;&quot;&quot;
+from __future__ import annotations
+
+import argparse
+import json
+from collections import deque
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable
+
+MOVE = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
+KEYS = {&#x27;a&#x27;, &#x27;b&#x27;, &#x27;r&#x27;}
+DOORS = {&#x27;A&#x27;: &#x27;a&#x27;, &#x27;B&#x27;: &#x27;b&#x27;, &#x27;R&#x27;: &#x27;r&#x27;}
+
+
+@dataclass(frozen=True)
+class State:
+    row: int
+    col: int
+    inventory: str | None
+    removed_keys: frozenset[tuple[int, int]]
+    won: bool = False
+
+
+class SwitchLockLevel:
+    def __init__(self, spec: dict):
+        self.id = spec[&#x27;id&#x27;]
+        self.grid = spec[&#x27;grid&#x27;]
+        widths = {len(row) for row in self.grid}
+        if len(widths) != 1:
+            raise ValueError(f&#x27;{self.id}: ragged grid&#x27;)
+        starts = [(r, c) for r, row in enumerate(self.grid) for c, value in enumerate(row) if value == &#x27;P&#x27;]
+        if len(starts) != 1:
+            raise ValueError(f&#x27;{self.id}: expected one P&#x27;)
+        self.start = State(*starts[0], None, frozenset(), False)
+
+    def tile(self, state: State, row: int, col: int) -&gt; str:
+        value = self.grid[row][col]
+        if (row, col) in state.removed_keys and value in KEYS:
+            return &#x27;.&#x27;
+        return value
+
+    def step(self, state: State, action: int) -&gt; State:
+        if state.won:
+            return state
+        if action == 5:
+            return State(state.row, state.col, None, state.removed_keys, False)
+        if action not in MOVE:
+            return state
+        dr, dc = MOVE[action]
+        nr, nc = state.row + dr, state.col + dc
+        if not (0 &lt;= nr &lt; len(self.grid) and 0 &lt;= nc &lt; len(self.grid[0])):
+            return state
+        target = self.tile(state, nr, nc)
+        if target == &#x27;#&#x27;:
+            return state
+        if target in DOORS and state.inventory != DOORS[target]:
+            return state
+
+        inventory = state.inventory
+        removed = set(state.removed_keys)
+        if target in DOORS:
+            inventory = None
+        elif target in KEYS and (nr, nc) not in removed and inventory is None:
+            inventory = target
+            removed.add((nr, nc))
+        elif target == &#x27;C&#x27; and inventory == &#x27;a&#x27;:
+            inventory = &#x27;b&#x27;
+        won = target == &#x27;G&#x27;
+        return State(nr, nc, inventory, frozenset(removed), won)
+
+    def render(self, state: State) -&gt; str:
+        rows = [list(row) for row in self.grid]
+        for r, c in state.removed_keys:
+            if rows[r][c] in KEYS:
+                rows[r][c] = &#x27;.&#x27;
+        rows[state.row][state.col] = &#x27;P&#x27;
+        return &#x27;\n&#x27;.join(&#x27;&#x27;.join(row) for row in rows) + f&#x27;\ninventory={state.inventory!r} won={state.won}&#x27;
+
+
+def shortest_path(level: SwitchLockLevel, max_nodes: int = 100_000) -&gt; list[int]:
+    queue = deque([(level.start, [])])
+    seen = {level.start}
+    while queue:
+        state, path = queue.popleft()
+        if state.won:
+            return path
+        for action in (1, 2, 3, 4, 5):
+            nxt = level.step(state, action)
+            if nxt not in seen:
+                seen.add(nxt)
+                queue.append((nxt, path + [action]))
+                if len(seen) &gt; max_nodes:
+                    raise RuntimeError(&#x27;state-space cap exceeded&#x27;)
+    raise RuntimeError(f&#x27;{level.id}: no solution&#x27;)
+
+
+def replay(level: SwitchLockLevel, actions: Iterable[int]) -&gt; State:
+    state = level.start
+    for action in actions:
+        state = level.step(state, int(action))
+    return state
+
+
+def level_score(human_actions: int, agent_actions: int, won: bool) -&gt; float:
+    if not won or agent_actions &lt;= 0:
+        return 0.0
+    return min(1.15, (human_actions / agent_actions) ** 2)
+
+
+def weighted_game_score(scores: list[float]) -&gt; float:
+    weights = list(range(1, len(scores) + 1))
+    return sum(w * s for w, s in zip(weights, scores)) / sum(weights)
+
+
+def validate_file(path: str) -&gt; list[SwitchLockLevel]:
+    data = json.loads(Path(path).read_text())
+    levels = [SwitchLockLevel(spec) for spec in data[&#x27;levels&#x27;]]
+    for level in levels:
+        path_actions = shortest_path(level)
+        final = replay(level, path_actions)
+        if not final.won:
+            raise AssertionError(f&#x27;{level.id}: BFS replay did not win&#x27;)
+    return levels
+
+
+def main() -&gt; None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(&#x27;spec&#x27;, nargs=&#x27;?&#x27;, default=str(Path(__file__).with_name(&#x27;arc3_switch_lock_relay.json&#x27;)))
+    parser.add_argument(&#x27;--actions&#x27;, help=&#x27;Comma-separated action list to replay on each level.&#x27;)
+    args = parser.parse_args()
+    levels = validate_file(args.spec)
+    print(&#x27;Switch–Lock Relay validation&#x27;)
+    scores = []
+    for level in levels:
+        optimum = shortest_path(level)
+        print(f&#x27;{level.id}: optimal actions={len(optimum)} path={optimum}&#x27;)
+        if args.actions:
+            agent_actions = [int(x) for x in args.actions.split(&#x27;,&#x27;) if x.strip()]
+            won = replay(level, agent_actions).won
+            score = level_score(len(optimum), len(agent_actions), won)
+            scores.append(score)
+            print(f&#x27;  supplied actions: won={won}, level_score={score:.4f}&#x27;)
+        else:
+            scores.append(1.0)
+    print(f&#x27;weighted score (oracle paths): {weighted_game_score(scores):.4f}&#x27;)
+
+
+if __name__ == &#x27;__main__&#x27;:
+    main()
+</pre></div></details>
+  </article>
+
+  <article class="card" style="margin-top:1.2rem">
+    <span class="badge arc2">Static holdout</span>
+    <h3>Contextual Symbolic Relay</h3>
+    <p>An 8×12 input contains a two-marker legend, a gray separator and a workspace. The marker color present in the workspace is the source; the other is the target. The vector between legend markers specifies how to translate the source object. The solver crops the workspace, moves and recolors the object, and preserves unrelated objects. Training examples use right, left and up; the test requires down.</p>
+    <div class="grid-pair">
+      <div><h4>Test input</h4><div class="arc-grid" data-grid='[[0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 7, 0], [0, 0, 1, 0, 5, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 5, 0, 1, 1, 0, 0, 0, 0], [0, 0, 9, 0, 5, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 5, 0, 0, 0, 0, 4, 0, 0], [0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0]]'></div></div>
+      <div><h4>Expected output</h4><div class="arc-grid" data-grid='[[0, 0, 0, 0, 0, 7, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 9, 9, 0, 0, 0, 0], [0, 9, 0, 0, 0, 0, 0], [0, 0, 0, 0, 4, 0, 0], [0, 0, 0, 0, 0, 0, 0]]'></div></div>
+    </div>
+    <p><strong>What it tests:</strong> parsing an explicit sub-grid legend, identifying a relational source by context, vector transfer, output cropping, recoloring and distractor preservation. Holdout mutations change colors, vector lengths, object shapes and separator positions.</p>
+    <details><summary>Challenge JSON</summary><div><div class="code-head"><strong>arc2_contextual_symbolic_relay_challenge.json</strong><button class="copy" data-target="relayjson">Copy</button></div><pre id="relayjson">{
+  &quot;evomolior_contextual_symbolic_relay&quot;: {
+    &quot;train&quot;: [
+      {
+        &quot;input&quot;: [
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            2,
+            0,
+            4,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            8,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            2,
+            2,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            2,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            3,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ],
+        &quot;output&quot;: [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            8,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            4,
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            4,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            3,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      {
+        &quot;input&quot;: [
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            7,
+            0,
+            3,
+            5,
+            0,
+            0,
+            0,
+            0,
+            3,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            3,
+            3,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            9,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ],
+        &quot;output&quot;: [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            7,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            7,
+            7,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            9,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      {
+        &quot;input&quot;: [
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            6,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            8,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            8,
+            8,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ],
+        &quot;output&quot;: [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            0,
+            6,
+            6,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            6,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      }
+    ],
+    &quot;test&quot;: [
+      {
+        &quot;input&quot;: [
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            7,
+            0
+          ],
+          [
+            0,
+            0,
+            1,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            9,
+            0,
+            5,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      }
+    ]
+  }
+}</pre></div></details>
+  </article>
+</section>
+
+<section id="prompts">
+  <div class="kicker">Prepared EvoMolior inputs</div>
+  <h2>Start with contracts that force evidence, files and falsification.</h2>
+  <div class="grid2">
+    <div class="card"><h3>ARC-AGI-3 role pack</h3><p>Spec Cartographer, Replay Failure Analyst, State Abstraction Researcher, Exploration Scientist, World-Model Verifier, Transfer Auditor and Kaggle Distiller.</p><a class="button" href="evomolior_arc_prize_2026_starter_pack/prompts/arc3_roles.json">Open JSON</a></div>
+    <div class="card"><h3>ARC-AGI-2 role pack</h3><p>Leakage Auditor, DSL Coverage Analyst, Perspective Generator, Execution Verifier, TTA Engineer, Two-Guess Selector and Submission Validator.</p><a class="button" href="evomolior_arc_prize_2026_starter_pack/prompts/arc2_roles.json">Open JSON</a></div>
+  </div>
+  <h3>Core system prompt</h3>
+  <div class="code-head"><strong>evomolior_research_system.md</strong><button class="copy" data-target="systemprompt">Copy</button></div>
+  <pre id="systemprompt"># EvoMolior ARC Prize 2026 research-system prompt
+
+You are an evidence-first research and experiment society working on ARC-AGI-2 and ARC-AGI-3.
+Your job is not to produce persuasive prose. Your job is to reduce uncertainty, create executable
+artifacts, and preserve a provenance trail that another engineer can reproduce offline.
+
+## Non-negotiable constraints
+
+1. Label every substantive item as one of:
+   - `[O]` official rule/data/tooling source;
+   - `[K]` Kaggle notebook, leaderboard or discussion;
+   - `[P]` research paper;
+   - `[C]` community repository/write-up;
+   - `[E]` our controlled experiment;
+   - `[I]` inference or design proposal.
+2. Never upgrade a public leaderboard result, a public-game score, or an author-reported paper
+   result into evidence of private-set generalization.
+3. Never inspect or hand-tune against the public ARC-AGI-2 evaluation tasks. Treat them as sealed.
+4. Track licenses for every imported code path, model, weight file and dataset. The competition
+   requires reproducible open-source solutions; do not assume a Kaggle notebook is reusable.
+5. Kaggle evaluation has no internet. Research may be distributed and agentic before packaging;
+   the final solver must be self-contained, deterministic enough to debug, and resource bounded.
+6. Every proposed component needs: hypothesis, baseline, treatment, metric, budget, stop rule,
+   failure modes and ablation. Reject architectural ornament with no measurable contribution.
+7. Preserve negative results and dead ends. A rejected method must include the exact evidence that
+   caused rejection so later agents do not repeat it.
+8. Produce files, not merely chat summaries. Required run outputs:
+   evidence.jsonl, claims.md, experiments.jsonl, ablations.csv, license_ledger.csv,
+   failure_clusters.md, implementation_plan.md, and a compact submission artifact.
+
+## Shared research questions
+
+- What does the official metric actually reward, and which proxy metrics are misleading?
+- Which public solution mechanisms survive ablation, and which merely co-occur with a score?
+- Where does the current solver fail because its representation/DSL lacks coverage rather than
+  because its search budget is too small?
+- How can two guesses (ARC-AGI-2) or exploratory actions (ARC-AGI-3) be selected to maximize
+  complementary information rather than correlated repetition?
+- Which expensive research-time discoveries can be distilled into a cheap offline runtime?
+
+## Handoff protocol
+
+Each role writes a structured handoff with:
+
+```json
+{
+  &quot;claims_added&quot;: [],
+  &quot;claims_disputed&quot;: [],
+  &quot;artifacts_created&quot;: [],
+  &quot;tests_run&quot;: [],
+  &quot;failures&quot;: [],
+  &quot;next_questions&quot;: [],
+  &quot;budget_used&quot;: {},
+  &quot;confidence&quot;: 0.0
+}
+```
+
+A Critic may promote a claim to `verified` only when it has direct source support or a reproducible
+experiment. An Integrator may merge code only when unit tests, an offline smoke test and a license
+entry exist. A Grader scores generalization evidence, not narrative sophistication.
+</pre>
+
+  <h3>Task-specific launch prompts</h3>
+  <details open><summary>Launch ARC-AGI-3 research generation</summary><div><pre>Using the shared evidence ledger and source freeze 2026-07-23, build an ablation-first ARC-AGI-3 program.
+
+Required arms:
+A0 official random starter;
+A1 legal actions + deterministic reset;
+A2 A1 + no-op/dead-signature memory;
+A3 A2 + rare-color/component salience;
+A4 A3 + state-action frontier graph;
+A5 A4 + compact causal hypothesis ledger;
+A6 A5 + replay verification;
+A7 A5 + optional compact local model;
+A8 A6 + A7 arbiter.
+
+Run at least five seeds on Switch–Lock Relay plus generated rotations/color permutations and on permitted public games. Report RHAE, levels, no-op rate, actions to first useful change, one-step prediction, transfer, wall-clock and peak memory. Do not promote an arm based on a single public leaderboard run. Emit executable agent_my_agent.py, ablations.csv, replay counterexamples and a license ledger.</pre></div></details>
+  <details><summary>Launch ARC-AGI-2 research generation</summary><div><pre>Using only public training data for development, build a sealed ARC-AGI-2 task-family benchmark and a two-guess portfolio.
+
+Candidate groups must be independent: geometric/pixel, object/relational DSL, native-2D neural or TTT, and code/text reasoning where offline licensing permits. Every candidate must execute on all demonstrations. Record exact pass, pixel diagnostic, complexity, equivariance, mutation stability, runtime and family. Route zero-step DSL failures away from more search. Select attempt 2 to maximize marginal solves under a calibrated family-error model.
+
+Required ablations: no diversity, no exact gate, no early stop, no TTT, no symbolic branch, no neural branch, correlated top-2 versus diversified top-2. Emit submission.json, program_provenance.json, pass_at_1_2.csv, dsl_coverage.csv, ablations.csv and a schema report. Never inspect public evaluation tasks during tuning.</pre></div></details>
+</section>
+
+<section id="experiments">
+  <div class="kicker">Implementation and evaluation outline</div>
+  <h2>What to build first, how to know it helped, and when to stop.</h2>
+  <h3>ARC-AGI-3 experiment matrix</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>ID</th><th>Change</th><th>Primary metric</th><th>Failure test</th><th>Keep rule</th></tr></thead>
+    <tbody>
+      <tr><td>3-E01</td><td>Legal actions + resets</td><td>Crash/invalid-action rate</td><td>Missing/changed available_actions</td><td>Zero invalid submissions across starter games.</td></tr>
+      <tr><td>3-E02</td><td>Dead signatures/no-op memory</td><td>No-op rate; actions to change</td><td>Useful delayed actions look like no-ops</td><td>Lower no-op rate without reducing solved levels.</td></tr>
+      <tr><td>3-E03</td><td>Rare-color/component clicks</td><td>Information/action</td><td>Inert rare distractors</td><td>Wins on mutated salience tests, not only originals.</td></tr>
+      <tr><td>3-E04</td><td>State-action frontier graph</td><td>Unique useful transitions/action</td><td>Hash collision and animation alias</td><td>RHAE gain across ≥5 seeds.</td></tr>
+      <tr><td>3-E05</td><td>Causal ledger + falsifiers</td><td>One-step prediction accuracy</td><td>False global model after local effect</td><td>Prediction and later-level transfer both improve.</td></tr>
+      <tr><td>3-E06</td><td>Exact replay verification</td><td>Model error; RHAE</td><td>Resource blowout</td><td>Net score/runtime frontier improves.</td></tr>
+      <tr><td>3-E07</td><td>Compact local VLM/LLM</td><td>Hard-state solve rate</td><td>Structured-output/tool failure</td><td>Outperforms controller after total resource accounting.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>ARC-AGI-2 experiment matrix</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>ID</th><th>Change</th><th>Primary metric</th><th>Failure test</th><th>Keep rule</th></tr></thead>
+    <tbody>
+      <tr><td>2-E01</td><td>Strict submission validator</td><td>Schema errors</td><td>Missing task/test/attempt</td><td>Mandatory; zero malformed outputs.</td></tr>
+      <tr><td>2-E02</td><td>Typed DSL baseline</td><td>Coverage and exact pass</td><td>Zero valid first transition</td><td>Keep primitives with unique sealed-family solves.</td></tr>
+      <tr><td>2-E03</td><td>Independent modalities</td><td>Unique correct outputs</td><td>Trace diversity but output collapse</td><td>Higher pass@2 than same-budget single family.</td></tr>
+      <tr><td>2-E04</td><td>Exact execution gate</td><td>False-positive rate</td><td>Plausible but failed demonstration</td><td>Mandatory except explicitly calibrated noisy branch.</td></tr>
+      <tr><td>2-E05</td><td>Structural early stop</td><td>Compute/solve</td><td>Prematurely stops late successes</td><td>Retain ≥99% baseline solves at lower compute.</td></tr>
+      <tr><td>2-E06</td><td>Per-task TTT</td><td>Exact gain versus seconds</td><td>Seed instability</td><td>Positive lower confidence bound across task families.</td></tr>
+      <tr><td>2-E07</td><td>Diversified attempt 2</td><td>Second-guess marginal</td><td>Correlated outputs</td><td>Pass@2 gain without reducing pass@1.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Artifact contract for every EvoMolior run</h3>
+  <div class="grid3">
+    <div class="card"><h3>Evidence</h3><p><code>evidence.jsonl</code><br><code>claims.md</code><br><code>license_ledger.csv</code><br><code>rule_change_log.md</code></p></div>
+    <div class="card"><h3>Experiments</h3><p><code>experiments.jsonl</code><br><code>ablations.csv</code><br><code>budget_curves.csv</code><br><code>failure_clusters.md</code></p></div>
+    <div class="card"><h3>Submission</h3><p><code>agent_my_agent.py</code> or <code>submission.json</code><br><code>schema_report.json</code><br><code>checksums.sha256</code><br><code>reproduction.md</code></p></div>
+  </div>
+</section>
+
+<section id="roadmap">
+  <div class="kicker">Calendar</div>
+  <h2>Milestone plan from 23 July to final submission and paper.</h2>
+  <div class="callout warning">ARC Prize lists 30 September for ARC-AGI-3 Milestone #2, 2 November for final submissions and 8 November for papers. Verify the exact live Kaggle cutoff time and any late rule changes before freezing.</div>
+  <div class="table-wrap"><table><thead><tr><th>Start</th><th>End</th><th>Track</th><th>Milestone</th><th>Work</th><th>Exit criterion</th></tr></thead><tbody><tr><td>2026-07-23</td><td>2026-07-31</td><td><span class="badge both">Both</span></td><td><strong>Evidence freeze v1</strong></td><td>Reproduce official starters; source/license ledger; sealed holdouts</td><td>All smoke tests green</td></tr>
+<tr><td>2026-08-01</td><td>2026-08-14</td><td><span class="badge arc3">ARC-AGI-3</span></td><td><strong>Baseline ladder</strong></td><td>Random → no-op filter → salience → graph frontier</td><td>Ablation table across seeds/mutations</td></tr>
+<tr><td>2026-08-01</td><td>2026-08-21</td><td><span class="badge arc2">ARC-AGI-2</span></td><td><strong>Baseline portfolio</strong></td><td>NVARC reproduction + compact DSL + strict submission validator</td><td>Stable local score and runtime curves</td></tr>
+<tr><td>2026-08-15</td><td>2026-08-31</td><td><span class="badge arc3">ARC-AGI-3</span></td><td><strong>Causal ledger</strong></td><td>One-step predictor, falsifiers, level consolidation</td><td>Transfer gain on Switch–Lock mutations</td></tr>
+<tr><td>2026-08-22</td><td>2026-09-12</td><td><span class="badge arc2">ARC-AGI-2</span></td><td><strong>Diversity and routing</strong></td><td>Independent perspectives, exact filters, two-guess selector, early stopping</td><td>Pass@2/compute improvement on sealed tasks</td></tr>
+<tr><td>2026-09-01</td><td>2026-09-15</td><td><span class="badge arc3">ARC-AGI-3</span></td><td><strong>Offline model option</strong></td><td>Small local VLM/LLM only if compact policy plateaus</td><td>Net RHAE gain after runtime/action accounting</td></tr>
+<tr><td>2026-09-16</td><td>2026-09-25</td><td><span class="badge arc3">ARC-AGI-3</span></td><td><strong>Milestone hardening</strong></td><td>Freeze dependencies, deterministic fallbacks, public write-up</td><td>Three clean Kaggle reruns</td></tr>
+<tr><td>2026-09-26</td><td>2026-09-30</td><td><span class="badge arc3">ARC-AGI-3</span></td><td><strong>Milestone #2 submission</strong></td><td>Tag open-source release and submit</td><td>Submission accepted; reproducibility bundle public</td></tr>
+<tr><td>2026-10-01</td><td>2026-10-18</td><td><span class="badge both">Both</span></td><td><strong>Cross-track transfer</strong></td><td>Share object abstractions, verification and experiment substrate—not task-specific rules</td><td>No regression on sealed holdouts</td></tr>
+<tr><td>2026-10-19</td><td>2026-10-27</td><td><span class="badge both">Both</span></td><td><strong>Final ablations</strong></td><td>Remove unproven components and document negative results</td><td>Frozen winning configurations</td></tr>
+<tr><td>2026-10-28</td><td>2026-11-02</td><td><span class="badge both">Both</span></td><td><strong>Final submission freeze</strong></td><td>Submission checks, licenses, checksums, reproducibility</td><td>Accepted final Kaggle submissions</td></tr>
+<tr><td>2026-11-03</td><td>2026-11-08</td><td><span class="badge both">Paper</span></td><td><strong>Solution write-up/paper</strong></td><td>Methods, ablations, failure analysis, open artifacts</td><td>Official write-up attached by deadline</td></tr></tbody></table></div>
+</section>
+
+<section id="checklists">
+  <div class="kicker">Submission safety</div>
+  <h2>Preflight checklists that prevent avoidable zeroes.</h2>
+  <div class="grid2">
+    <div class="card"><span class="badge arc3">ARC-AGI-3</span><h3>Kaggle preflight</h3><ol class="compact"><li>Clone the current official starter; accept rules and configure token.</li><li>Replace only <code>agent/my_agent.py</code>; keep class and method contract.</li><li>Use <code>available_actions</code>; set coordinates for complex actions; handle reset/death/undo.</li><li>Run syntax, unit and frame-shape tests; then <code>make verify-local</code> and <code>make play-local</code>.</li><li>Measure action count separately from wall-clock/tool calls.</li><li>Freeze every model weight/dependency offline and record licenses.</li><li><code>make submit</code>; confirm Phase A completes; manually submit generated parquet for Phase B.</li><li>Run at least three clean reruns of the frozen artifact; archive hashes and logs.</li></ol></div>
+    <div class="card"><span class="badge arc2">ARC-AGI-2</span><h3>Kaggle preflight</h3><ol class="compact"><li>Locate the live challenge and sample files robustly; do not hard-code one path without fallback.</li><li>Produce one list entry per task test input.</li><li>Each entry has exactly <code>attempt_1</code> and <code>attempt_2</code>.</li><li>Every output is a non-empty rectangular integer grid, values 0–9, allowed dimensions.</li><li>Check all task IDs and row counts against challenge/sample before writing.</li><li>Run a tiny known synthetic task and a representative training subset in the same notebook environment.</li><li>Capture timeout/OOM per task and emit deterministic valid fallbacks.</li><li>Open the final JSON, parse it again and print a schema summary before submission.</li></ol></div>
+  </div>
+  <h3>Open-source/reproducibility preflight</h3>
+  <div class="card"><ul class="compact"><li>Permissive license for authored code; compatible licenses for all third-party methods/code.</li><li>Model and weight redistribution/use rights recorded.</li><li>Exact environment, seeds, hardware assumptions and dependency hashes.</li><li>No API keys, internet calls or undeclared downloads in the evaluation notebook.</li><li>Public release contains the configuration that produced the submitted result, not a simplified facsimile.</li><li>Negative results and ablations are included in the write-up.</li></ul></div>
+</section>
+
+<section id="sources">
+  <div class="kicker">Provenance ledger</div>
+  <h2>Sources reviewed and how they were used.</h2>
+  <p class="muted">Filter the table. “Dynamic” means the page may have changed after the 23 July snapshot. Paper and community results are treated as reported evidence, not independently reproduced facts.</p>
+  <div class="filters">
+    <input id="sourceSearch" type="search" placeholder="Search title or claim" aria-label="Search sources">
+    <select id="trackFilter" aria-label="Filter by track"><option value="">All tracks</option><option>ARC-AGI-3</option><option>ARC-AGI-2</option><option>Both</option></select>
+    <select id="classFilter" aria-label="Filter by class"><option value="">All classes</option><option>Official</option><option>Official/Kaggle</option><option>Official analysis</option><option>Kaggle public notebook</option><option>Kaggle leaderboard</option><option>Kaggle discussion</option><option>Research paper</option><option>Open-source repository</option><option>Official technical report</option></select>
+  </div>
+  <div class="table-wrap"><table id="sourceTable"><thead><tr><th>ID</th><th>Class</th><th>Track</th><th>Source</th><th>Use</th><th>Reliability</th><th>Dynamic</th></tr></thead><tbody><tr data-track="Both" data-class="Official">
+      <td><code>O01</code></td><td>Official</td><td>Both</td>
+      <td><a href="https://arcprize.org/competitions/2026" target="_blank" rel="noopener">ARC Prize 2026 – competition overview</a><span class="mobile-note">Dates, $2M/three-track structure, open-source and no-internet conditions.</span></td>
+      <td>Dates, $2M/three-track structure, open-source and no-internet conditions.</td><td>High</td><td>No</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Official">
+      <td><code>O02</code></td><td>Official</td><td>ARC-AGI-3</td>
+      <td><a href="https://arcprize.org/competitions/2026/arc-agi-3" target="_blank" rel="noopener">ARC-AGI-3 2026 competition page</a><span class="mobile-note">Objective, four capabilities, prize structure, milestone dates and eligibility.</span></td>
+      <td>Objective, four capabilities, prize structure, milestone dates and eligibility.</td><td>High</td><td>Low</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Official">
+      <td><code>O03</code></td><td>Official</td><td>ARC-AGI-2</td>
+      <td><a href="https://arcprize.org/competitions/2026/arc-agi-2" target="_blank" rel="noopener">ARC-AGI-2 2026 competition page</a><span class="mobile-note">85% private target, prize structure, exact two-attempt scoring and notebook requirement.</span></td>
+      <td>85% private target, prize structure, exact two-attempt scoring and notebook requirement.</td><td>High</td><td>Low</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Official/Kaggle">
+      <td><code>O04</code></td><td>Official/Kaggle</td><td>ARC-AGI-3</td>
+      <td><a href="https://www.kaggle.com/competitions/arc-prize-2026-arc-agi-3/overview" target="_blank" rel="noopener">Kaggle ARC Prize 2026 – ARC-AGI-3 overview</a><span class="mobile-note">Live competition surface; always re-check rules, data and notebook settings here.</span></td>
+      <td>Live competition surface; always re-check rules, data and notebook settings here.</td><td>High</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Official/Kaggle">
+      <td><code>O05</code></td><td>Official/Kaggle</td><td>ARC-AGI-2</td>
+      <td><a href="https://www.kaggle.com/competitions/arc-prize-2026-arc-agi-2/overview" target="_blank" rel="noopener">Kaggle ARC Prize 2026 – ARC-AGI-2 overview</a><span class="mobile-note">Live competition surface; always re-check rules, data and notebook settings here.</span></td>
+      <td>Live competition surface; always re-check rules, data and notebook settings here.</td><td>High</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Official">
+      <td><code>O06</code></td><td>Official</td><td>ARC-AGI-3</td>
+      <td><a href="https://arcprize.org/media/ARC_AGI_3_Technical_Report.pdf" target="_blank" rel="noopener">ARC-AGI-3 technical report</a><span class="mobile-note">64×64/16-color frame format, action space, dataset composition, RHAE design and calibration.</span></td>
+      <td>64×64/16-color frame format, action space, dataset composition, RHAE design and calibration.</td><td>High</td><td>No</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Official">
+      <td><code>O07</code></td><td>Official</td><td>ARC-AGI-3</td>
+      <td><a href="https://docs.arcprize.org/methodology" target="_blank" rel="noopener">ARC-AGI-3 scoring methodology</a><span class="mobile-note">RHAE formula, 1.15 cap, level weighting and what counts as an action.</span></td>
+      <td>RHAE formula, 1.15 cap, level weighting and what counts as an action.</td><td>High</td><td>Low</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Official">
+      <td><code>O08</code></td><td>Official</td><td>ARC-AGI-3</td>
+      <td><a href="https://docs.arcprize.org/arc-prize-2026" target="_blank" rel="noopener">ARC-AGI-3 Kaggle starter documentation</a><span class="mobile-note">Python 3.12 starter loop, edit agent/my_agent.py, make play-local/make submit and accelerator choices.</span></td>
+      <td>Python 3.12 starter loop, edit agent/my_agent.py, make play-local/make submit and accelerator choices.</td><td>High</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Official">
+      <td><code>O09</code></td><td>Official</td><td>ARC-AGI-3</td>
+      <td><a href="https://docs.arcprize.org/local-vs-online" target="_blank" rel="noopener">ARC-AGI-3 local versus online execution</a><span class="mobile-note">Local engine is recommended, very fast and rate-limit free; online mode adds scorecards and replays.</span></td>
+      <td>Local engine is recommended, very fast and rate-limit free; online mode adds scorecards and replays.</td><td>High</td><td>Low</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Official">
+      <td><code>O10</code></td><td>Official</td><td>ARC-AGI-2</td>
+      <td><a href="https://github.com/arcprize/ARC-AGI-2" target="_blank" rel="noopener">ARC-AGI-2 official repository</a><span class="mobile-note">1,000 public training tasks, 120 public evaluation tasks, private tiers, JSON format and leakage warning.</span></td>
+      <td>1,000 public training tasks, 120 public evaluation tasks, private tiers, JSON format and leakage warning.</td><td>High</td><td>Low</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Official">
+      <td><code>O11</code></td><td>Official</td><td>ARC-AGI-2</td>
+      <td><a href="https://arcprize.org/guide/1" target="_blank" rel="noopener">ARC-AGI-1 &amp; ARC-AGI-2 technical guide</a><span class="mobile-note">Task structure, exact-match evaluation, approach families and hybrid neural-symbolic guidance.</span></td>
+      <td>Task structure, exact-match evaluation, approach families and hybrid neural-symbolic guidance.</td><td>High</td><td>Low</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Official">
+      <td><code>O12</code></td><td>Official</td><td>ARC-AGI-3</td>
+      <td><a href="https://github.com/arcprize/ARC-AGI-3-Agents" target="_blank" rel="noopener">ARC-AGI-3 Agents framework</a><span class="mobile-note">Agent framework, available_actions/ACTION7 evolution, local environments and observability hooks.</span></td>
+      <td>Agent framework, available_actions/ACTION7 evolution, local environments and observability hooks.</td><td>High</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Official">
+      <td><code>O13</code></td><td>Official</td><td>ARC-AGI-3</td>
+      <td><a href="https://github.com/arcprize/ARC-AGI-3-Kaggle-Starter" target="_blank" rel="noopener">ARC-AGI-3 Kaggle Starter repository</a><span class="mobile-note">Submission packaging reference and official MyAgent contract.</span></td>
+      <td>Submission packaging reference and official MyAgent contract.</td><td>High</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Official analysis">
+      <td><code>O14</code></td><td>Official analysis</td><td>ARC-AGI-3</td>
+      <td><a href="https://arcprize.org/blog/arc-agi-3-gpt-5-5-opus-4-7-analysis" target="_blank" rel="noopener">Analyzing GPT-5.5 &amp; Opus 4.7 with ARC-AGI-3</a><span class="mobile-note">160-trace analysis and three recurring failures: local-effect/global-model gap, wrong abstraction and weak transfer after a win.</span></td>
+      <td>160-trace analysis and three recurring failures: local-effect/global-model gap, wrong abstraction and weak transfer after a win.</td><td>High</td><td>No</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Official analysis">
+      <td><code>O15</code></td><td>Official analysis</td><td>ARC-AGI-3</td>
+      <td><a href="https://arcprize.org/blog/arc-prize-2026-milestone-1" target="_blank" rel="noopener">ARC-AGI-3 Milestone Prize #1 recap</a><span class="mobile-note">Tufa Duck, Reki and Forge architecture details, ablation lessons and local/public proxy warning.</span></td>
+      <td>Tufa Duck, Reki and Forge architecture details, ablation lessons and local/public proxy warning.</td><td>High</td><td>No</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Official analysis">
+      <td><code>O16</code></td><td>Official analysis</td><td>ARC-AGI-3</td>
+      <td><a href="https://arcprize.org/blog/arc-agi-3-preview-30-day-learnings" target="_blank" rel="noopener">ARC-AGI-3 Preview: 30-day learnings</a><span class="mobile-note">Preview winners, action-efficiency lessons and StochasticGoose/Blind Squirrel results.</span></td>
+      <td>Preview winners, action-efficiency lessons and StochasticGoose/Blind Squirrel results.</td><td>High</td><td>No</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Kaggle public notebook">
+      <td><code>K01</code></td><td>Kaggle public notebook</td><td>ARC-AGI-3</td>
+      <td><a href="https://www.kaggle.com/code/jeroencottaar/tufa-labs-duck-harness-june-30-milestone-winner" target="_blank" rel="noopener">Tufa Labs Duck harness – Milestone #1 winner</a><span class="mobile-note">Public implementation reference for a lightweight coding-agent/REPL harness.</span></td>
+      <td>Public implementation reference for a lightweight coding-agent/REPL harness.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Kaggle discussion">
+      <td><code>K02</code></td><td>Kaggle discussion</td><td>ARC-AGI-3</td>
+      <td><a href="https://www.kaggle.com/competitions/arc-prize-2026-arc-agi-3/discussion/717133" target="_blank" rel="noopener">Tufa Labs Duck write-up</a><span class="mobile-note">Author-provided design rationale; use as a lead, then verify in code.</span></td>
+      <td>Author-provided design rationale; use as a lead, then verify in code.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Kaggle public notebook">
+      <td><code>K03</code></td><td>Kaggle public notebook</td><td>ARC-AGI-3</td>
+      <td><a href="https://www.kaggle.com/code/ruichardliu/milestone1-2nd-solution" target="_blank" rel="noopener">Reki Milestone #1 second-place solution</a><span class="mobile-note">Vision policy, reflection memory, rare-color clicks, dead signatures and structured action repair.</span></td>
+      <td>Vision policy, reflection memory, rare-color clicks, dead signatures and structured action repair.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Kaggle public notebook">
+      <td><code>K04</code></td><td>Kaggle public notebook</td><td>ARC-AGI-3</td>
+      <td><a href="https://www.kaggle.com/code/mbmmurad/arc-agi-3-lb-0-86-3rd-place-candidate-milestone" target="_blank" rel="noopener">Forge Milestone candidate</a><span class="mobile-note">Profile-driven candidate/arbiter framework; public score snapshot 0.86 at milestone.</span></td>
+      <td>Profile-driven candidate/arbiter framework; public score snapshot 0.86 at milestone.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Kaggle public notebook">
+      <td><code>K05</code></td><td>Kaggle public notebook</td><td>ARC-AGI-3</td>
+      <td><a href="https://www.kaggle.com/code/nihilisticneuralnet/arc-agi-3-graph-based-exploration-lightweight" target="_blank" rel="noopener">Graph-Based Exploration (lightweight)</a><span class="mobile-note">Compact graph-exploration baseline; public score snapshot 0.09.</span></td>
+      <td>Compact graph-exploration baseline; public score snapshot 0.09.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Kaggle public notebook">
+      <td><code>K06</code></td><td>Kaggle public notebook</td><td>ARC-AGI-3</td>
+      <td><a href="https://www.kaggle.com/code/inversion/arc3-sample-submission-stochastic-goose" target="_blank" rel="noopener">Stochastic Goose sample submission</a><span class="mobile-note">Action-change prediction baseline; public score snapshot 0.25.</span></td>
+      <td>Action-change prediction baseline; public score snapshot 0.25.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Kaggle public notebook">
+      <td><code>K07</code></td><td>Kaggle public notebook</td><td>ARC-AGI-3</td>
+      <td><a href="https://www.kaggle.com/code/nihilisticneuralnet/0-46-arc-agi-3-persistent-memory-bfs-arc-solver" target="_blank" rel="noopener">Persistent Memory BFS ARC solver</a><span class="mobile-note">Public reference combining persistent memory and state-space search; score label 0.46.</span></td>
+      <td>Public reference combining persistent memory and state-space search; score label 0.46.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Kaggle public notebook">
+      <td><code>K08</code></td><td>Kaggle public notebook</td><td>ARC-AGI-3</td>
+      <td><a href="https://www.kaggle.com/code/thtennant/arc3-duck-v7/input?scriptVersionId=333356346" target="_blank" rel="noopener">Duck v7</a><span class="mobile-note">Later public Duck variant; public score snapshot 1.23 and long runtime.</span></td>
+      <td>Later public Duck variant; public score snapshot 1.23 and long runtime.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Kaggle leaderboard">
+      <td><code>K09</code></td><td>Kaggle leaderboard</td><td>ARC-AGI-3</td>
+      <td><a href="https://www.kaggle.com/competitions/arc-prize-2026-arc-agi-3/leaderboard" target="_blank" rel="noopener">ARC-AGI-3 public leaderboard</a><span class="mobile-note">Dynamic partial-test ranking; snapshot top scores 1.86, 1.61 and 1.60.</span></td>
+      <td>Dynamic partial-test ranking; snapshot top scores 1.86, 1.61 and 1.60.</td><td>High for snapshot</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Kaggle leaderboard">
+      <td><code>K10</code></td><td>Kaggle leaderboard</td><td>ARC-AGI-2</td>
+      <td><a href="https://www.kaggle.com/competitions/arc-prize-2026-arc-agi-2/leaderboard" target="_blank" rel="noopener">ARC-AGI-2 public leaderboard</a><span class="mobile-note">Dynamic partial-test ranking; snapshot top scores 65.83, 38.61 and 36.39.</span></td>
+      <td>Dynamic partial-test ranking; snapshot top scores 65.83, 38.61 and 36.39.</td><td>High for snapshot</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Kaggle discussion">
+      <td><code>K11</code></td><td>Kaggle discussion</td><td>ARC-AGI-2</td>
+      <td><a href="https://www.kaggle.com/competitions/arc-prize-2026-arc-agi-2/discussion/704408" target="_blank" rel="noopener">Successful run with 0.0 score</a><span class="mobile-note">Community report that a clean 15-minute notebook run returned 0.0, motivating strict output validation.</span></td>
+      <td>Community report that a clean 15-minute notebook run returned 0.0, motivating strict output validation.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Kaggle public notebook">
+      <td><code>K12</code></td><td>Kaggle public notebook</td><td>ARC-AGI-2</td>
+      <td><a href="https://www.kaggle.com/code/yiheng/reproduce-nvarc-2025-results" target="_blank" rel="noopener">Reproduce NVARC 2025 Results</a><span class="mobile-note">Public 2026 reproduction; score snapshot 30.97, runtime 27m06s on L4×4.</span></td>
+      <td>Public 2026 reproduction; score snapshot 30.97, runtime 27m06s on L4×4.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Kaggle public notebook">
+      <td><code>K13</code></td><td>Kaggle public notebook</td><td>ARC-AGI-2</td>
+      <td><a href="https://www.kaggle.com/code/amanatar/nvarc-improved-arc-agi-2-2026" target="_blank" rel="noopener">NVARC Improved – ARC-AGI-2 2026</a><span class="mobile-note">Public derivative; score snapshot 18.19, runtime 33m06s on L4×4.</span></td>
+      <td>Public derivative; score snapshot 18.19, runtime 33m06s on L4×4.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Kaggle public notebook">
+      <td><code>K14</code></td><td>Kaggle public notebook</td><td>ARC-AGI-2</td>
+      <td><a href="https://www.kaggle.com/code/lucifer19/blackcat-stable-anchor-nvarc-guard" target="_blank" rel="noopener">BlackCat Stable Anchor – NVARC Guard</a><span class="mobile-note">Public NVARC guard/portfolio derivative; best score snapshot 28.89.</span></td>
+      <td>Public NVARC guard/portfolio derivative; best score snapshot 28.89.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Kaggle public notebook">
+      <td><code>K15</code></td><td>Kaggle public notebook</td><td>ARC-AGI-2</td>
+      <td><a href="https://www.kaggle.com/code/koushikrudra/failed-in-aimo" target="_blank" rel="noopener">Failed in AIMO</a><span class="mobile-note">Public ARC-AGI-2 notebook despite its title; score snapshot 33.89.</span></td>
+      <td>Public ARC-AGI-2 notebook despite its title; score snapshot 33.89.</td><td>Medium</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Research paper">
+      <td><code>P01</code></td><td>Research paper</td><td>ARC-AGI-3</td>
+      <td><a href="https://arxiv.org/abs/2512.24156" target="_blank" rel="noopener">Graph-Based Exploration for ARC-AGI-3 Interactive Reasoning Tasks</a><span class="mobile-note">Segmentation, salience and directed state graphs; median 30/52 preview levels across six games.</span></td>
+      <td>Segmentation, salience and directed state graphs; median 30/52 preview levels across six games.</td><td>Medium-high</td><td>No</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Research paper">
+      <td><code>P02</code></td><td>Research paper</td><td>ARC-AGI-3</td>
+      <td><a href="https://arxiv.org/abs/2605.05138" target="_blank" rel="noopener">Executable World Models for ARC-AGI-3 in the Era of Coding Agents</a><span class="mobile-note">Executable Python world model, replay verification, simplification and planning; public-set results only.</span></td>
+      <td>Executable Python world model, replay verification, simplification and planning; public-set results only.</td><td>Medium-high</td><td>No</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Research paper">
+      <td><code>P03</code></td><td>Research paper</td><td>ARC-AGI-3</td>
+      <td><a href="https://arxiv.org/abs/2607.15439" target="_blank" rel="noopener">Do Coding Agents Need Executable World Models, Simplification, and Verification?</a><span class="mobile-note">July ablation: model/effort effects robust; verification strongest but expensive; public-set saturation is not held-out proof.</span></td>
+      <td>July ablation: model/effort effects robust; verification strongest but expensive; public-set saturation is not held-out proof.</td><td>Medium-high</td><td>No</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Research paper">
+      <td><code>P04</code></td><td>Research paper</td><td>ARC-AGI-2</td>
+      <td><a href="https://arxiv.org/abs/2606.31543" target="_blank" rel="noopener">Modality-Driven Search with Holistic Trace Judging for ARC-AGI-2</a><span class="mobile-note">Independent text/image/code candidate generation and joint judging; reports 72.9% semi-private at high per-task cost.</span></td>
+      <td>Independent text/image/code candidate generation and joint judging; reports 72.9% semi-private at high per-task cost.</td><td>Medium-high</td><td>No</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Research paper">
+      <td><code>P05</code></td><td>Research paper</td><td>ARC-AGI-2</td>
+      <td><a href="https://arxiv.org/abs/2606.09026" target="_blank" rel="noopener">Structural Grid Descriptors Predict Within-Task Solver Success</a><span class="mobile-note">Structural progress features support early stopping and expose DSL coverage failures.</span></td>
+      <td>Structural progress features support early stopping and expose DSL coverage failures.</td><td>Medium-high</td><td>No</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Official technical report">
+      <td><code>P06</code></td><td>Official technical report</td><td>ARC-AGI-2</td>
+      <td><a href="https://arxiv.org/abs/2601.10904" target="_blank" rel="noopener">ARC Prize 2025: Technical Report</a><span class="mobile-note">2025 competition statistics, top private scores and refinement-loop synthesis.</span></td>
+      <td>2025 competition statistics, top private scores and refinement-loop synthesis.</td><td>High</td><td>No</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Official analysis">
+      <td><code>O17</code></td><td>Official analysis</td><td>ARC-AGI-2</td>
+      <td><a href="https://arcprize.org/blog/arc-prize-2025-results-analysis" target="_blank" rel="noopener">ARC Prize 2025 Results &amp; Analysis</a><span class="mobile-note">NVARC/ARChitects/MindsAI results, cost figures and refinement-loop interpretation.</span></td>
+      <td>NVARC/ARChitects/MindsAI results, cost figures and refinement-loop interpretation.</td><td>High</td><td>No</td>
+    </tr>
+<tr data-track="ARC-AGI-2" data-class="Open-source repository">
+      <td><code>C01</code></td><td>Open-source repository</td><td>ARC-AGI-2</td>
+      <td><a href="https://github.com/1ytic/NVARC" target="_blank" rel="noopener">NVARC solution repository</a><span class="mobile-note">Code lineage for the 2025 winning system; inspect licenses and dependencies before reuse.</span></td>
+      <td>Code lineage for the 2025 winning system; inspect licenses and dependencies before reuse.</td><td>Medium-high</td><td>Yes</td>
+    </tr>
+<tr data-track="ARC-AGI-3" data-class="Open-source repository">
+      <td><code>C02</code></td><td>Open-source repository</td><td>ARC-AGI-3</td>
+      <td><a href="https://github.com/DriesSmit/ARC3-solution" target="_blank" rel="noopener">StochasticGoose ARC3 solution</a><span class="mobile-note">CNN-based prediction of which actions produce frame changes.</span></td>
+      <td>CNN-based prediction of which actions produce frame changes.</td><td>Medium-high</td><td>Yes</td>
+    </tr></tbody></table></div>
+</section>
+
+<section id="limits">
+  <div class="kicker">What this package does not claim</div>
+  <h2>Honest limits</h2>
+  <div class="callout danger"><strong>No hidden evaluation data was available.</strong> The generated code has not received a Kaggle leaderboard score. It is a validated implementation scaffold and research plan, not a promise of prize-level performance.</div>
+  <ul class="compact"><li>The ARC-AGI-3 frame extraction uses defensive introspection and must be adapted/tested against the current installed <code>arcengine</code> representation.</li><li>The ARC-AGI-2 portfolio is deliberately small; its purpose is to establish a correct executable/validation architecture that EvoMolior can expand.</li><li>Public notebook code was surveyed for mechanisms and operational lessons; it was not copied into the starter. License review is still mandatory before importing any third-party implementation.</li><li>Leaderboard values, hardware options and rules can change. The live Kaggle pages remain authoritative.</li><li>The supplied project file describes EvoKammer conceptually; no source tree was examined, so the exact effort to integrate these prompts/schemas is unknown.</li></ul>
+</section>
+</main>
+</div>
+
+<footer class="footer">
+  <p><strong>EvoMolior × ARC Prize 2026 research dossier</strong> · Frozen 23 July 2026 · Companion files are in <a href="evomolior_arc_prize_2026_starter_pack.zip">the starter pack</a>.</p>
+  <p class="small">The synthetic tasks are original evaluation aids. ARC Prize, ARC-AGI and Kaggle names belong to their respective owners. Re-check live rules before submission.</p>
+</footer>
+
+<script>
+const colors = ['#000000','#0074D9','#FF4136','#2ECC40','#FFDC00','#AAAAAA','#F012BE','#FF851B','#7FDBFF','#870C25','#4B4B4B','#2B5D87','#8E3B46','#3E7C59','#D4A72C','#F7F7F7'];
+for (const el of document.querySelectorAll('.arc-grid')) {
+  const grid = JSON.parse(el.dataset.grid);
+  el.style.gridTemplateColumns = `repeat(${grid[0].length}, 1fr)`;
+  for (const row of grid) for (const value of row) {
+    const cell = document.createElement('div'); cell.className='arc-cell'; cell.style.background=colors[value] || '#fff'; cell.title=String(value); el.appendChild(cell);
+  }
+}
+document.getElementById('themeBtn').addEventListener('click', () => {
+  document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+});
+for (const btn of document.querySelectorAll('.copy')) {
+  btn.addEventListener('click', async () => {
+    const target = document.getElementById(btn.dataset.target);
+    await navigator.clipboard.writeText(target.innerText);
+    const old=btn.textContent; btn.textContent='Copied'; setTimeout(()=>btn.textContent=old,1100);
+  });
+}
+function filterSources() {
+  const q=document.getElementById('sourceSearch').value.toLowerCase();
+  const track=document.getElementById('trackFilter').value;
+  const cls=document.getElementById('classFilter').value;
+  for (const row of document.querySelectorAll('#sourceTable tbody tr')) {
+    const okQ=!q || row.innerText.toLowerCase().includes(q);
+    const okT=!track || row.dataset.track===track;
+    const okC=!cls || row.dataset.class===cls;
+    row.hidden=!(okQ&&okT&&okC);
+  }
+}
+for (const id of ['sourceSearch','trackFilter','classFilter']) document.getElementById(id).addEventListener('input',filterSources);
+</script>
+</body>
+</html>

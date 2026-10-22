@@ -23,6 +23,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.Json
 
 class ToolVersionTransitionServiceTest {
     private val runId = "run-tool-transition"
@@ -41,7 +42,18 @@ class ToolVersionTransitionServiceTest {
                     runId = runId,
                     groupId = groupId,
                     toolsMountHostPath = File(root, "tools").absolutePath,
-                    opportunityResolver = { commitment }
+                    opportunityResolver = { commitment },
+                    sealedPromotionTestResolver = {
+                        listOf(
+                            SealedPromotionTestFixture(
+                                id = "identity-test",
+                                input = Json.parseToJsonElement("""{"value":1.0}"""),
+                                expectedOutput = Json.parseToJsonElement(
+                                    """{"normalized":1.0}"""
+                                )
+                            )
+                        )
+                    }
                 )
                 assertEquals(
                     ToolPromotionResult.Promoted("normalize-v1"),
@@ -178,7 +190,7 @@ class ToolVersionTransitionServiceTest {
     private fun submission(
         id: String,
         name: String,
-        code: String = "cat >/dev/null\necho '{\"normalized\":1}'"
+        code: String = "cat >/dev/null\necho '{\"normalized\":1.0}'"
     ): StagingSubmissionEntity {
         val opportunity = commitment().opportunity
         val inputSchema = TypedToolSchemaCompiler.compile(opportunity.requiredInputs)
@@ -202,8 +214,8 @@ class ToolVersionTransitionServiceTest {
                   "tests": [
                     {
                       "testId": "identity-test",
-                      "input": {"value":1},
-                      "expectedOutput": {"normalized":1}
+                      "input": {"value":1.0},
+                      "expectedOutput": {"normalized":1.0}
                     }
                   ]
                 }

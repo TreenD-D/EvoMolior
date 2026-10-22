@@ -36,17 +36,20 @@ internal const val SCORING_WORKER_TOKEN_HEADER = "X-EvoMolior-Scoring-Token"
  * @param token Per-run bearer token.
  * @param groupIds Complete competing group set.
  * @param readyFile Bootstrap file where the bound ephemeral port is published.
+ * @param owner Owning process; its exit closes the scoring authority independently of RPC cleanup.
  */
 internal class ScoringWorkerServer(
     private val port: Int,
     private val token: String,
     private val groupIds: List<String>,
-    private val readyFile: Path? = null
+    private val readyFile: Path? = null,
+    private val owner: ProcessHandle,
 ) {
     private val json = Json { ignoreUnknownKeys = false; encodeDefaults = true }
     private val shutdown = CountDownLatch(1)
 
     fun run() {
+        owner.onExit().thenRun { shutdown.countDown() }
         val server = embeddedServer(Netty, host = "127.0.0.1", port = port) {
             install(ContentNegotiation) { json(json) }
             routing {
@@ -93,12 +96,15 @@ internal class ScoringWorkerServer(
                 }
             }
         }.start(wait = false)
-        readyFile?.let { path ->
-            val resolvedPort = runBlocking { server.engine.resolvedConnectors().single().port }
-            Files.writeString(path, resolvedPort.toString())
+        try {
+            readyFile?.let { path ->
+                val resolvedPort = runBlocking { server.engine.resolvedConnectors().single().port }
+                Files.writeString(path, resolvedPort.toString())
+            }
+            shutdown.await()
+        } finally {
+            server.stop(gracePeriodMillis = 500, timeoutMillis = 2_000)
         }
-        shutdown.await()
-        server.stop(gracePeriodMillis = 500, timeoutMillis = 2_000)
     }
 
     private suspend fun score(request: ScoringWorkerRequest): ScoringWorkerResponse {
@@ -169,12 +175,22 @@ fun main(args: Array<String>) {
     require(args.size >= 3) {
         "Usage: ScoringWorkerServerKt <port> <readyFile> <groupId>..."
     }
+    val expectedOwnerPid = requireNotNull(System.getenv("EVOMOLIOR_SCORING_WORKER_OWNER_PID")?.toLongOrNull()) {
+        "EVOMOLIOR_SCORING_WORKER_OWNER_PID is required"
+    }
+    val owner = ProcessHandle.current().parent().orElseThrow {
+        IllegalStateException("Scoring worker has no owning parent")
+    }
+    require(expectedOwnerPid > 1 && owner.pid() == expectedOwnerPid && owner.isAlive) {
+        "Scoring worker owner exited or does not match bootstrap authority"
+    }
     ScoringWorkerServer(
         port = args[0].toInt(),
         token = requireNotNull(System.getenv("EVOMOLIOR_SCORING_WORKER_TOKEN")) {
             "EVOMOLIOR_SCORING_WORKER_TOKEN is required"
         },
         groupIds = args.drop(2),
-        readyFile = Path.of(args[1])
+        readyFile = Path.of(args[1]),
+        owner = owner,
     ).run()
 }

@@ -29,6 +29,9 @@ import com.achulkov.evomolior.substrate.db.entity.ToolRegistryEntryEntity
 import com.achulkov.evomolior.substrate.cost.CostLedgerRepository
 import com.achulkov.evomolior.substrate.tools.ToolInfrastructureRepository
 import com.achulkov.evomolior.substrate.tools.ToolMaterializer
+import com.achulkov.evomolior.orchestration.repair.PrivatePromotionFailure
+import com.achulkov.evomolior.core.repair.ToolRepairCode
+import io.github.aakira.napier.Napier
 import java.io.File
 import java.nio.file.Files
 import java.util.UUID
@@ -57,8 +60,49 @@ sealed class ToolPromotionResult {
     /** Exact registry version and lifecycle authority were committed. */
     data class Promoted(val toolVersionId: String) : ToolPromotionResult()
 
-    /** Promotion failed before registry activation. */
-    data class Rejected(val reason: String) : ToolPromotionResult()
+    /**
+     * Promotion failed before registry activation.
+     *
+     * [reason] is a receiver-safe stable code. Private fixture identity, expected/actual values,
+     * output, paths, and prose never cross this boundary.
+     *
+     * @param reason Receiver-safe stable rejection code.
+     * @param authority Authority class that rejected promotion.
+     * @param privateFailure Closed private failure class, only for private promotion authority.
+     * @param publicRepairCode Closed repair code emitted by deterministic public validation.
+     */
+    data class Rejected(
+        val reason: String,
+        val authority: ToolPromotionRejectionAuthority =
+            ToolPromotionRejectionAuthority.PUBLIC_CONTRACT,
+        val privateFailure: PrivatePromotionFailure? = null,
+        val publicRepairCode: ToolRepairCode? = null
+    ) : ToolPromotionResult() {
+        init {
+            require(
+                (authority == ToolPromotionRejectionAuthority.PRIVATE_PROMOTION) ==
+                    (privateFailure != null)
+            ) {
+                "Private promotion rejection authority requires exactly one typed failure"
+            }
+            require(
+                publicRepairCode == null ||
+                    authority == ToolPromotionRejectionAuthority.PUBLIC_CONTRACT
+            ) {
+                "Only deterministic public rejection authority may carry a public repair code"
+            }
+            require(privateFailure == null || publicRepairCode == null) {
+                "A promotion rejection cannot mix public and private failure authority"
+            }
+        }
+    }
+}
+
+/** Authority class for a safe tool-promotion rejection. */
+enum class ToolPromotionRejectionAuthority {
+    PUBLIC_CONTRACT,
+    PRIVATE_PROMOTION,
+    INFRASTRUCTURE
 }
 
 /** Typed parent transition committed atomically with an explicitly linked child promotion. */
@@ -80,13 +124,16 @@ data class ToolPromotionLineageTransition(
 /**
  * Promotes tools only after exact Council-contract validation and real bounded sandbox execution.
  *
+ * Candidate tests are public deterministic preflight authority only. Promotion always resolves
+ * and executes the separately sealed private fixtures and never infers them from candidate tests.
+ *
  * @param database Group substrate database.
  * @param runId Owning run.
  * @param groupId Owning group.
  * @param toolsMountHostPath Host path for active executable versions.
  * @param opportunityResolver Sealed Atlas opportunity lookup for a staged submission.
- * @param sealedPromotionTestResolver Private grader-authority fixture lookup. When configured,
- * promotion executes these fixtures rather than worker-submitted lookalikes.
+ * @param sealedPromotionTestResolver Private grader-authority fixture lookup. Promotion requires
+ * this authority and never substitutes worker-authored lookalike tests.
  * @param repository Append-only tool infrastructure authority.
  */
 class ToolPromotionService(
@@ -105,6 +152,11 @@ class ToolPromotionService(
 ) {
     private val contractValidator = ToolPromotionContractValidator()
 
+    /** Resolves the same exact opportunity authority used by promotion. */
+    suspend fun resolveOpportunityAuthority(
+        submission: StagingSubmissionEntity
+    ): ToolOpportunityCommitment? = opportunityResolver(submission)
+
     /** Validates, executes, records, and atomically activates one staged tool version. */
     suspend fun promote(
         submission: StagingSubmissionEntity,
@@ -121,14 +173,19 @@ class ToolPromotionService(
         }
         val payload = runCatching {
             StrictToolPayloadJson.parseToJsonElement(submission.content) as? JsonObject
-        }.getOrNull() ?: return rejected("tool_promotion_invalid_json")
+        }.getOrNull() ?: return rejected(
+            "tool_promotion_invalid_json",
+            ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
+        )
         val parsed = when (val contract = contractValidator.validate(payload, commitment)) {
             is ToolPromotionContractValidationResult.Accepted -> contract.tool
-            is ToolPromotionContractValidationResult.Rejected -> return rejected(contract.reason)
+            is ToolPromotionContractValidationResult.Rejected ->
+                return rejected(contract.reason, contract.repairCode)
         }
-        val promotionTests = sealedPromotionTestResolver?.let { resolver ->
-            val fixtures = resolver(commitment)
-                ?: return rejected("tool_promotion_missing_sealed_test_authority")
+        val sealedResolver = sealedPromotionTestResolver
+            ?: return rejected("tool_promotion_missing_sealed_test_authority")
+        val promotionTests = sealedResolver(commitment)
+            ?.let { fixtures ->
             if (
                 fixtures.size != commitment.opportunity.promotionTestIds.size ||
                 fixtures.mapTo(linkedSetOf(), SealedPromotionTestFixture::id) !=
@@ -144,9 +201,7 @@ class ToolPromotionService(
                 return rejected("tool_promotion_sealed_test_authority_mismatch")
             }
             fixtures
-        } ?: parsed.tests.map {
-            SealedPromotionTestFixture(it.id, it.input, it.expectedOutput)
-        }
+        } ?: return rejected("tool_promotion_missing_sealed_test_authority")
         if ((lineageParentVersionId == null) != (lineageTransition == null)) {
             return rejected("tool_promotion_lineage_transition_pair_required")
         }
@@ -298,13 +353,14 @@ class ToolPromotionService(
                     subjectType = subjectType,
                     subjectId = executionId,
                     kind = CostLedgerEntryKind.RESERVED,
+                    reservedMaximumUsd = 0.0,
                     occurredAt = now()
                 ).withComputedHash()
                 runCatching { costLedgerRepository.reserve(reservation) }.getOrElse { error ->
-                    return rejected(
-                        "tool_promotion_cost_reservation_failed:" +
-                            error.message.orEmpty().take(200)
-                    )
+                    Napier.w(error) {
+                        "[$groupId] Tool promotion cost reservation failed for ${submission.id}"
+                    }
+                    return rejected("tool_promotion_cost_reservation_failed")
                 }
                 val startedAt = now()
                 val result = runCatching {
@@ -330,16 +386,16 @@ class ToolPromotionService(
                     subjectType = subjectType,
                     subjectId = executionId,
                     kind = CostLedgerEntryKind.FINALIZED,
-                    toolCost = MonetaryAmount(MonetaryAmountStatus.UNKNOWN),
+                    toolCost = MonetaryAmount(MonetaryAmountStatus.KNOWN, 0.0),
                     toolComputeMillis = elapsedMillis,
                     wallTimeMillis = elapsedMillis,
                     occurredAt = completedAt
                 ).withComputedHash()
                 runCatching { costLedgerRepository.finalize(finalization) }.getOrElse { error ->
-                    return rejected(
-                        "tool_promotion_cost_finalization_failed:" +
-                            error.message.orEmpty().take(200)
-                    )
+                    Napier.w(error) {
+                        "[$groupId] Tool promotion cost finalization failed for ${submission.id}"
+                    }
+                    return rejected("tool_promotion_cost_finalization_failed")
                 }
                 val output = result.stdout.trim()
                 val outputValidation = ToolPromotionOutputValidator.validate(
@@ -350,6 +406,7 @@ class ToolPromotionService(
                 )
                 val outputElement = outputValidation.output
                 val failure = classifyFailure(result, outputValidation.failure)
+                val privateFailure = classifyPrivateFailure(result, outputValidation)
                 val succeeded = failure == null
                 val execution = ToolExecutionRecord(
                     executionId = executionId,
@@ -384,7 +441,7 @@ class ToolPromotionService(
                 ).withComputedHash()
                 repository.appendExecution(execution)
                 if (!succeeded) {
-                    return rejected("tool_promotion_test_failed:${test.id}:${failure?.name}")
+                    return rejectedPrivate(requireNotNull(privateFailure))
                 }
                 successfulExecutionIds += execution.executionId
             }
@@ -446,7 +503,10 @@ class ToolPromotionService(
                 ToolPromotionResult.Promoted(registryEntry.id)
             } catch (error: Exception) {
                 withContext(Dispatchers.IO) { finalExecutable.delete() }
-                rejected("tool_promotion_activation_failed:${error.message.orEmpty().take(200)}")
+                Napier.w(error) {
+                    "[$groupId] Tool promotion activation failed for ${submission.id}"
+                }
+                rejected("tool_promotion_activation_failed")
             }
         } finally {
             withContext(Dispatchers.IO) { validationRoot.deleteRecursively() }
@@ -464,8 +524,37 @@ class ToolPromotionService(
         else -> null
     }
 
-    private fun rejected(reason: String): ToolPromotionResult.Rejected =
-        ToolPromotionResult.Rejected(reason)
+    private fun classifyPrivateFailure(
+        result: ExecutionResult,
+        outputValidation: ToolPromotionOutputValidation
+    ): PrivatePromotionFailure? = when {
+        result.timedOut -> PrivatePromotionFailure.TIMEOUT
+        result.truncated -> PrivatePromotionFailure.OUTPUT_LIMIT
+        result.exitCode != 0 -> PrivatePromotionFailure.NON_ZERO_EXIT
+        outputValidation.failureClass ==
+            ToolPromotionOutputFailure.EXPECTED_OUTPUT_MISMATCH ->
+            PrivatePromotionFailure.EXPECTED_OUTPUT_MISMATCH
+        outputValidation.failureClass != null ->
+            PrivatePromotionFailure.INVALID_OUTPUT_SCHEMA
+        else -> null
+    }
+
+    private fun rejected(
+        reason: String,
+        publicRepairCode: ToolRepairCode? = null
+    ): ToolPromotionResult.Rejected =
+        ToolPromotionResult.Rejected(
+            reason = reason,
+            publicRepairCode = publicRepairCode
+        )
+
+    private fun rejectedPrivate(
+        failure: PrivatePromotionFailure
+    ): ToolPromotionResult.Rejected = ToolPromotionResult.Rejected(
+        reason = "tool_promotion_private_test_failed",
+        authority = ToolPromotionRejectionAuthority.PRIVATE_PROMOTION,
+        privateFailure = failure
+    )
 
     private fun isExactActivePromotedLifecycle(
         registryEntry: ToolRegistryEntryEntity,

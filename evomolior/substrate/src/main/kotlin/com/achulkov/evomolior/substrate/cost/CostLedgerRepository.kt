@@ -7,9 +7,12 @@ import com.achulkov.evomolior.core.contract.CostLedgerEntry
 import com.achulkov.evomolior.core.contract.CostLedgerEntryKind
 import com.achulkov.evomolior.core.contract.CostLedgerPolicy
 import com.achulkov.evomolior.core.contract.CostLedgerSummary
+import com.achulkov.evomolior.core.contract.CostSubjectType
 import com.achulkov.evomolior.substrate.db.EvoMoliorDatabase
 import com.achulkov.evomolior.substrate.db.entity.CostLedgerEntryEntity
 import kotlinx.serialization.json.Json
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 /** Validates provider/tool cost events and enforces an optional cumulative safety cap atomically. */
 class CostLedgerRepository(
@@ -19,7 +22,8 @@ class CostLedgerRepository(
         encodeDefaults = true
         explicitNulls = true
         ignoreUnknownKeys = false
-    }
+    },
+    private val now: () -> Instant = { Clock.System.now() }
 ) {
     private val dao = database.costLedgerDao()
 
@@ -57,6 +61,34 @@ class CostLedgerRepository(
             "Cost release was invalid or duplicated"
         }
         return entry
+    }
+
+    /**
+     * Atomically proves zero active reservations and permanently rejects future reservations.
+     *
+     * Repeated publication attempts return the first immutable closure authority.
+     */
+    suspend fun closeForPublication(runId: String): CostLedgerEntry {
+        require(runId.isNotBlank()) { "Cost publication closure requires a run ID" }
+        dao.publicationClosure(runId)?.let(::decode)?.let { return it }
+        val closure = CostLedgerEntry(
+            entryId = "cost-publication-closed-$runId",
+            reservationId = "publication-closure-$runId",
+            runId = runId,
+            groupId = null,
+            agentId = null,
+            subjectType = CostSubjectType.PUBLICATION_BARRIER,
+            subjectId = "publication-closure",
+            kind = CostLedgerEntryKind.PUBLICATION_CLOSED,
+            occurredAt = now()
+        ).withComputedHash()
+        check(dao.closeForPublication(closure.toEntity())) {
+            val active = dao.activeReservationCount(runId)
+            "Publication closure blocked by $active active cost reservation(s) for run=$runId"
+        }
+        return requireNotNull(dao.publicationClosure(runId)) {
+            "Cost publication closure did not persist for run=$runId"
+        }.let(::decode)
     }
 
     /** Returns one exact immutable ledger event. */

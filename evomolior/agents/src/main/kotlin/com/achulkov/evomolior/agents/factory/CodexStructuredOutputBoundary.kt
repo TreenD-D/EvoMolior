@@ -72,7 +72,10 @@ internal data class CodexOutputSchemaDocument(
         fun from(schema: LLMParams.Schema): CodexOutputSchemaDocument {
             val jsonSchema = schema as? LLMParams.Schema.JSON
                 ?: error("Codex/ChatGPT supports only JSON output schemas")
-            val bytes = jsonSchema.schema.toString().toByteArray(Charsets.UTF_8)
+            val bytes = jsonSchema.schema
+                .withoutCodexUnsupportedKeywords()
+                .toString()
+                .toByteArray(Charsets.UTF_8)
             return CodexOutputSchemaDocument(
                 name = schema.name,
                 bytes = bytes,

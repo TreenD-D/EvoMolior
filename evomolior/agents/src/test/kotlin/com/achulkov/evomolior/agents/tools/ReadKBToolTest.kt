@@ -176,6 +176,76 @@ class ReadKBToolTest {
     }
 
     @Test
+    fun `long bodies are paged with an explicit continuation offset`() = runTest {
+        val runId = "run-read-kb-paging"
+        val groupId = "group-0"
+        val db = SubstrateDatabaseFactory(createTempDirectory("read-kb-paging-").toFile())
+            .get(runId, groupId)
+        val body = "# Long report\n\n" + "Inventory row with evidence. ".repeat(300) + "TAIL-MARKER"
+        db.knowledgeBaseDao().insert(
+            KnowledgeBaseEntryEntity(
+                id = "kb-long",
+                content = body,
+                sourceAgentId = "author",
+                generation = 1,
+                domain = "evidence",
+                groupId = groupId,
+                runId = runId,
+                createdAtMs = 1_000L
+            )
+        )
+        val tool = ReadKBTool(knowledgeBaseDao = db.knowledgeBaseDao(), runId = runId, groupId = groupId)
+
+        val index = tool.execute(ReadKBTool.Args())
+        assertContains(index, "Length: ${body.length} chars")
+
+        val first = tool.execute(ReadKBTool.Args(entryIds = listOf("kb-long")))
+        assertFalse(first.contains("TAIL-MARKER"))
+        assertContains(first, "offset=$KB_BODY_MAX_CHARS) to continue")
+
+        val second = tool.execute(ReadKBTool.Args(entryIds = listOf("kb-long"), offset = KB_BODY_MAX_CHARS))
+        assertContains(second, "Content (characters $KB_BODY_MAX_CHARS-${body.length} of ${body.length}):")
+        assertContains(second, "TAIL-MARKER")
+        assertFalse(second.contains("to continue"))
+        assertEquals(body, body.substring(0, KB_BODY_MAX_CHARS) + body.substring(KB_BODY_MAX_CHARS))
+    }
+
+    @Test
+    fun `entry without lineage anchor is still readable and simply not recorded`() = runTest {
+        val runId = "run-read-kb-no-anchor"
+        val groupId = "group-0"
+        val db = SubstrateDatabaseFactory(createTempDirectory("read-kb-no-anchor-").toFile())
+            .get(runId, groupId)
+        db.knowledgeBaseDao().insert(
+            KnowledgeBaseEntryEntity(
+                id = "kb-rolled-up",
+                content = "# Rolled-up evidence\n\nCanonical body without a Critic result record.",
+                sourceAgentId = "system",
+                generation = 1,
+                domain = "evidence",
+                groupId = groupId,
+                runId = runId,
+                createdAtMs = 1_000L
+            )
+        )
+        val graph = ContributionGraphRepository(db)
+
+        val result = ReadKBTool(
+            knowledgeBaseDao = db.knowledgeBaseDao(),
+            runId = runId,
+            groupId = groupId,
+            agentId = "archivist",
+            round = 1,
+            contributionGraphRepository = graph,
+            useIdFactory = { "use-unanchored" }
+        ).execute(ReadKBTool.Args(entryIds = listOf("kb-rolled-up")))
+
+        // Previously this threw "KB read lacks immutable canonical authority" and the read failed.
+        assertContains(result, "Canonical body without a Critic result record.")
+        assertEquals(null, graph.downstreamUse("downstream-read:use-unanchored"))
+    }
+
+    @Test
     fun `blank query surfaces organized active headers and excludes archived history`() = runTest {
         val runId = "run-read-kb-organized"
         val groupId = "group-0"

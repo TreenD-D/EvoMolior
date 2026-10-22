@@ -42,6 +42,7 @@ import com.achulkov.evomolior.substrate.db.entity.ReceiverScoreContributionRecor
 import com.achulkov.evomolior.substrate.db.entity.BenchmarkScoreContributionRecordEntity
 import com.achulkov.evomolior.substrate.db.entity.ControlInterventionRecordEntity
 import com.achulkov.evomolior.substrate.db.entity.SummaryValidationRecordEntity
+import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -520,7 +521,19 @@ class ContributionGraphRepository(
                 }
             }
         }
-        return dao.promotedCriticDecisionsForRun(runId, groupId)
+        val decisions = dao.promotedCriticDecisionsForRun(runId, groupId)
+        val submissionsById = database.stagingDao()
+            .getByIds(decisions.map(CriticDecisionEntity::submissionId))
+            .associateBy(StagingSubmissionEntity::id)
+        return decisions
+            .filter { decision ->
+                val submission = requireNotNull(submissionsById[decision.submissionId]) {
+                    "Promoted Critic decision lacks its staging authority"
+                }
+                // Provisional hypotheses may propagate through the ledger, but never become
+                // a final-output source merely because Critic accepted their generic artifact.
+                submission.type != "HYPOTHESIS"
+            }
             .map { decision ->
                 FinalDeliverableSource(
                     nodeId = null,

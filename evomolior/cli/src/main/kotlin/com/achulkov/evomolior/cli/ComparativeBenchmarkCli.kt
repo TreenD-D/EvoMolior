@@ -279,6 +279,9 @@ internal data class ComparativeBenchmarkCliOptions(
 internal object ComparativeBenchmarkCliArguments {
     /** Parses comparison flags and delegates the remaining benchmark flags. */
     fun parse(args: Array<String>): ComparativeBenchmarkCliOptions? {
+        if (args.any { it == "-codex-preset" || it == "--codex-preset" }) {
+            throw CliUsageException("-codex-preset is not supported by comparative benchmarks")
+        }
         if (args.any { it == "-h" || it == "--help" }) return null
         val benchmarkArgs = mutableListOf<String>()
         var experimentId = "comparison-${System.currentTimeMillis()}"

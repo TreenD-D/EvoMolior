@@ -19,7 +19,32 @@ import androidx.room.PrimaryKey
         Index("status"),
         Index("type"),
         Index("generation"),
-        Index(value = ["runId", "groupId", "status"])
+        Index(value = ["runId", "groupId", "status"]),
+        Index(
+            value = [
+                "runId",
+                "groupId",
+                "wipTaskRef",
+                "status",
+                "type",
+                "generation",
+                "reviewedAtMs",
+                "submittedAtMs",
+                "id"
+            ],
+            orders = [
+                Index.Order.ASC,
+                Index.Order.ASC,
+                Index.Order.ASC,
+                Index.Order.ASC,
+                Index.Order.ASC,
+                Index.Order.DESC,
+                Index.Order.DESC,
+                Index.Order.DESC,
+                Index.Order.ASC
+            ],
+            name = "index_staging_tool_repair_history"
+        )
     ]
 )
 data class StagingSubmissionEntity(
@@ -50,5 +75,7 @@ data class StagingSubmissionEntity(
     /** Canonical substrate reference created by a successful Critic promotion. */
     val promotedArtifactRef: String? = null,
     /** Hash of the exact promoted submission content. */
-    val promotedArtifactHash: String? = null
+    val promotedArtifactHash: String? = null,
+    /** Safe runtime-owned candidate authority; never contains private fixtures or values. */
+    val toolCandidateAuthorityJson: String? = null
 )

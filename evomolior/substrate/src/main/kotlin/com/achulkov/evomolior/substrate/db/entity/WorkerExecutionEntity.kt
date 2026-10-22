@@ -2,12 +2,14 @@ package com.achulkov.evomolior.substrate.db.entity
 
 import androidx.room.Entity
 import androidx.room.Index
+import androidx.room.ColumnInfo
 
 /** Immutable registration of one agent lifecycle for publication accounting. */
 @Entity(
     tableName = "agent_lifecycle_registrations",
     indices = [
         Index(value = ["runId", "groupId", "classification"]),
+        Index(value = ["runId", "groupId", "duty"]),
         Index(value = ["runId", "groupId", "agentId"], unique = true),
         Index(value = ["registrationHash"], unique = true)
     ]
@@ -21,6 +23,10 @@ data class AgentLifecycleRegistrationEntity(
     val role: String,
     val generation: Int,
     val classification: String,
+    @ColumnInfo(defaultValue = "'NONE'")
+    val duty: String = "NONE",
+    val workspaceId: String? = null,
+    val workspaceSourceHash: String? = null,
     val registrationHash: String,
     val contentJson: String,
     val registeredAtMs: Long
@@ -138,4 +144,31 @@ data class AgentExitRecordEntity(
     val wasKilled: Boolean,
     val contentJson: String,
     val exitedAtMs: Long
+)
+
+/** Append-only committed runtime-state transition for one registered agent lifecycle. */
+@Entity(
+    tableName = "agent_runtime_state_events",
+    indices = [
+        Index(
+            value = ["runId", "groupId", "agentId", "generation", "revision"],
+            unique = true
+        ),
+        Index(value = ["runId", "groupId", "agentId", "generation", "occurredAtMs"])
+    ]
+)
+data class AgentRuntimeStateEventEntity(
+    @androidx.room.PrimaryKey
+    val eventId: String,
+    val runId: String,
+    val groupId: String,
+    val agentId: String,
+    val generation: Int,
+    val revision: Long,
+    val intent: String,
+    val previousStateHash: String?,
+    val stateHash: String,
+    val eventHash: String,
+    val contentJson: String,
+    val occurredAtMs: Long
 )

@@ -117,6 +117,14 @@ interface EvoMoliorEngineService {
     suspend fun getResultsBundle(runId: String): ByteArray?
 
     /**
+     * Returns a strict typed projection of the verified terminal outcome archive.
+     *
+     * @param runId Completed, recovered, or startup-rejected run identity.
+     */
+    suspend fun getRunOutcomePresentation(runId: String): RunOutcomePresentation? =
+        getResultsBundle(runId)?.let(RunOutcomeBundleInspector::inspect)
+
+    /**
      * Returns the current durable Overseer kernel snapshot.
      */
     suspend fun getOverseerKernelState(): OverseerKernelState
@@ -259,7 +267,7 @@ data class EngineState(
 )
 
 @Serializable
-enum class EngineStatus { IDLE, GENESIS, RUNNING, PAUSED, EVALUATING, COMPLETED }
+enum class EngineStatus { IDLE, GENESIS, RUNNING, PAUSED, EVALUATING, COMPLETED, RECOVERED }
 
 /**
  * High-level summary of a single group's current state.

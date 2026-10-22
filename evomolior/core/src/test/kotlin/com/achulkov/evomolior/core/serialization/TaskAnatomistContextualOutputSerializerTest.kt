@@ -7,6 +7,7 @@ import com.achulkov.evomolior.core.atlas.EvidenceProfile
 import com.achulkov.evomolior.core.atlas.NodeDeliverableContract
 import com.achulkov.evomolior.core.atlas.NodeId
 import com.achulkov.evomolior.core.atlas.NodeKind
+import com.achulkov.evomolior.core.atlas.PhysicalDimension
 import com.achulkov.evomolior.core.atlas.ProofContract
 import com.achulkov.evomolior.core.atlas.ProofMethod
 import com.achulkov.evomolior.core.atlas.ReplicationPolicy
@@ -25,6 +26,9 @@ import com.achulkov.evomolior.core.council.LocalNodeKey
 import com.achulkov.evomolior.core.council.NodeAtomicityAssessment
 import com.achulkov.evomolior.core.council.ReceiverContractDraft
 import com.achulkov.evomolior.core.council.TaskAnatomistOutput
+import com.achulkov.evomolior.core.repair.AggregationSemantics
+import com.achulkov.evomolior.core.repair.QuantitySpec
+import com.achulkov.evomolior.core.repair.TimeBasis
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -56,6 +60,37 @@ class TaskAnatomistContextualOutputSerializerTest {
         assertNotNull(
             wire.getValue("nodes").jsonArray.last().jsonObject["toolOpportunity"]
         )
+        assertEquals(
+            output,
+            persistedJson.decodeFromJsonElement(TaskAnatomistOutput.serializer(), wire)
+        )
+    }
+
+    @Test
+    fun `persisted task wire retains default-null quantity compatibility`() {
+        val output = output(listOf(node("typed", quantityToolOpportunity())))
+        val persistedJson = Json {
+            explicitNulls = false
+            encodeDefaults = false
+        }
+        val wire = persistedJson.encodeToJsonElement(
+            TaskAnatomistOutput.serializer(),
+            output
+        ).jsonObject
+        val quantity = wire.getValue("nodes")
+            .jsonArray
+            .single()
+            .jsonObject
+            .getValue("toolOpportunity")
+            .jsonObject
+            .getValue("requiredInputs")
+            .jsonArray
+            .single()
+            .jsonObject
+            .getValue("quantitySpec")
+            .jsonObject
+
+        assertFalse("timeBasis" in quantity)
         assertEquals(
             output,
             persistedJson.decodeFromJsonElement(TaskAnatomistOutput.serializer(), wire)
@@ -198,6 +233,72 @@ class TaskAnatomistContextualOutputSerializerTest {
         )
     }
 
+    @Test
+    fun `full wire requires explicit nullable time basis inside quantity specs`() {
+        val serializer = TaskAnatomistContextualOutputSerializer(
+            AcceptanceProfile.APPENDIX_B_FULL
+        )
+        val output = output(listOf(node("typed", quantityToolOpportunity())))
+        val wire = serializer.encodeProviderWire(output).jsonObject
+        val typedNode = wire.getValue("nodesWithToolOpportunity")
+            .jsonArray
+            .single()
+            .jsonObject
+        val opportunity = typedNode.getValue("toolOpportunity").jsonObject
+        val input = opportunity.getValue("requiredInputs").jsonArray.single().jsonObject
+        val inputQuantity = input.getValue("quantitySpec").jsonObject
+        val outputItems = opportunity.getValue("requiredOutputs")
+            .jsonArray
+            .single()
+            .jsonObject
+            .getValue("items")
+            .jsonObject
+        val outputQuantity = outputItems.getValue("quantitySpec").jsonObject
+
+        assertEquals(JsonNull, inputQuantity.getValue("timeBasis"))
+        assertEquals(
+            TimeBasis.SECOND.name,
+            outputQuantity.getValue("timeBasis").jsonPrimitive.content
+        )
+        assertEquals(output, serializer.decodeProviderWire(wire))
+
+        val outputWithoutTimeBasis = JsonObject(
+            outputQuantity - "timeBasis"
+        )
+        val outputItemsWithoutTimeBasis = JsonObject(
+            outputItems + ("quantitySpec" to outputWithoutTimeBasis)
+        )
+        val outputField = opportunity.getValue("requiredOutputs")
+            .jsonArray
+            .single()
+            .jsonObject
+        val outputFieldWithoutTimeBasis = JsonObject(
+            outputField + ("items" to outputItemsWithoutTimeBasis)
+        )
+        val opportunityWithoutTimeBasis = JsonObject(
+            opportunity + (
+                "requiredOutputs" to JsonArray(listOf(outputFieldWithoutTimeBasis))
+            )
+        )
+        assertFailsWith<IllegalArgumentException> {
+            serializer.decodeProviderWire(
+                JsonObject(
+                wire + (
+                    "nodesWithToolOpportunity" to JsonArray(
+                        listOf(
+                            JsonObject(
+                                typedNode + (
+                                    "toolOpportunity" to opportunityWithoutTimeBasis
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+            )
+        }
+    }
+
     private fun assertRejected(
         serializer: TaskAnatomistContextualOutputSerializer,
         wire: JsonObject
@@ -279,4 +380,42 @@ class TaskAnatomistContextualOutputSerializerTest {
         maximumRuntimeMillis = 1_000,
         maximumOutputBytes = 4_096
     )
+
+    private fun quantityToolOpportunity(): ToolOpportunity {
+        val dimensionless = PhysicalDimension()
+        return toolOpportunity("quantity-tool").copy(
+            requiredInputs = listOf(
+                TypedField(
+                    name = "interval_count",
+                    type = TypedFieldType.INTEGER,
+                    description = "Number of bounded intervals.",
+                    physicalDimension = dimensionless,
+                    quantitySpec = QuantitySpec(
+                        dimension = dimensionless,
+                        unitId = "1",
+                        scaleToSi = 1.0,
+                        aggregation = AggregationSemantics.INSTANTANEOUS
+                    )
+                )
+            ),
+            requiredOutputs = listOf(
+                TypedField(
+                    name = "interval_rates",
+                    type = TypedFieldType.ARRAY,
+                    description = "One bounded rate per interval.",
+                    itemType = TypedFieldType.NUMBER,
+                    minimumItems = 2,
+                    maximumItems = 2,
+                    physicalDimension = dimensionless,
+                    quantitySpec = QuantitySpec(
+                        dimension = dimensionless,
+                        unitId = "%",
+                        scaleToSi = 0.01,
+                        aggregation = AggregationSemantics.PER_INTERVAL_RATE,
+                        timeBasis = TimeBasis.SECOND
+                    )
+                )
+            )
+        )
+    }
 }

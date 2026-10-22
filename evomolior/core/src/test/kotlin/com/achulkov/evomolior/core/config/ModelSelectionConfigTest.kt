@@ -158,6 +158,16 @@ class ModelSelectionConfigTest {
         val candidates = LlmBackend.codexCliCandidates { null }.toList()
 
         assertTrue(LlmBackend.CHATGPT_APP_CODEX_CLI_PATH in candidates)
+        assertTrue(candidates.indexOf(LlmBackend.CHATGPT_APP_NESTED_CODEX_CLI_PATH) <
+            candidates.indexOf(LlmBackend.CHATGPT_APP_CODEX_CLI_PATH))
+        assertEquals(listOf("/operator/codex", "/environment/codex"),
+            LlmBackend.codexCliCandidates {
+                when (it) {
+                    "EVOMOLIOR_CODEX_CLI" -> "/operator/codex"
+                    "CODEX_CLI_PATH" -> "/environment/codex"
+                    else -> null
+                }
+            }.take(2).toList())
         assertTrue(
             candidates.indexOf(LlmBackend.CHATGPT_APP_CODEX_CLI_PATH) <
                 candidates.indexOf(LlmBackend.DEFAULT_CODEX_APP_CLI_PATH)

@@ -108,7 +108,8 @@ class CouncilSpecialistClosureValidatorTest {
         val unmappedNode = base.taskAnatomist.nodes.last().key
         val bundle = base.copy(
             kgArchitect = base.kgArchitect.copy(
-                nodeMappings = base.kgArchitect.nodeMappings - unmappedNode
+                nodeMappings = base.kgArchitect.nodeMappings - unmappedNode,
+                aliases = base.kgArchitect.aliases + ("supports" to "supports")
             ),
             seedCurator = base.seedCurator.copy(
                 primordialKgFacts = listOf(
@@ -137,6 +138,11 @@ class CouncilSpecialistClosureValidatorTest {
         assertTrue(
             report.errorsFor(Role.CouncilKGArchitect).any {
                 it.path.segments == listOf("kgArchitect", "nodeMappings")
+            }
+        )
+        assertTrue(
+            report.errorsFor(Role.CouncilKGArchitect).any {
+                it.path.segments == listOf("kgArchitect", "aliases", "supports")
             }
         )
         assertTrue(
@@ -186,6 +192,45 @@ class CouncilSpecialistClosureValidatorTest {
                     it.path.segments == listOf("taskAnatomist", "nodes", "stageKey")
             }
         )
+    }
+
+    @Test
+    fun `normal field without Task-owned test authority routes repair before synthesis`() {
+        val base = CouncilSpecialistBundle.from(fixtures.outputs())
+        val testless = base.copy(
+            taskAnatomist = base.taskAnatomist.copy(
+                nodes = base.taskAnatomist.nodes.map { node ->
+                    node.copy(
+                        proofContract = node.proofContract.copy(
+                            executableTestIds = emptySet()
+                        ),
+                        toolOpportunity = node.toolOpportunity?.copy(
+                            promotionTestIds = emptySet()
+                        )
+                    )
+                }
+            )
+        )
+
+        val report = CouncilSpecialistClosureValidator.validate(
+            runId = "normal-testless-specialist-closure",
+            envelope = fixtures.envelope(),
+            bundle = testless
+        )
+        val error = report.errors.single {
+            it.path.segments ==
+                listOf(
+                    "taskAnatomist",
+                    "nodes",
+                    "proofContract",
+                    "executableTestIds"
+                )
+        }
+
+        assertEquals(FieldCompileErrorCode.ENVELOPE_VIOLATION, error.code)
+        assertEquals(setOf(Role.CouncilTaskAnatomist), error.responsibleCouncilRoles)
+        assertTrue(error.message.contains("at least one executable or promotion test"))
+        assertTrue(Role.CouncilTaskAnatomist !in report.frozenValidRoleHashes)
     }
 
     @Test

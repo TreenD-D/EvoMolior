@@ -14,6 +14,7 @@ import com.achulkov.evomolior.agents.factory.installProviderCostRecorder
 import com.achulkov.evomolior.agents.factory.runWithOpenRouterProviderRetry
 import com.achulkov.evomolior.core.contract.BlockingAgentAbortException
 import com.achulkov.evomolior.core.config.LlmBackend
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CancellationException
@@ -44,13 +45,20 @@ import kotlinx.coroutines.withTimeout
 class DifferentialPrivacyTransform(
     private val openRouterApiKey: String,
     private val llmBackend: LlmBackend = LlmBackend.OPENROUTER,
+    private val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     private val modelId: String = ModelSelectionConfig.DEFAULT_LEAK_TRANSFORM_MODEL,
     private val timeoutMs: Long = 240_000L,
     private val promptExecutor: PromptExecutor? = null,
     private var providerCostRecorder: ProviderCallCostRecorder? = null
 ) {
 
-    private val executor by lazy { promptExecutor ?: LlmExecutorFactory.create(llmBackend, openRouterApiKey) }
+    private val executor by lazy {
+        promptExecutor ?: LlmExecutorFactory.create(
+            backend = llmBackend,
+            apiKey = openRouterApiKey,
+            codexReasoningEffort = codexReasoningEffort
+        )
+    }
 
     /**
      * Transforms [rawContent] so that it cannot be traced back to the source group.

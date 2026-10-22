@@ -2,6 +2,9 @@ package com.achulkov.evomolior.core.atlas
 
 import com.achulkov.evomolior.core.contract.NodePortfolio
 import com.achulkov.evomolior.core.contract.AgentLifecycleRegistration
+import com.achulkov.evomolior.core.contract.AgentExitRecord
+import com.achulkov.evomolior.core.contract.AgentRuntimeState
+import com.achulkov.evomolior.core.contract.AgentRuntimeStateEvent
 import com.achulkov.evomolior.core.contract.ContributionCommit
 import com.achulkov.evomolior.core.contract.ContributionEdge
 import com.achulkov.evomolior.core.contract.CriticDecisionRecord
@@ -18,6 +21,7 @@ import com.achulkov.evomolior.core.contract.PublicationStateEvent
 import com.achulkov.evomolior.core.contract.FinalCandidateRecord
 import com.achulkov.evomolior.core.contract.WorkerView
 import com.achulkov.evomolior.core.contract.GroupFeedbackPacket
+import com.achulkov.evomolior.core.contract.ProvisionalNovelHypothesis
 import com.achulkov.evomolior.core.grader.EvaluationIndependenceProfile
 import com.achulkov.evomolior.core.grader.GraderAtlas
 import com.achulkov.evomolior.core.grader.GraderAtlasNode
@@ -152,6 +156,18 @@ object AtlasHashing {
     /** Hashes exact UTF-8 text without normalization. */
     fun hashText(value: String): String = sha256(value)
 
+    /** Hashes one immutable agent exit authority. */
+    fun hashAgentExitRecord(record: AgentExitRecord): String =
+        hashSerializable(AgentExitRecord.serializer(), record)
+
+    /** Hashes one runtime-state snapshot while excluding its self-referential hash. */
+    fun hashAgentRuntimeState(state: AgentRuntimeState): String =
+        hashWithoutField(AgentRuntimeState.serializer(), state, "stateHash")
+
+    /** Hashes one runtime-state transition while excluding its self-referential hash. */
+    fun hashAgentRuntimeStateEvent(event: AgentRuntimeStateEvent): String =
+        hashWithoutField(AgentRuntimeStateEvent.serializer(), event, "eventHash")
+
     /** Hashes an exact node-grade bundle while excluding its self-referential hash field. */
     fun hashNodeGradeBundle(bundle: NodeGradeBundle): String =
         hashWithoutField(NodeGradeBundle.serializer(), bundle, "bundleHash")
@@ -276,10 +292,18 @@ object AtlasHashing {
 
     /** Hashes one immutable agent lifecycle registration excluding its self-hash. */
     fun hashAgentLifecycleRegistration(value: AgentLifecycleRegistration): String =
-        hashWithoutField(
+        hashWithoutFields(
             AgentLifecycleRegistration.serializer(),
             value,
-            "registrationHash"
+            if (
+                value.duty == com.achulkov.evomolior.core.contract.AgentLifecycleDuty.NONE &&
+                value.workspaceId == null &&
+                value.workspaceSourceHash == null
+            ) {
+                setOf("registrationHash", "duty", "workspaceId", "workspaceSourceHash")
+            } else {
+                setOf("registrationHash")
+            }
         )
 
     /** Hashes one publication transition excluding its self-hash. */
@@ -416,6 +440,14 @@ object AtlasHashing {
 
     fun hashOutlierFitnessRecord(value: OutlierFitnessRecord): String =
         hashWithoutField(OutlierFitnessRecord.serializer(), value, "recordHash")
+
+    /** Hashes one provisional novel hypothesis excluding its self-referential hash. */
+    fun hashProvisionalNovelHypothesis(value: ProvisionalNovelHypothesis): String =
+        hashWithoutField(
+            ProvisionalNovelHypothesis.serializer(),
+            value,
+            "hypothesisHash"
+        )
 
     /** Hashes Atlas provenance for a tool opportunity excluding its self hash. */
     fun hashToolOpportunityCommitment(value: ToolOpportunityCommitment): String =

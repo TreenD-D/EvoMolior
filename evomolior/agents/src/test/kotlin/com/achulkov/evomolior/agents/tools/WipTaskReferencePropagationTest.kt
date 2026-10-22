@@ -1,5 +1,8 @@
 package com.achulkov.evomolior.agents.tools
 
+import com.achulkov.evomolior.core.atlas.CompiledToolCandidateWire
+import com.achulkov.evomolior.core.atlas.ToolCandidateWireCompilation
+import com.achulkov.evomolior.core.atlas.ToolCandidateWireDraft
 import com.achulkov.evomolior.core.budget.BudgetConfig
 import com.achulkov.evomolior.core.budget.BudgetLedger
 import com.achulkov.evomolior.core.model.GroupProfile
@@ -128,6 +131,121 @@ class WipTaskReferencePropagationTest {
         )
         assertEquals("pending", submissions.getValue("{\"candidate\":2}").status)
     }
+
+    @Test
+    fun `ordinary worker tool staging rejects missing assigned opportunity before budget or persistence`() =
+        runTest {
+            val dataRoot = createTempDirectory("write-staging-tool-authority-missing-").toFile()
+            val db = SubstrateDatabaseFactory(dataRoot).get("run-tool-authority", "group-0")
+            val budget = ledger()
+            val before = budget.snapshot().currentBalance
+            val tool = WriteStagingTool(
+                stagingDao = db.stagingDao(),
+                budgetLedger = budget,
+                runId = "run-tool-authority",
+                groupId = "group-0",
+                agentId = "agent-1",
+                role = "Builder",
+                generation = 0,
+                defaultWipTaskRef = "node-tool",
+                requireAssignedToolAuthority = true
+            )
+
+            val result = tool.execute(
+                WriteStagingTool.Args(
+                    type = "TOOL",
+                    content = """{"opportunityId":"opportunity-tool"}"""
+                )
+            )
+
+            assertEquals(
+                "Error: TOOL submission requires an assigned sealed tool opportunity.",
+                result
+            )
+            assertEquals(before, budget.snapshot().currentBalance)
+            assertTrue(
+                db.stagingDao().getByAgent(
+                    "run-tool-authority",
+                    "group-0",
+                    "agent-1"
+                ).isEmpty()
+            )
+        }
+
+    @Test
+    fun `ordinary worker tool staging rejects mismatched node and opportunity without mutation`() =
+        runTest {
+            val dataRoot = createTempDirectory("write-staging-tool-authority-mismatch-").toFile()
+            val db = SubstrateDatabaseFactory(dataRoot).get("run-tool-authority", "group-0")
+            val budget = ledger()
+            val before = budget.snapshot().currentBalance
+            val tool = WriteStagingTool(
+                stagingDao = db.stagingDao(),
+                budgetLedger = budget,
+                runId = "run-tool-authority",
+                groupId = "group-0",
+                agentId = "agent-1",
+                role = "Builder",
+                generation = 0,
+                defaultWipTaskRef = "node-tool",
+                requireAssignedToolAuthority = true,
+                assignedToolAuthority = AssignedToolSubmissionAuthority(
+                    nodeId = "node-tool",
+                    opportunityId = "opportunity-tool",
+                    opportunityCommitmentHash = "a".repeat(64)
+                ),
+                toolCandidateWireCompiler = { draft ->
+                    val wrongNode = draft.sourceArtifactPath == "src/wrong-node.py"
+                    val opportunityId = if (wrongNode) {
+                        "opportunity-tool"
+                    } else {
+                        "opportunity-other"
+                    }
+                    ToolCandidateWireCompilation.Compiled(
+                        CompiledToolCandidateWire(
+                            content = """{"opportunityId":"$opportunityId"}""",
+                            wipTaskRef = if (wrongNode) "node-other" else "node-tool",
+                            opportunityCommitmentHash = "a".repeat(64),
+                            sourceHash = "b".repeat(64),
+                            supplementalTestsHash = null,
+                            candidateHash = "c".repeat(64)
+                        )
+                    )
+                }
+            )
+
+            val wrongNode = tool.execute(
+                WriteStagingTool.Args(
+                    type = "TOOL",
+                    toolCandidate = ToolCandidateWireDraft(
+                        opportunityHandle = "T1",
+                        sourceArtifactPath = "src/wrong-node.py",
+                        entryPoint = "run_tool"
+                    )
+                )
+            )
+            val wrongOpportunity = tool.execute(
+                WriteStagingTool.Args(
+                    type = "TOOL",
+                    toolCandidate = ToolCandidateWireDraft(
+                        opportunityHandle = "T1",
+                        sourceArtifactPath = "src/wrong-opportunity.py",
+                        entryPoint = "run_tool"
+                    )
+                )
+            )
+
+            assertTrue(wrongNode.contains("exact assigned Atlas node"))
+            assertTrue(wrongOpportunity.contains("does not match assigned authority"))
+            assertEquals(before, budget.snapshot().currentBalance)
+            assertTrue(
+                db.stagingDao().getByAgent(
+                    "run-tool-authority",
+                    "group-0",
+                    "agent-1"
+                ).isEmpty()
+            )
+        }
 
     @Test
     fun `write staging tool accepts article sized doc payloads below raised cap`() = runTest {

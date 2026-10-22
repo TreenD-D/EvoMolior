@@ -139,6 +139,7 @@ data class CompiledCouncilCandidateManifestV3(
                 graderField = graderStartingField,
                 atlas = workerAtlas,
                 graderAtlas = graderAtlas,
+                receiverContract = receiverContract,
                 envelope = executionEnvelope,
                 report = consistencyReport
             )

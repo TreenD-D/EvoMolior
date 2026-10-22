@@ -53,6 +53,37 @@ interface StagingDao {
         generation: Int
     ): List<StagingSubmissionEntity>
 
+    /** Returns only Critic-promoted speculative hypothesis payloads for provisional propagation. */
+    @Query(
+        """
+        SELECT * FROM staging_submissions
+        WHERE runId = :runId AND groupId = :groupId
+          AND type = 'HYPOTHESIS' AND status = 'promoted' AND speculative = 1
+        ORDER BY generation ASC, submittedAtMs ASC, id ASC
+        LIMIT :limit
+        """
+    )
+    suspend fun getPromotedHypotheses(
+        runId: String,
+        groupId: String,
+        limit: Int
+    ): List<StagingSubmissionEntity>
+
+    /** Returns every reviewed TOOL candidate for one generation in stable submission order. */
+    @Query(
+        """
+        SELECT * FROM staging_submissions
+        WHERE runId = :runId AND groupId = :groupId AND generation = :generation
+          AND type = 'TOOL' AND status IN ('promoted', 'rejected')
+        ORDER BY submittedAtMs ASC, id ASC
+        """
+    )
+    suspend fun getReviewedToolsByGeneration(
+        runId: String,
+        groupId: String,
+        generation: Int
+    ): List<StagingSubmissionEntity>
+
     @Query("""
         SELECT * FROM staging_submissions 
         WHERE runId = :runId AND groupId = :groupId AND status = 'pending'
@@ -66,6 +97,29 @@ interface StagingDao {
         ORDER BY submittedAtMs DESC
     """)
     suspend fun getByAgent(runId: String, groupId: String, agentId: String): List<StagingSubmissionEntity>
+
+    /**
+     * Returns bounded prior rejected tool attempts for one exact authoring node.
+     *
+     * Callers must additionally validate the staged opportunity ID against sealed Atlas authority.
+     */
+    @Query("""
+        SELECT * FROM staging_submissions
+        WHERE runId = :runId AND groupId = :groupId
+          AND wipTaskRef = :authoringNodeId
+          AND generation < :beforeGeneration
+          AND status = 'rejected' AND type = 'TOOL'
+        ORDER BY generation DESC, reviewedAtMs DESC, submittedAtMs DESC, id ASC
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getPriorRejectedToolsForNode(
+        runId: String,
+        groupId: String,
+        authoringNodeId: String,
+        beforeGeneration: Int,
+        limit: Int,
+        offset: Int
+    ): List<StagingSubmissionEntity>
 
     @Query("""
         SELECT COUNT(*) FROM staging_submissions 

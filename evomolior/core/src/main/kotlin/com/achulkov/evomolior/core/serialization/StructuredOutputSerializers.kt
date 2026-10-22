@@ -3,6 +3,9 @@ package com.achulkov.evomolior.core.serialization
 import com.achulkov.evomolior.core.atlas.PhysicalDimension
 import com.achulkov.evomolior.core.atlas.TypedField
 import com.achulkov.evomolior.core.atlas.TypedFieldType
+import com.achulkov.evomolior.core.repair.QuantitySpec
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import com.achulkov.evomolior.core.council.LocalNodeKey
 import com.achulkov.evomolior.core.model.Role
 import kotlinx.serialization.KSerializer
@@ -156,7 +159,9 @@ private sealed interface StructuredTypedField {
         override val description: String,
         override val required: Boolean,
         override val validationRules: List<String>,
-        val physicalDimension: PhysicalDimension?
+        val physicalDimension: PhysicalDimension?,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val quantitySpec: QuantitySpec? = null
     ) : StructuredTypedField
 
     @Serializable
@@ -166,7 +171,9 @@ private sealed interface StructuredTypedField {
         override val description: String,
         override val required: Boolean,
         override val validationRules: List<String>,
-        val physicalDimension: PhysicalDimension?
+        val physicalDimension: PhysicalDimension?,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val quantitySpec: QuantitySpec? = null
     ) : StructuredTypedField
 
     @Serializable
@@ -218,11 +225,19 @@ private sealed interface StructuredArrayItems {
 
     @Serializable
     @SerialName("INTEGER_ITEMS")
-    data class IntegerItems(val physicalDimension: PhysicalDimension?) : StructuredArrayItems
+    data class IntegerItems(
+        val physicalDimension: PhysicalDimension?,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val quantitySpec: QuantitySpec? = null
+    ) : StructuredArrayItems
 
     @Serializable
     @SerialName("NUMBER_ITEMS")
-    data class NumberItems(val physicalDimension: PhysicalDimension?) : StructuredArrayItems
+    data class NumberItems(
+        val physicalDimension: PhysicalDimension?,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val quantitySpec: QuantitySpec? = null
+    ) : StructuredArrayItems
 
     @Serializable
     @SerialName("BOOLEAN_ITEMS")
@@ -244,6 +259,7 @@ private sealed interface StructuredArrayItems {
  * closed item contract mandatory only for `ARRAY`, makes nested fields mandatory only for object
  * values, excludes nested arrays, and removes inapplicable scalar properties.
  */
+@OptIn(ExperimentalSerializationApi::class)
 internal object TypedFieldStructuredOutputSerializer : KSerializer<TypedField> {
     private val delegate = StructuredTypedField.serializer()
 
@@ -271,14 +287,16 @@ internal object TypedFieldStructuredOutputSerializer : KSerializer<TypedField> {
                 description = description,
                 required = required,
                 validationRules = sortedRules,
-                physicalDimension = physicalDimension
+                physicalDimension = physicalDimension,
+                quantitySpec = quantitySpec
             )
             TypedFieldType.NUMBER -> StructuredTypedField.NumberField(
                 name = name,
                 description = description,
                 required = required,
                 validationRules = sortedRules,
-                physicalDimension = physicalDimension
+                physicalDimension = physicalDimension,
+                quantitySpec = quantitySpec
             )
             TypedFieldType.BOOLEAN -> StructuredTypedField.BooleanField(
                 name = name,
@@ -326,7 +344,8 @@ internal object TypedFieldStructuredOutputSerializer : KSerializer<TypedField> {
             description = description,
             required = required,
             validationRules = validationRules.toUniqueSet("validation rule"),
-            physicalDimension = physicalDimension
+            physicalDimension = physicalDimension,
+            quantitySpec = quantitySpec
         )
         is StructuredTypedField.NumberField -> TypedField(
             name = name,
@@ -334,7 +353,8 @@ internal object TypedFieldStructuredOutputSerializer : KSerializer<TypedField> {
             description = description,
             required = required,
             validationRules = validationRules.toUniqueSet("validation rule"),
-            physicalDimension = physicalDimension
+            physicalDimension = physicalDimension,
+            quantitySpec = quantitySpec
         )
         is StructuredTypedField.BooleanField -> TypedField(
             name = name,
@@ -371,15 +391,18 @@ internal object TypedFieldStructuredOutputSerializer : KSerializer<TypedField> {
                 ?.toUniqueObjectFields()
                 .orEmpty(),
             validationRules = validationRules.toUniqueSet("validation rule"),
-            physicalDimension = items.physicalDimension
+            physicalDimension = items.physicalDimension,
+            quantitySpec = items.quantitySpec
         )
     }
 
     private fun TypedField.toStructuredArrayItems(): StructuredArrayItems =
         when (requireNotNull(itemType)) {
             TypedFieldType.STRING -> StructuredArrayItems.StringItems
-            TypedFieldType.INTEGER -> StructuredArrayItems.IntegerItems(physicalDimension)
-            TypedFieldType.NUMBER -> StructuredArrayItems.NumberItems(physicalDimension)
+            TypedFieldType.INTEGER ->
+                StructuredArrayItems.IntegerItems(physicalDimension, quantitySpec)
+            TypedFieldType.NUMBER ->
+                StructuredArrayItems.NumberItems(physicalDimension, quantitySpec)
             TypedFieldType.BOOLEAN -> StructuredArrayItems.BooleanItems
             TypedFieldType.JSON -> StructuredArrayItems.JsonItems
             TypedFieldType.OBJECT -> StructuredArrayItems.ObjectItems(
@@ -394,6 +417,16 @@ internal object TypedFieldStructuredOutputSerializer : KSerializer<TypedField> {
         get() = when (this) {
             is StructuredArrayItems.IntegerItems -> physicalDimension
             is StructuredArrayItems.NumberItems -> physicalDimension
+            StructuredArrayItems.StringItems,
+            StructuredArrayItems.BooleanItems,
+            StructuredArrayItems.JsonItems,
+            is StructuredArrayItems.ObjectItems -> null
+        }
+
+    private val StructuredArrayItems.quantitySpec: QuantitySpec?
+        get() = when (this) {
+            is StructuredArrayItems.IntegerItems -> quantitySpec
+            is StructuredArrayItems.NumberItems -> quantitySpec
             StructuredArrayItems.StringItems,
             StructuredArrayItems.BooleanItems,
             StructuredArrayItems.JsonItems,

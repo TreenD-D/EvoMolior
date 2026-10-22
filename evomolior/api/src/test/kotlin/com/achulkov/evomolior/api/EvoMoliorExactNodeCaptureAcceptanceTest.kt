@@ -13,6 +13,8 @@ import com.achulkov.evomolior.competition.grader.ExactGraderBundleResolver
 import com.achulkov.evomolior.competition.grader.ExactGraderRoundStatus
 import com.achulkov.evomolior.competition.grader.ExactGraderRoundVerdict
 import com.achulkov.evomolior.competition.grader.GraderGroupManager
+import com.achulkov.evomolior.competition.scoring.NodeCaptureResolutionRequest
+import com.achulkov.evomolior.competition.scoring.NodeCaptureResolver
 import com.achulkov.evomolior.core.atlas.ArtifactType
 import com.achulkov.evomolior.core.atlas.AtlasGroupId
 import com.achulkov.evomolior.core.atlas.AtlasAgentId
@@ -30,8 +32,11 @@ import com.achulkov.evomolior.core.atlas.NodeEvidencePacket
 import com.achulkov.evomolior.core.atlas.NodeExecutionState
 import com.achulkov.evomolior.core.atlas.NodeGradeBundle
 import com.achulkov.evomolior.core.atlas.NodeGradeBundleVerdict
+import com.achulkov.evomolior.core.atlas.NodeGradingAssignment
 import com.achulkov.evomolior.core.atlas.NodeId
 import com.achulkov.evomolior.core.atlas.NodeKind
+import com.achulkov.evomolior.core.atlas.NodeCaptureDecisionType
+import com.achulkov.evomolior.core.atlas.NodeCaptureReasonCode
 import com.achulkov.evomolior.core.atlas.NodeScoreVector
 import com.achulkov.evomolior.core.atlas.ProofContract
 import com.achulkov.evomolior.core.atlas.ProofMethod
@@ -52,6 +57,10 @@ import com.achulkov.evomolior.core.contract.CriticDecisionRecord
 import com.achulkov.evomolior.core.contract.CriticOutcome
 import com.achulkov.evomolior.core.contract.CriticReview
 import com.achulkov.evomolior.core.contract.FitnessPlane
+import com.achulkov.evomolior.core.grader.BoundedScore
+import com.achulkov.evomolior.core.grader.GraderScoreBundle
+import com.achulkov.evomolior.core.grader.GraderScoreBundleStatus
+import com.achulkov.evomolior.core.grader.ScoreNormalizationTrace
 import com.achulkov.evomolior.core.model.GradingResult
 import com.achulkov.evomolior.core.model.GroupProfileType
 import com.achulkov.evomolior.core.model.RoundScore
@@ -83,6 +92,7 @@ import kotlin.reflect.full.declaredFunctions
 import kotlin.reflect.jvm.isAccessible
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
@@ -383,7 +393,7 @@ class EvoMoliorExactNodeCaptureAcceptanceTest {
     }
 
     @Test
-    fun `InvalidVerdictNoMutationTest disclosure leak pressure capture yields and fitness remain unchanged`() =
+    fun `DuplicateGraderBundleNoMutationTest round mutations remain frozen`() =
         runTest {
             val factory = SubstrateDatabaseFactory(
                 createTempDirectory("invalid-exact-round-authority-api-").toFile()
@@ -419,14 +429,19 @@ class EvoMoliorExactNodeCaptureAcceptanceTest {
                 engine.registerGroup(groupA.value)
                 engine.registerGroup(groupB.value)
             }
+            val exactBundles = listOf(
+                exactGraderBundle(groupA, 0.81),
+                exactGraderBundle(groupB, 0.94)
+            )
             val invalidVerdict = ExactGraderBundleResolver().resolve(
                 runId = runId,
                 round = 1,
-                expectedGraderGroupIds = setOf("grader-a", "grader-b"),
+                expectedGraderGroupIds = setOf("grader-a"),
                 expectedTargetGroupIds = setOf(groupA, groupB),
-                bundles = emptyList()
+                bundles = exactBundles + exactBundles.first()
             )
             assertEquals(ExactGraderRoundStatus.INVALID, invalidVerdict.status)
+            assertTrue(requireNotNull(invalidVerdict.reason).contains("duplicates=1"))
             setPrivate(service, "activeWorkerAtlasId", atlasId)
             setPrivate(service, "activeCoordinator", coordinator)
             setPrivate(service, "activeDisclosureEngine", disclosureEngine)
@@ -565,6 +580,87 @@ class EvoMoliorExactNodeCaptureAcceptanceTest {
                 captureRepository.gradeBundlesForRun(runId).none { bundle ->
                     bundle.bundleHash in validSiblingBundles.map(NodeGradeBundle::bundleHash)
                 }
+            )
+        }
+
+    @Test
+    fun `MissingExactNodeEvidenceTest persists and replays explicit scoreless authority`() =
+        runTest {
+            val factory = SubstrateDatabaseFactory(
+                createTempDirectory("missing-exact-node-evidence-api-").toFile()
+            )
+            val migration = migration()
+            val atlasRepository = AtlasTransactionRepository(factory)
+            atlasRepository.initialize(migration)
+            val service = service(factory)
+            val criteriaFreezeHashes = mapOf(
+                "grader-a" to "freeze-a",
+                "grader-b" to "freeze-b"
+            )
+            @Suppress("UNCHECKED_CAST")
+            val generated = service::class.declaredFunctions
+                .first { it.name == "completeNoEvidenceNodeGradeBundles" }
+                .apply { isAccessible = true }
+                .callSuspend(
+                    service,
+                    migration.atlas,
+                    emptyList<NodeGradingAssignment>(),
+                    setOf(nodeId),
+                    1,
+                    listOf(groupA.value),
+                    criteriaFreezeHashes.keys.toList(),
+                    criteriaFreezeHashes,
+                    emptyList<NodeGradeBundle>()
+                ) as List<NodeGradeBundle>
+            val noEvidence = generated.single()
+
+            assertEquals(NodeGradeBundleVerdict.NO_EVIDENCE, noEvidence.verdict)
+            assertEquals(null, noEvidence.evidencePacketId)
+            assertEquals(null, noEvidence.evidencePacketHash)
+            assertEquals(null, noEvidence.scoreVector)
+            assertEquals(null, noEvidence.normalizedScore)
+
+            val captureRepository = NodeCaptureRepository(factory)
+            captureRepository.appendGradeBundle(noEvidence)
+            val replayed = captureRepository.gradeBundlesForRun(runId).single()
+            assertEquals(noEvidence, replayed)
+            assertEquals(noEvidence.bundleHash, replayed.bundleHash)
+
+            val currentState = atlasRepository.currentStates(runId, atlasId).getValue(nodeId)
+            val resolution = NodeCaptureResolver().resolve(
+                NodeCaptureResolutionRequest(
+                    atlas = migration.atlas,
+                    currentState = currentState,
+                    round = 1,
+                    expectedGroupIds = setOf(groupA),
+                    bundles = listOf(replayed),
+                    graderCriteriaFreezeHashes = criteriaFreezeHashes
+                )
+            )
+            assertEquals(NodeCaptureDecisionType.NO_EVIDENCE, resolution.decision.decisionType)
+            assertEquals(NodeCaptureReasonCode.NO_EVIDENCE, resolution.decision.reasonCode)
+            assertEquals(setOf(noEvidence.bundleHash), resolution.decision.authoritativeBundleHashes)
+            assertEquals(null, resolution.nextState)
+            assertEquals(
+                AtlasHashing.hashExecutionState(currentState),
+                resolution.expectedStateHash
+            )
+            assertTrue(resolution.decision.resultingOwnerGroupIds.isEmpty())
+            assertFalse(resolution.decision.yieldEligible)
+            assertEquals(
+                resolution.decision,
+                captureRepository.appendCaptureDecision(resolution.decision)
+            )
+            assertTrue(
+                captureRepository.yieldSchedulesForActivation(
+                    runId,
+                    groupA.value,
+                    2
+                ).isEmpty()
+            )
+            assertTrue(
+                requireNotNull(atlasRepository.currentProjections(runId, atlasId))
+                    .resources.nodes.all { it.claimedByGroupId == null }
             )
         }
 
@@ -971,4 +1067,45 @@ class EvoMoliorExactNodeCaptureAcceptanceTest {
             )
         ).withComputedHash()
     }
+
+    private fun exactGraderBundle(
+        targetGroupId: AtlasGroupId,
+        score: Double
+    ): GraderScoreBundle = GraderScoreBundle(
+        bundleId = "exact-grader-${targetGroupId.value}",
+        runId = runId,
+        round = 1,
+        graderGroupId = "grader-a",
+        targetGroupId = targetGroupId,
+        graderAtlasHash = "grader-atlas-hash",
+        criteriaFreezeHash = "criteria-freeze-hash",
+        targetSnapshotHash = "snapshot-${targetGroupId.value}",
+        nodeScores = mapOf(
+            nodeId to NodeScoreVector(
+                score,
+                score,
+                score,
+                score,
+                score,
+                score,
+                score,
+                score,
+                hardFailure = false,
+                confidence = score
+            )
+        ),
+        groupScores = mapOf("summary" to BoundedScore(score)),
+        requirementResults = emptyMap(),
+        rationaleHashes = mapOf("summary" to AtlasHashing.hashText("summary rationale")),
+        normalizationTrace = listOf(
+            ScoreNormalizationTrace(
+                sourceId = "summary",
+                rawValue = score,
+                normalizedValue = score,
+                weight = 1.0,
+                policyHash = "summary-policy"
+            )
+        ),
+        status = GraderScoreBundleStatus.VALID
+    ).withComputedHash()
 }

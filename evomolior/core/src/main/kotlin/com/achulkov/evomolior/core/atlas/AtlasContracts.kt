@@ -2,7 +2,10 @@ package com.achulkov.evomolior.core.atlas
 
 import com.achulkov.evomolior.core.serialization.StringIntMapEntriesSerializer
 import com.achulkov.evomolior.core.serialization.TypedFieldStructuredOutputSerializer
+import com.achulkov.evomolior.core.repair.QuantitySpec
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 
 /** Stable identifier for a limitation node. */
 @JvmInline
@@ -57,15 +60,31 @@ data class ReceiverContract(
  * @param description Receiver-facing description.
  * @param requiredSections Required logical sections, independent of order.
  * @param minimumEvidenceItems Minimum evidence items in the output.
+ * @param maximumWordCount Optional maximum whitespace-delimited words, including code and headings.
+ * @param exactMarkdownHeadings Optional exact ordered Markdown heading contract.
+ * @param requiredTextStatements Literal report statements required case-insensitively.
+ * @param minimumWordCount Optional minimum whitespace-delimited words.
  */
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class FinalOutputSpec(
     val relativePath: String,
     val mediaType: String,
     val description: String = "",
     val requiredSections: Set<String> = emptySet(),
-    val minimumEvidenceItems: Int = 0
-)
+    val minimumEvidenceItems: Int = 0,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val maximumWordCount: Int? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val exactMarkdownHeadings: List<String> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val requiredTextStatements: List<String> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val minimumWordCount: Int? = null,
+) {
+    init {
+        require(minimumEvidenceItems >= 0)
+        require(maximumWordCount == null || maximumWordCount > 0)
+        require(minimumWordCount == null || (minimumWordCount > 0 && (maximumWordCount == null || minimumWordCount <= maximumWordCount)))
+        require((exactMarkdownHeadings + requiredTextStatements).none(String::isBlank))
+    }
+}
 
 /**
  * Evidence requirements applying to the receiver contract.
@@ -465,6 +484,8 @@ data class PhysicalDimension(
  * @param validationRules Deterministic validation commitments.
  * @param physicalDimension Physical dimension of a numeric value or numeric array item. An empty
  * vector is explicitly dimensionless; null preserves legacy/direct opportunity compatibility.
+ * @param quantitySpec Optional unit, aggregation, and time-basis semantics. Null is omitted from
+ * canonical serialization so historical Atlas hashes remain unchanged.
  */
 @Serializable(with = TypedFieldStructuredOutputSerializer::class)
 data class TypedField(
@@ -478,7 +499,8 @@ data class TypedField(
     val objectFields: Set<TypedField> = emptySet(),
     val enumValues: Set<String> = emptySet(),
     val validationRules: Set<String> = emptySet(),
-    val physicalDimension: PhysicalDimension? = null
+    val physicalDimension: PhysicalDimension? = null,
+    val quantitySpec: QuantitySpec? = null
 ) {
     init {
         require(name.matches(FIELD_NAME)) { "Typed field name must be a JSON-compatible identifier" }
@@ -528,6 +550,22 @@ data class TypedField(
                     (itemType == TypedFieldType.INTEGER || itemType == TypedFieldType.NUMBER))
         ) {
             "Physical dimensions are supported only for numeric fields and numeric array items"
+        }
+        require(
+            quantitySpec == null ||
+                type == TypedFieldType.INTEGER ||
+                type == TypedFieldType.NUMBER ||
+                (type == TypedFieldType.ARRAY &&
+                    (itemType == TypedFieldType.INTEGER || itemType == TypedFieldType.NUMBER))
+        ) {
+            "Quantity metadata is supported only for numeric fields and numeric array items"
+        }
+        require(
+            quantitySpec == null ||
+                physicalDimension == null ||
+                quantitySpec.dimension == physicalDimension
+        ) {
+            "Quantity metadata must agree with legacy physical-dimension metadata"
         }
     }
 

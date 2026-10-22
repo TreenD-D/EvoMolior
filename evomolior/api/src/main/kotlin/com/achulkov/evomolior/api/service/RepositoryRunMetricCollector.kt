@@ -1,3 +1,5 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+
 package com.achulkov.evomolior.api.service
 
 import com.achulkov.evomolior.core.atlas.AtlasAgentId
@@ -18,16 +20,26 @@ import com.achulkov.evomolior.core.contract.AgentLifecycleClassification
 import com.achulkov.evomolior.core.contract.CostLedgerEntryKind
 import com.achulkov.evomolior.core.contract.CostSubjectType
 import com.achulkov.evomolior.core.contract.MonetaryAmountStatus
+import com.achulkov.evomolior.core.contract.RoundPhaseLedgerPolicy
+import com.achulkov.evomolior.core.deliverable.ComponentAuthorityClass
+import com.achulkov.evomolior.core.deliverable.DeliverableContentOrigin
+import com.achulkov.evomolior.core.deliverable.ReceiverDecisionPackage
+import com.achulkov.evomolior.core.deliverable.RunOutcomeClass
 import com.achulkov.evomolior.core.grader.GraderFitnessPlane
 import com.achulkov.evomolior.core.grader.GraderScoreBundleStatus
 import com.achulkov.evomolior.core.kg.KgFactAttemptStatus
+import com.achulkov.evomolior.core.repair.ToolPromotionStatus
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
 import com.achulkov.evomolior.substrate.atlas.AtlasTransactionRepository
 import com.achulkov.evomolior.substrate.atlas.NodeCaptureRepository
 import com.achulkov.evomolior.substrate.cost.CostLedgerRepository
+import com.achulkov.evomolior.substrate.deliverable.DeliverablePersistenceRepository
 import com.achulkov.evomolior.substrate.grader.GraderAuthorityRepository
 import com.achulkov.evomolior.substrate.kg.KgFactAttemptRepository
 import com.achulkov.evomolior.substrate.outlier.OutlierNoveltyRepository
+import com.achulkov.evomolior.substrate.publication.PublicationOutcomeRepository
+import com.achulkov.evomolior.substrate.repair.ToolRepairPersistenceRepository
+import com.achulkov.evomolior.substrate.roundledger.RoundPhaseLedgerRepository
 import com.achulkov.evomolior.substrate.tools.ToolInfrastructureRepository
 import com.achulkov.evomolior.substrate.worker.ContributionGraphRepository
 import com.achulkov.evomolior.substrate.worker.WorkerExecutionRepository
@@ -78,6 +90,22 @@ class RepositoryRunMetricCollector(
         "node_to_final_lineage" -> nodeToFinalLineage(context)
         "provider_cost_per_accepted_node" -> providerCostPerAcceptedNode(context)
         "score_replay_error" -> scoreReplayError(context)
+        "exit_identity_conflicts" -> exitIdentityConflicts(context)
+        "exit_finalization_retries" -> exitFinalizationRetries(context)
+        "tool_contract_transport_failure_rate" -> toolContractTransportFailureRate(context)
+        "tool_repair_diagnostics_emitted" -> toolRepairDiagnosticsEmitted(context)
+        "tool_repair_diagnostic_consumption_rate" ->
+            toolRepairDiagnosticConsumptionRate(context)
+        "repair_to_promotion_rate" -> repairToPromotionRate(context)
+        "repeated_identical_tool_failure_rate" ->
+            repeatedIdenticalToolFailureRate(context)
+        "receiver_component_coverage" -> receiverComponentCoverage(context)
+        "interim_snapshot_coverage" -> interimSnapshotCoverage(context)
+        "recovery_component_coverage" -> recoveryComponentCoverage(context)
+        "provisional_claim_with_authority_rate" ->
+            provisionalClaimWithAuthorityRate(context)
+        "accepted_package_deterministic_content_rate" ->
+            acceptedPackageDeterministicContentRate(context)
         else -> error("Unsupported run metric collector ID: $metricId")
     }
 
@@ -138,9 +166,9 @@ class RepositoryRunMetricCollector(
         val revealed = mandatory.filterTo(linkedSetOf()) { nodeId ->
             states[nodeId]?.revealedToGroups?.isNotEmpty() == true
         }
-        val aboveThreshold = revealed.count { nodeId ->
+        val aboveThreshold = mandatory.count { nodeId ->
             val minimum = atlas.nodes.getValue(nodeId).capturePolicy.minimumGrade
-            states.getValue(nodeId).grades.any { grade ->
+            states[nodeId]?.grades.orEmpty().any { grade ->
                 grade.verdict == GradeVerdict.VALID_PASS && grade.normalizedScore >= minimum
             }
         }
@@ -152,10 +180,10 @@ class RepositoryRunMetricCollector(
         return ratio(
             "mandatory_node_coverage",
             aboveThreshold,
-            revealed.size,
+            mandatory.size,
             "ratio",
             disclosureEvidence + listOf("worker-atlas/${atlas.atlasHash}"),
-            "No mandatory nodes were revealed",
+            "The Atlas declares no mandatory nodes",
         )
     }
 
@@ -305,8 +333,11 @@ class RepositoryRunMetricCollector(
             unit = "ratio",
         )
         val states = atlasRepository.currentStates(context.runId, context.atlasId)
+        val intendedUseNodeIds = atlas.nodes.values
+            .mapNotNull { it.toolOpportunity }
+            .flatMapTo(linkedSetOf()) { it.expectedReuseNodeIds }
         val eligibleAssignments = states.values.flatMap { state ->
-            if (atlas.nodes.getValue(state.nodeId).toolOpportunity == null) {
+            if (state.nodeId !in intendedUseNodeIds) {
                 emptyList()
             } else {
                 state.leases.mapNotNull { lease ->
@@ -373,15 +404,17 @@ class RepositoryRunMetricCollector(
             ToolInfrastructureRepository(databaseFactory.get(context.runId, groupId))
                 .simulationsForRun(context.runId)
         }
+        val simulationTargetNodeIds = atlas.nodes.values
+            .mapNotNull { it.toolOpportunity }
+            .filter { it.simulationRecordBindings != null }
+            .flatMapTo(linkedSetOf()) { it.expectedReuseNodeIds }
         val simulationExecutionIds = simulations.mapTo(linkedSetOf()) { it.executionId }
         val packetsByHash = captureRepository.evidencePacketsForRun(context.runId)
             .associateBy(NodeEvidencePacket::packetHash)
         val bundlesByHash = captureRepository.gradeBundlesForRun(context.runId)
             .associateBy { it.bundleHash }
         val decisions = captureRepository.captureDecisionsForRun(context.runId)
-            .filter { decision ->
-                atlas.nodes[decision.nodeId]?.toolOpportunity?.simulationRecordBindings != null
-            }
+            .filter { it.nodeId in simulationTargetNodeIds }
         val influenced = decisions.count { decision ->
             decision.authoritativeBundleHashes.any { bundleHash ->
                 val packetHash = bundlesByHash[bundleHash]?.evidencePacketHash
@@ -837,6 +870,376 @@ class RepositoryRunMetricCollector(
         )
     }
 
+    private fun exitIdentityConflicts(context: RunMetricsExportContext) =
+        context.closureRuntimeInput?.lifecycle?.let {
+            available(
+                "exit_identity_conflicts",
+                numerator = it.exitIdentityConflicts.toDouble(),
+                value = it.exitIdentityConflicts.toDouble(),
+                unit = "count",
+                evidenceRefs = it.evidenceRefs,
+            )
+        } ?: missingInfrastructure(
+            "exit_identity_conflicts",
+            "Live lifecycle conflict counters were not supplied by the run owner",
+            listOf("measurement-infrastructure/exit_identity_conflicts"),
+            "count",
+        )
+
+    private fun exitFinalizationRetries(context: RunMetricsExportContext) =
+        context.closureRuntimeInput?.lifecycle?.let {
+            available(
+                "exit_finalization_retries",
+                numerator = it.exitFinalizationRetries.toDouble(),
+                value = it.exitFinalizationRetries.toDouble(),
+                unit = "count",
+                evidenceRefs = it.evidenceRefs,
+            )
+        } ?: missingInfrastructure(
+            "exit_finalization_retries",
+            "Live lifecycle finalization retry counters were not supplied by the run owner",
+            listOf("measurement-infrastructure/exit_finalization_retries"),
+            "count",
+        )
+
+    private fun toolContractTransportFailureRate(context: RunMetricsExportContext) =
+        context.closureRuntimeInput?.toolTransport?.let {
+            ratio(
+                "tool_contract_transport_failure_rate",
+                it.failures,
+                it.attempts,
+                "ratio",
+                it.evidenceRefs,
+                "No tool-contract transport attempts occurred",
+            )
+        } ?: missingInfrastructure(
+            "tool_contract_transport_failure_rate",
+            "Runtime tool-contract transport diagnostics were not supplied by the run owner",
+            listOf("measurement-infrastructure/tool_contract_transport_failure_rate"),
+            "ratio",
+        )
+
+    private suspend fun toolRepairDiagnosticsEmitted(context: RunMetricsExportContext) =
+        repairAuthority(context)?.let {
+            available(
+                "tool_repair_diagnostics_emitted",
+                numerator = it.diagnostics.size.toDouble(),
+                value = it.diagnostics.size.toDouble(),
+                unit = "count",
+                evidenceRefs = it.evidenceRefs,
+            )
+        } ?: noToolOpportunity("tool_repair_diagnostics_emitted", context)
+
+    private suspend fun toolRepairDiagnosticConsumptionRate(
+        context: RunMetricsExportContext,
+    ): RunMetricCollectionResult {
+        val authority = repairAuthority(context)
+            ?: return noToolOpportunity(
+                "tool_repair_diagnostic_consumption_rate",
+                context,
+                "ratio",
+            )
+        val diagnosticIds = authority.diagnostics.mapTo(linkedSetOf()) { it.diagnosticId }
+        if (diagnosticIds.isEmpty()) {
+            return notApplicable(
+                "tool_repair_diagnostic_consumption_rate",
+                "No typed repair diagnostics were emitted",
+                authority.evidenceRefs,
+                "ratio",
+            )
+        }
+        val consumed = authority.attempts
+            .flatMapTo(linkedSetOf()) { it.consumedDiagnosticIds }
+            .count(diagnosticIds::contains)
+        return ratio(
+            "tool_repair_diagnostic_consumption_rate",
+            consumed,
+            diagnosticIds.size,
+            "ratio",
+            authority.evidenceRefs,
+            "No typed repair diagnostics were emitted",
+        )
+    }
+
+    private suspend fun repairToPromotionRate(
+        context: RunMetricsExportContext,
+    ): RunMetricCollectionResult {
+        val authority = repairAuthority(context)
+            ?: return noToolOpportunity("repair_to_promotion_rate", context, "ratio")
+        val repairs = authority.attempts.filter { it.consumedDiagnosticIds.isNotEmpty() }
+        return ratio(
+            "repair_to_promotion_rate",
+            repairs.count { it.promotionResult == ToolPromotionStatus.PROMOTED },
+            repairs.size,
+            "ratio",
+            authority.evidenceRefs,
+            "No persisted repair attempt consumed a typed diagnostic",
+        )
+    }
+
+    private suspend fun repeatedIdenticalToolFailureRate(
+        context: RunMetricsExportContext,
+    ): RunMetricCollectionResult {
+        val authority = repairAuthority(context)
+            ?: return noToolOpportunity(
+                "repeated_identical_tool_failure_rate",
+                context,
+                "ratio",
+            )
+        val failures = authority.attempts.filter {
+            it.consumedDiagnosticIds.isNotEmpty() &&
+                it.promotionResult != ToolPromotionStatus.PROMOTED
+        }
+        val repeats = failures.groupBy {
+            "${it.candidateHash}/${it.preflightResult}/${it.criticResult}/${it.promotionResult}"
+        }.values.sumOf { (it.size - 1).coerceAtLeast(0) }
+        return ratio(
+            "repeated_identical_tool_failure_rate",
+            repeats,
+            failures.size,
+            "ratio",
+            authority.evidenceRefs,
+            "No diagnosed repair attempt ended in failure",
+        )
+    }
+
+    private suspend fun receiverComponentCoverage(context: RunMetricsExportContext) =
+        packageCoverage(
+            metricId = "receiver_component_coverage",
+            context = context,
+            outcomeClass = RunOutcomeClass.ACCEPTED_DECISION_PACKAGE,
+            absentReason = "No accepted receiver package was published",
+        )
+
+    private suspend fun recoveryComponentCoverage(context: RunMetricsExportContext) =
+        packageCoverage(
+            metricId = "recovery_component_coverage",
+            context = context,
+            outcomeClass = RunOutcomeClass.PROVISIONAL_DECISION_PACKAGE,
+            absentReason = "No provisional recovery package was published",
+        )
+
+    private suspend fun interimSnapshotCoverage(
+        context: RunMetricsExportContext,
+    ): RunMetricCollectionResult {
+        if (context.completedThroughRound < 0) {
+            return notApplicable(
+                "interim_snapshot_coverage",
+                "No round reached a sealed boundary",
+                listOf("round-ledger-scope/${context.runId}"),
+                "ratio",
+            )
+        }
+        val database = databaseFactory.getAtlas(context.runId)
+        val ledger = RoundPhaseLedgerRepository(database)
+        val deliverables = DeliverablePersistenceRepository(database)
+        val evidence = mutableListOf<String>()
+        for (round in 0..context.completedThroughRound) {
+            val history = ledger.history(context.runId, round)
+            evidence += history.map { "round-phase/${it.eventHash}" }
+            if (!RoundPhaseLedgerPolicy.isArchived(history)) {
+                return sourceUnavailable(
+                    "interim_snapshot_coverage",
+                    "Completed round $round lacks an archived round-phase ledger",
+                    evidence + "round-ledger/${context.runId}/$round",
+                    unit = "ratio",
+                )
+            }
+        }
+        val snapshots = context.workerGroupIds.flatMap { groupId ->
+            deliverables.snapshots(context.runId, groupId).filter {
+                it.round in 0..context.completedThroughRound
+            }
+        }.distinctBy { it.groupId to it.round }
+        return ratio(
+            "interim_snapshot_coverage",
+            snapshots.size,
+            context.workerGroupIds.size * (context.completedThroughRound + 1),
+            "ratio",
+            evidence + snapshots.map { "interim-snapshot/${it.snapshotHash}" },
+            "No worker-group sealed-round snapshot was required",
+        )
+    }
+
+    private suspend fun provisionalClaimWithAuthorityRate(
+        context: RunMetricsExportContext,
+    ): RunMetricCollectionResult {
+        val authority = deliverableAuthority(context)
+            ?: return sourceUnavailable(
+                "provisional_claim_with_authority_rate",
+                "Deliverable blueprint authority is unavailable",
+                listOf("deliverable-blueprint-scope/${context.runId}"),
+                unit = "ratio",
+            )
+        val provisional = authority.packages.lastOrNull {
+            it.outcomeClass == RunOutcomeClass.PROVISIONAL_DECISION_PACKAGE
+        } ?: return notApplicable(
+            "provisional_claim_with_authority_rate",
+            "No provisional recovery package was published",
+            authority.evidenceRefs,
+            "ratio",
+        )
+        val evidenceIds = provisional.evidenceLedger.mapTo(linkedSetOf()) { it.evidenceId }
+        val claims = provisional.components.filter {
+            it.authorityClass != ComponentAuthorityClass.WITHHELD
+        }
+        return ratio(
+            "provisional_claim_with_authority_rate",
+            claims.count {
+                it.provenance.evidenceIds.isNotEmpty() &&
+                    it.provenance.evidenceIds.all(evidenceIds::contains)
+            },
+            claims.size,
+            "ratio",
+            authority.evidenceRefs,
+            "The provisional package contains no receiver-visible claims",
+        )
+    }
+
+    private suspend fun acceptedPackageDeterministicContentRate(
+        context: RunMetricsExportContext,
+    ): RunMetricCollectionResult {
+        val authority = deliverableAuthority(context)
+            ?: return sourceUnavailable(
+                "accepted_package_deterministic_content_rate",
+                "Deliverable blueprint authority is unavailable",
+                listOf("deliverable-blueprint-scope/${context.runId}"),
+                unit = "ratio",
+            )
+        val accepted = authority.packages.lastOrNull {
+            it.outcomeClass == RunOutcomeClass.ACCEPTED_DECISION_PACKAGE
+        } ?: return notApplicable(
+            "accepted_package_deterministic_content_rate",
+            "No accepted receiver package was published",
+            authority.evidenceRefs,
+            "ratio",
+        )
+        val blocks = accepted.components.flatMap { it.blocks }
+        return ratio(
+            "accepted_package_deterministic_content_rate",
+            blocks.count { it.origin == DeliverableContentOrigin.DETERMINISTIC_SUPPLIED },
+            blocks.size,
+            "ratio",
+            authority.evidenceRefs,
+            "The accepted package contains no semantic content blocks",
+        )
+    }
+
+    private suspend fun packageCoverage(
+        metricId: String,
+        context: RunMetricsExportContext,
+        outcomeClass: RunOutcomeClass,
+        absentReason: String,
+    ): RunMetricCollectionResult {
+        val authority = deliverableAuthority(context)
+            ?: return sourceUnavailable(
+                metricId,
+                "Deliverable blueprint authority is unavailable",
+                listOf("deliverable-blueprint-scope/${context.runId}"),
+                unit = "ratio",
+            )
+        val decisionPackage = authority.packages.lastOrNull {
+            it.outcomeClass == outcomeClass
+        } ?: return notApplicable(metricId, absentReason, authority.evidenceRefs, "ratio")
+        val required = authority.blueprint.componentSpecs.filter { it.required }
+        val components = decisionPackage.components.associateBy { it.componentId }
+        val missing = decisionPackage.missingAuthority.mapTo(linkedSetOf()) { it.componentId }
+        return ratio(
+            metricId,
+            required.count { spec ->
+                val component = components[spec.componentId]
+                component != null &&
+                    component.authorityClass.satisfies(spec.minimumAuthority) &&
+                    spec.componentId !in missing
+            },
+            required.size,
+            "ratio",
+            authority.evidenceRefs,
+            "The deliverable blueprint declares no required components",
+        )
+    }
+
+    private suspend fun repairAuthority(
+        context: RunMetricsExportContext,
+    ): RepairMetricAuthority? {
+        val atlas = currentAtlas(context) ?: return null
+        val opportunities = atlas.nodes.values.mapNotNull {
+            it.toolOpportunity?.opportunityId
+        }.distinct().sorted()
+        if (opportunities.isEmpty()) return null
+        val diagnostics = mutableListOf<com.achulkov.evomolior.core.repair.ToolRepairDiagnosticV1>()
+        val attempts = mutableListOf<com.achulkov.evomolior.core.repair.ToolRepairAttemptRecord>()
+        context.workerGroupIds.forEach { groupId ->
+            val repository = ToolRepairPersistenceRepository(
+                databaseFactory.get(context.runId, groupId)
+            )
+            opportunities.forEach { opportunityId ->
+                diagnostics += repository.visibleDiagnostics(
+                    context.runId,
+                    groupId,
+                    opportunityId,
+                    context.completedThroughRound + 1,
+                )
+                attempts += repository.attempts(opportunityId)
+            }
+        }
+        return RepairMetricAuthority(
+            diagnostics.distinctBy { it.diagnosticId },
+            attempts.distinctBy { it.attemptId },
+            diagnostics.map { "tool-repair-diagnostic/${it.diagnosticHash}" } +
+                attempts.map { "tool-repair-attempt/${it.attemptHash}" } +
+                opportunities.map { "tool-opportunity/$it" },
+        )
+    }
+
+    private fun noToolOpportunity(
+        metricId: String,
+        context: RunMetricsExportContext,
+        unit: String = "count",
+    ) = notApplicable(
+        metricId,
+        "The worker Atlas declares no reusable-tool opportunity",
+        listOf("worker-atlas/${context.atlasId}"),
+        unit,
+    )
+
+    private suspend fun deliverableAuthority(
+        context: RunMetricsExportContext,
+    ): DeliverableMetricAuthority? {
+        val atlas = currentAtlas(context) ?: return null
+        val database = databaseFactory.getAtlas(context.runId)
+        val repository = DeliverablePersistenceRepository(database)
+        val blueprint = repository.blueprint(
+            "deliverable-blueprint-${atlas.receiverContractHash.take(24)}"
+        ) ?: return null
+        val packages = (
+            repository.decisionPackages(context.runId) +
+                listOfNotNull(context.acceptedDecisionPackage)
+            ).distinctBy { it.packageHash }
+        val outcomes = PublicationOutcomeRepository(database)
+        return DeliverableMetricAuthority(
+            blueprint,
+            packages,
+            listOf("deliverable-blueprint/${blueprint.blueprintHash}") +
+                packages.map {
+                    if (it == context.acceptedDecisionPackage) {
+                        "decision-package-candidate/${it.packageHash}"
+                    } else {
+                        "decision-package/${it.packageHash}"
+                    }
+                } +
+                outcomes.acceptedHistory(context.runId).map {
+                    "publication-outcome/${it.eventHash}"
+                } +
+                outcomes.recoveryHistory(context.runId).map {
+                    "publication-outcome/${it.eventHash}"
+                } +
+                outcomes.startupHistory(context.runId).map {
+                    "publication-outcome/${it.eventHash}"
+                },
+        )
+    }
+
     private suspend fun currentAtlas(context: RunMetricsExportContext) =
         atlasRepository.currentAtlas(context.runId, context.atlasId)
 
@@ -983,6 +1386,18 @@ class RepositoryRunMetricCollector(
     private companion object {
         const val COST_LEDGER_GROUP_ID = "__cost_ledger__"
     }
+
+    private data class RepairMetricAuthority(
+        val diagnostics: List<com.achulkov.evomolior.core.repair.ToolRepairDiagnosticV1>,
+        val attempts: List<com.achulkov.evomolior.core.repair.ToolRepairAttemptRecord>,
+        val evidenceRefs: List<String>,
+    )
+
+    private data class DeliverableMetricAuthority(
+        val blueprint: com.achulkov.evomolior.core.deliverable.DeliverableBlueprint,
+        val packages: List<ReceiverDecisionPackage>,
+        val evidenceRefs: List<String>,
+    )
 }
 
 internal fun rewardUsefulnessCounts(

@@ -12,8 +12,13 @@ import com.achulkov.evomolior.core.contract.FinalDeliverableReferenceRecord
 import com.achulkov.evomolior.core.contract.PublicationStateEvent
 import com.achulkov.evomolior.core.contract.PublicationStatePolicy
 import com.achulkov.evomolior.core.contract.StartingFieldWireContract
+import com.achulkov.evomolior.core.deliverable.AcceptedDeliverableAuthority
+import com.achulkov.evomolior.core.deliverable.DeliverableHashing
+import com.achulkov.evomolior.core.deliverable.RunOutcomeClass
 import com.achulkov.evomolior.core.grader.GraderAtlas
 import com.achulkov.evomolior.core.metrics.RunMetricsV1
+import com.achulkov.evomolior.core.outcome.RunOutcomeManifestEntryCategory
+import com.achulkov.evomolior.core.outcome.RunOutcomeManifestV1
 import java.io.ByteArrayInputStream
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
@@ -39,6 +44,7 @@ data class RunManifest(
     val startingFieldSha256: String,
     val runMetricsSha256: String? = null,
     val acceptanceAdmissionSha256: String? = null,
+    val outcomeManifestSha256: String? = null,
     val artifactCount: Int,
     val archiveEntryCount: Int,
     val inputArtifacts: List<RunInputArtifact>,
@@ -99,6 +105,7 @@ enum class RunManifestEntryCategory {
     PUBLICATION_AUTHORITY,
     RUN_METRICS,
     ACCEPTANCE_ADMISSION,
+    RUN_OUTCOME_MANIFEST,
     ARCHIVE
 }
 
@@ -153,6 +160,10 @@ object RunManifestVerifier {
         requiredV2Categories + RunManifestEntryCategory.RUN_METRICS
     private val requiredV4Categories =
         requiredV3Categories + RunManifestEntryCategory.ACCEPTANCE_ADMISSION
+    private val requiredV5Categories = setOf(
+        RunManifestEntryCategory.OUTPUT,
+        RunManifestEntryCategory.RUN_OUTCOME_MANIFEST
+    )
 
     /**
      * Verifies [bundleBytes] and optionally requires [expectedRunId].
@@ -189,14 +200,14 @@ object RunManifestVerifier {
         }.getOrElse {
             return RunManifestVerificationResult(null, errors + "Invalid manifest.json: ${it.message}")
         }
-        if (manifest.schemaVersion !in 1..4) {
+        if (manifest.schemaVersion !in 1..5) {
             errors += "Unsupported manifest schema version: ${manifest.schemaVersion}"
         }
         if (
             manifest.acceptanceProfile != AcceptanceProfile.NORMAL &&
-            manifest.schemaVersion != 4
+            manifest.schemaVersion !in setOf(4, 5)
         ) {
-            errors += "Non-normal acceptance manifest must use schemaVersion=4"
+            errors += "Non-normal acceptance manifest must use schemaVersion=4 or schemaVersion=5"
         }
 
         if (expectedRunId != null && manifest.runId != expectedRunId) {
@@ -250,7 +261,8 @@ object RunManifestVerifier {
             1 -> requiredCategories
             2 -> requiredV2Categories
             3 -> requiredV3Categories
-            else -> requiredV4Categories
+            4 -> requiredV4Categories
+            else -> requiredV5Categories
         }
         (required - manifest.entries.mapTo(mutableSetOf()) { it.category }).forEach {
             errors += "Missing required evidence category: $it"
@@ -262,7 +274,7 @@ object RunManifestVerifier {
             errors += "Manifest archiveEntryCount=${manifest.archiveEntryCount} does not match " +
                 "exported archive entries=$exportedArchiveEntryCount"
         }
-        if (manifest.schemaVersion >= 2) {
+        if (manifest.schemaVersion in 2..4) {
             verifyCanonicalAuthorityMappings(manifest, errors)
         }
         val startingFieldBytes = files["starting-field.json"]
@@ -335,20 +347,282 @@ object RunManifestVerifier {
             manifestRunId = manifest.runId,
             errors = errors
         ) { it.runId }
-        if (manifest.schemaVersion >= 2) {
+        if (manifest.schemaVersion in 2..4) {
             verifyV2Authorities(files, manifest, errors)
         }
-        if (manifest.schemaVersion >= 3 || manifest.runMetricsSha256 != null) {
+        if (
+            manifest.schemaVersion in 3..4 ||
+            (manifest.schemaVersion < 5 && manifest.runMetricsSha256 != null)
+        ) {
             verifyV3RunMetrics(files, manifest, errors)
         }
         if (
-            manifest.schemaVersion >= 4 ||
+            manifest.schemaVersion == 4 ||
             manifest.acceptanceAdmissionSha256 != null ||
             manifest.acceptanceProfile != AcceptanceProfile.NORMAL
         ) {
             verifyV4AcceptanceAdmission(files, manifest, errors)
         }
+        if (manifest.schemaVersion == 5 || manifest.outcomeManifestSha256 != null) {
+            verifyV5OutcomeManifest(files, manifest, errors)
+        }
         return RunManifestVerificationResult(manifest, errors.distinct())
+    }
+
+    private fun verifyV5OutcomeManifest(
+        files: Map<String, ByteArray>,
+        manifest: RunManifest,
+        errors: MutableList<String>,
+    ) {
+        if (manifest.schemaVersion != 5) {
+            errors += "Outcome-aware manifests must use schemaVersion=5"
+            return
+        }
+        val entries = manifest.entries.filter {
+            it.category == RunManifestEntryCategory.RUN_OUTCOME_MANIFEST
+        }
+        if (entries.size != 1 || entries.singleOrNull()?.path != OUTCOME_MANIFEST_PATH) {
+            errors += "Schema-v5 manifest requires exactly one $OUTCOME_MANIFEST_PATH entry"
+        }
+        val commitment = manifest.outcomeManifestSha256
+        if (commitment == null || !SHA_256_REGEX.matches(commitment)) {
+            errors += "Schema-v5 manifest has no valid outcomeManifestSha256 commitment"
+        }
+        val bytes = files[OUTCOME_MANIFEST_PATH] ?: return
+        val actualHash = sha256Hex(bytes)
+        if (actualHash != commitment) {
+            errors += "Run outcome manifest hash does not match manifest commitment"
+        }
+        if (entries.singleOrNull()?.sha256 != actualHash) {
+            errors += "Run outcome manifest entry hash does not match its content"
+        }
+        val outcome = runCatching {
+            json.decodeFromString<RunOutcomeManifestV1>(bytes.toString(Charsets.UTF_8))
+        }.getOrElse {
+            errors += "Invalid $OUTCOME_MANIFEST_PATH: ${it.message}"
+            return
+        }
+        if (outcome.runId != manifest.runId) {
+            errors += "Run outcome manifest belongs to runId=${outcome.runId}"
+        }
+        if (
+            outcome.outcomeClass !=
+            com.achulkov.evomolior.core.deliverable.RunOutcomeClass.ACCEPTED_DECISION_PACKAGE
+        ) {
+            errors += "RunManifest schema-v5 is reserved for accepted outcome archives"
+        }
+        if (!outcome.hasValidHashAndSemantics()) {
+            errors += "Run outcome manifest hash or class separation is invalid"
+        }
+        if (outcome.acceptanceAdmissionHash != manifest.acceptanceAdmissionSha256) {
+            errors += "Run outcome admission hash does not match manifest commitment"
+        }
+        if (
+            manifest.acceptanceProfile != AcceptanceProfile.NORMAL &&
+            outcome.acceptanceAdmissionHash == null
+        ) {
+            errors += "Non-normal outcome manifest lacks acceptance admission authority"
+        }
+        outcome.acceptanceAdmissionHash?.let { admissionHash ->
+            val admissionBytes = files[ACCEPTANCE_ADMISSION_PATH]
+            if (admissionBytes == null) {
+                errors += "Run outcome admission bytes are missing"
+            } else {
+                if (sha256Hex(admissionBytes) != admissionHash) {
+                    errors += "Run outcome admission bytes do not match outcome commitment"
+                }
+                runCatching {
+                    decodeAcceptanceAdmissionArtifact(admissionBytes)
+                }.onSuccess { admission ->
+                    if (
+                        admission.distributionManifestSha256 !=
+                        outcome.admissionDistributionHash
+                    ) {
+                        errors += "Acceptance admission distribution hash does not match outcome manifest"
+                    }
+                }
+            }
+        }
+        val outcomeEntriesByPath = outcome.entries.associateBy { it.path }
+        if (outcomeEntriesByPath.size != outcome.entries.size) {
+            errors += "Run outcome manifest contains duplicate paths"
+        }
+        outcome.entries.forEach { entry ->
+            val content = files[entry.path]
+            if (content == null) {
+                errors += "Missing outcome-attested entry: ${entry.path}"
+            } else {
+                if (content.size.toLong() != entry.sizeBytes) {
+                    errors += "Outcome entry size mismatch for ${entry.path}"
+                }
+                if (sha256Hex(content) != entry.sha256) {
+                    errors += "Outcome entry hash mismatch for ${entry.path}"
+                }
+            }
+        }
+        val payloadPaths = files.keys - setOf("manifest.json", OUTCOME_MANIFEST_PATH)
+        if (payloadPaths != outcomeEntriesByPath.keys) {
+            (payloadPaths - outcomeEntriesByPath.keys).forEach {
+                errors += "Outcome-unattested ZIP entry: $it"
+            }
+            (outcomeEntriesByPath.keys - payloadPaths).forEach {
+                errors += "Missing outcome payload: $it"
+            }
+        }
+        val acceptedAuthorityPaths = outcome.entries.filter {
+            it.category == RunOutcomeManifestEntryCategory.ACCEPTED_AUTHORITY
+        }.map { it.path }.toSet()
+        if ("authority/final-reference.json" !in acceptedAuthorityPaths) {
+            errors += "Accepted schema-v5 archive lacks final-reference package authority"
+        }
+        verifyV5AcceptedAuthority(files, outcome, errors)
+        verifyV5AcceptedSupportAuthorities(files, outcome, errors)
+    }
+
+    private fun verifyV5AcceptedAuthority(
+        files: Map<String, ByteArray>,
+        outcome: RunOutcomeManifestV1,
+        errors: MutableList<String>,
+    ) {
+        val packageEntries = outcome.entries.filter {
+            it.category == RunOutcomeManifestEntryCategory.RECEIVER_DECISION_PACKAGE
+        }
+        if (packageEntries.isEmpty()) {
+            errors += "Accepted schema-v5 archive lacks receiver decision-package authority"
+            return
+        }
+        val packages = packageEntries.mapNotNull { entry ->
+            val bytes = files[entry.path] ?: return@mapNotNull null
+            runCatching {
+                DeliverableHashing.decodePackage(bytes.toString(Charsets.UTF_8))
+            }.getOrElse {
+                errors += "Invalid receiver decision package ${entry.path}: ${it.message}"
+                null
+            }
+        }
+        val validPackages = packages.filter { decisionPackage ->
+            decisionPackage.runId == outcome.runId &&
+                decisionPackage.outcomeClass == RunOutcomeClass.ACCEPTED_DECISION_PACKAGE &&
+                decisionPackage.packageHash == outcome.decisionPackageHash &&
+                decisionPackage.hasValidHashes() &&
+                decisionPackage.acceptedAuthority != null
+        }
+        if (validPackages.size != packages.size || validPackages.isEmpty()) {
+            errors += "Accepted schema-v5 decision package lacks a valid winner/source/writer chain"
+            return
+        }
+        val packageAuthority = requireNotNull(validPackages.first().acceptedAuthority)
+        if (validPackages.any { it.acceptedAuthority != packageAuthority }) {
+            errors += "Accepted schema-v5 decision packages disagree on accepted authority"
+            return
+        }
+        val authorityEntry = outcome.entries.singleOrNull {
+            it.path == ACCEPTED_AUTHORITY_PATH &&
+                it.category == RunOutcomeManifestEntryCategory.ACCEPTED_AUTHORITY
+        }
+        if (authorityEntry == null) {
+            errors += "Accepted schema-v5 archive requires exactly one $ACCEPTED_AUTHORITY_PATH entry"
+            return
+        }
+        val authorityBytes = files[authorityEntry.path] ?: return
+        val fileAuthority = runCatching {
+            json.decodeFromString<AcceptedDeliverableAuthority>(
+                authorityBytes.toString(Charsets.UTF_8)
+            )
+        }.getOrElse {
+            errors += "Invalid accepted authority ${authorityEntry.path}: ${it.message}"
+            return
+        }
+        if (fileAuthority != packageAuthority) {
+            errors += "Accepted final-reference authority differs from the receiver decision package"
+        }
+        if (
+            outcome.acceptedAuthorityHash !=
+            acceptedDeliverableAuthorityHash(fileAuthority)
+        ) {
+            errors += "Accepted final-reference authority hash does not match outcome manifest"
+        }
+    }
+
+    private fun verifyV5AcceptedSupportAuthorities(
+        files: Map<String, ByteArray>,
+        outcome: RunOutcomeManifestV1,
+        errors: MutableList<String>,
+    ) {
+        val metricsBytes = files[ACCEPTED_RUN_METRICS_PATH]
+        if (metricsBytes == null) {
+            errors += "Accepted schema-v5 archive lacks $ACCEPTED_RUN_METRICS_PATH"
+        } else {
+            if (sha256Hex(metricsBytes) != outcome.metricsHash) {
+                errors += "Accepted run metrics hash does not match outcome manifest"
+            }
+            runCatching {
+                json.decodeFromString<RunMetricsV1>(metricsBytes.toString(Charsets.UTF_8))
+            }.onSuccess { metrics ->
+                if (metrics.runId != outcome.runId) {
+                    errors += "Accepted run metrics belong to runId=${metrics.runId}"
+                }
+            }.onFailure {
+                errors += "Invalid $ACCEPTED_RUN_METRICS_PATH: ${it.message}"
+            }
+        }
+
+        val historyBytes = files[ACCEPTED_PUBLICATION_HISTORY_PATH]
+        if (historyBytes == null) {
+            errors += "Accepted schema-v5 archive lacks $ACCEPTED_PUBLICATION_HISTORY_PATH"
+        } else {
+            if (sha256Hex(historyBytes) != outcome.publicationHistoryHash) {
+                errors += "Accepted publication history hash does not match outcome manifest"
+            }
+            runCatching {
+                json.decodeFromString(
+                    ListSerializer(PublicationStateEvent.serializer()),
+                    historyBytes.toString(Charsets.UTF_8),
+                )
+            }.onSuccess { history ->
+                if (history.isEmpty()) {
+                    errors += "Accepted publication history is empty"
+                } else {
+                    history.forEachIndexed { index, event ->
+                        if (
+                            event.runId != outcome.runId ||
+                            !event.hasValidHash() ||
+                            !PublicationStatePolicy.allows(history.getOrNull(index - 1), event)
+                        ) {
+                            errors += "Invalid accepted publication event at index $index"
+                        }
+                    }
+                    if (history.last().state !=
+                        com.achulkov.evomolior.core.contract.PublicationState.ARCHIVED
+                    ) {
+                        errors += "Accepted publication history does not terminate at ARCHIVED"
+                    }
+                }
+            }.onFailure {
+                errors += "Invalid $ACCEPTED_PUBLICATION_HISTORY_PATH: ${it.message}"
+            }
+        }
+
+        val reportBytes = files[MechanismActivationReportV1.ARCHIVE_PATH]
+        if (reportBytes == null) {
+            errors += "Accepted schema-v5 archive lacks ${MechanismActivationReportV1.ARCHIVE_PATH}"
+        } else {
+            runCatching {
+                json.decodeFromString<MechanismActivationReportV1>(
+                    reportBytes.toString(Charsets.UTF_8)
+                )
+            }.onSuccess { report ->
+                if (
+                    report.runId != outcome.runId ||
+                    report.outcomeClass != RunOutcomeClass.ACCEPTED_DECISION_PACKAGE ||
+                    !report.hasValidHash()
+                ) {
+                    errors += "Accepted mechanism activation report is invalid"
+                }
+            }.onFailure {
+                errors += "Invalid ${MechanismActivationReportV1.ARCHIVE_PATH}: ${it.message}"
+            }
+        }
     }
 
     private fun verifyV4AcceptanceAdmission(
@@ -824,6 +1098,12 @@ object RunManifestVerifier {
 
     private const val RUN_METRICS_PATH = "run-metrics-v1.json"
     private const val ACCEPTANCE_ADMISSION_PATH = "acceptance-admission-v1.json"
+    /** Canonical root manifest entry used to identify and verify outcome-aware archives. */
+    const val OUTCOME_MANIFEST_PATH = "run-outcome-manifest-v1.json"
+    private const val ACCEPTED_AUTHORITY_PATH = "authority/final-reference.json"
+    private const val ACCEPTED_RUN_METRICS_PATH = "accepted/run-metrics-v1.json"
+    private const val ACCEPTED_PUBLICATION_HISTORY_PATH =
+        "accepted/publication-history.json"
     private const val RUN_CONFIG_ATTESTATION_PATH = "metadata/run-config.json"
     private const val BINARY_METADATA_PATH = "metadata/binary.json"
     private val SINGLETON_AUTHORITY_PATHS = mapOf(
@@ -846,6 +1126,16 @@ object RunManifestVerifier {
     private val CONTRIBUTION_LINEAGE_PATH =
         Regex("^authority/contribution-lineage/[^/]+\\.json$")
     private val SHA_256_REGEX = Regex("^[0-9a-f]{64}$")
+}
+
+internal fun acceptedDeliverableAuthorityHash(
+    authority: AcceptedDeliverableAuthority,
+): String {
+    val element = Json {
+        encodeDefaults = true
+        explicitNulls = true
+    }.encodeToJsonElement(AcceptedDeliverableAuthority.serializer(), authority)
+    return DeliverableHashing.hashText(DeliverableHashing.canonicalJson(element))
 }
 
 internal fun sha256Hex(bytes: ByteArray): String =

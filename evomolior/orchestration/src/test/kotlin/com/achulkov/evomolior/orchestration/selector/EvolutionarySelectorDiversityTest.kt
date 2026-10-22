@@ -215,6 +215,32 @@ class EvolutionarySelectorDiversityTest {
     }
 
     @Test
+    fun `artifact work preserves a Builder owner under outlier and low budget pressure`() = runTest {
+        val dataRoot = createTempDirectory("selector-artifact-owner-").toFile()
+        val selector = EvolutionarySelector(
+            db = SubstrateDatabaseFactory(dataRoot).get("run-selector-artifact-owner", "group-0"),
+            profile = GroupProfile.default(GroupProfileType.Library),
+            runId = "run-selector-artifact-owner",
+            groupId = "group-0",
+        )
+
+        val pruned = selector.computeAllocation(
+            generation = 0,
+            globalBudgetCeiling = 150.0,
+            artifactWorkRequired = true,
+        )
+        val scaled = selector.computeAllocation(
+            generation = 1,
+            globalBudgetCeiling = 18.0,
+            artifactWorkRequired = true,
+        )
+
+        assertTrue(pruned.entries.any { it.role == Role.Builder })
+        assertTrue(pruned.entries.none { it.role == Role.Outlier })
+        assertEquals(Role.Builder, scaled.entries.single().role)
+    }
+
+    @Test
     fun `zero budget ceiling produces empty allocation instead of over-budget fixed spawns`() = runTest {
         val dataRoot = createTempDirectory("selector-zero-budget-").toFile()
         val runId = "run-selector-zero-budget"

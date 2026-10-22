@@ -35,7 +35,11 @@ internal fun databaseConstitutionalActionGate(
             EventLogEntryEntity(
                 id = UUID.randomUUID().toString(),
                 timestampMs = System.currentTimeMillis(),
-                eventType = EventTypes.CONSTITUTIONAL_VIOLATION,
+                eventType = if (event.blocked) {
+                    EventTypes.CONSTITUTIONAL_VIOLATION
+                } else {
+                    EventTypes.CONSTITUTIONAL_AUDIT
+                },
                 agentId = agentId,
                 groupId = groupId,
                 runId = runId,

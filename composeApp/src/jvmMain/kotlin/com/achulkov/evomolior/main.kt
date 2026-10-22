@@ -389,7 +389,14 @@ private fun runHeadlessAutoReplay(
         val eventLogger = launch(Dispatchers.Default) {
             engineService.events.collect { event ->
                 logHeadlessEvent(event)
-                if (event is EvoMoliorEvent.RunCompleted && !completionSignal.isCompleted) {
+                if (
+                    (
+                        event is EvoMoliorEvent.RunCompleted ||
+                            event is EvoMoliorEvent.RunCompletedProvisional ||
+                            event is EvoMoliorEvent.RunRecovered
+                        ) &&
+                    !completionSignal.isCompleted
+                ) {
                     completionSignal.complete(Unit)
                 }
             }
@@ -428,6 +435,20 @@ private fun logHeadlessEvent(event: EvoMoliorEvent) {
         is EvoMoliorEvent.RunCompleted -> {
             Napier.i("EvoMoliorViewModel: run completed runId=${event.runId} winner=${event.winnerId}")
             Napier.d("EvoMoliorViewModel: received event RunCompleted")
+        }
+        is EvoMoliorEvent.RunCompletedProvisional -> {
+            Napier.w(
+                "EvoMoliorViewModel: run completed provisionally " +
+                    "runId=${event.runId} reason=${event.reason}"
+            )
+            Napier.d("EvoMoliorViewModel: received event RunCompletedProvisional")
+        }
+        is EvoMoliorEvent.RunRecovered -> {
+            Napier.w(
+                "EvoMoliorViewModel: run recovered without acceptance " +
+                    "runId=${event.runId} reason=${event.reason}"
+            )
+            Napier.d("EvoMoliorViewModel: received event RunRecovered")
         }
         is EvoMoliorEvent.GraderRoundStarted -> {
             Napier.i("EvoMoliorViewModel: grader round started graderGroupId=${event.graderGroupId} round=${event.roundIndex}")

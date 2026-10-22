@@ -172,14 +172,177 @@ class FetchSourceToolTest {
         }
 
         try {
-            val result = runCatching {
-                JavaNetSourceFetcher().fetch("http://127.0.0.1:${server.address.port}/start")
-            }
+            val result = JavaNetSourceFetcher().fetch("http://127.0.0.1:${server.address.port}/start")
 
-            assertTrue(result.isFailure)
+            assertEquals(302, result.statusCode)
+            assertEquals("http://127.0.0.1:${server.address.port}/destination", result.redirectLocation)
             assertTrue(!redirectedDestinationReached)
         } finally {
             server.stop(0)
         }
     }
+
+    @Test
+    fun `http fetcher resolves relative redirect locations and bounds large bodies`() = runTest {
+        val largeBody = ByteArray(MAX_SOURCE_BODY_BYTES + 1024) { 'a'.code.toByte() }
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
+            createContext("/docs/start") { exchange ->
+                exchange.responseHeaders.add("Location", "../final?x=1")
+                exchange.sendResponseHeaders(301, -1)
+                exchange.close()
+            }
+            createContext("/large") { exchange ->
+                exchange.responseHeaders.add("Content-Type", "text/plain; charset=utf-8")
+                exchange.sendResponseHeaders(200, largeBody.size.toLong())
+                exchange.responseBody.use { it.write(largeBody) }
+            }
+            start()
+        }
+
+        try {
+            val base = "http://127.0.0.1:${server.address.port}"
+            val redirect = JavaNetSourceFetcher().fetch("$base/docs/start")
+            assertEquals("$base/final?x=1", redirect.redirectLocation)
+
+            val large = JavaNetSourceFetcher().fetch("$base/large")
+            assertEquals(200, large.statusCode)
+            assertEquals(MAX_SOURCE_BODY_BYTES, large.body.length)
+            assertTrue(large.bodyTruncated)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `approved redirect destination is authorized audited and then fetched`() = runTest {
+        val auditFile = createTempDirectory("fetch-source-tool-redirect-").toFile()
+            .resolve(SourceAccessDecisionStore.FILE_NAME)
+        val requested = mutableListOf<String>()
+        val tool = redirectTool(
+            auditFile = auditFile,
+            allowedHosts = setOf("geoservices.ign.fr"),
+            responses = mapOf(
+                "https://geoservices.ign.fr/rgealti" to FetchedSource(
+                    statusCode = 301,
+                    contentType = null,
+                    body = "",
+                    redirectLocation = "https://geoservices.ign.fr/documentation/donnees/alti/rgealti"
+                ),
+                "https://geoservices.ign.fr/documentation/donnees/alti/rgealti" to FetchedSource(
+                    statusCode = 200,
+                    contentType = "text/html",
+                    body = "<main>RGE ALTI 1 m and 5 m grids.</main>"
+                )
+            ),
+            requested = requested
+        )
+
+        val result = tool.execute(
+            FetchSourceTool.Args(
+                url = "https://geoservices.ign.fr/rgealti",
+                purpose = "Inspect official RGE ALTI terrain documentation."
+            )
+        )
+
+        assertTrue(result.startsWith("SOURCE_FETCHED"), result)
+        assertTrue(result.contains("Redirected from: https://geoservices.ign.fr/rgealti"))
+        assertTrue(result.contains("RGE ALTI 1 m and 5 m grids."))
+        assertEquals(2, requested.size)
+        val records = SourceAccessDecisionStore(auditFile).readAll()
+        assertEquals(2, records.size)
+        assertTrue(records.all { it.allowed })
+        assertTrue(records.last().purpose.startsWith("Redirect from https://geoservices.ign.fr/rgealti"))
+    }
+
+    @Test
+    fun `unapproved redirect destination is never requested and is reported`() = runTest {
+        val auditFile = createTempDirectory("fetch-source-tool-redirect-block-").toFile()
+            .resolve(SourceAccessDecisionStore.FILE_NAME)
+        val requested = mutableListOf<String>()
+        val tool = redirectTool(
+            auditFile = auditFile,
+            allowedHosts = setOf("docs.example.org"),
+            responses = mapOf(
+                "https://docs.example.org/start" to FetchedSource(
+                    statusCode = 302,
+                    contentType = null,
+                    body = "",
+                    redirectLocation = "https://tracker.example.net/collect"
+                )
+            ),
+            requested = requested
+        )
+
+        val result = tool.execute(
+            FetchSourceTool.Args(
+                url = "https://docs.example.org/start",
+                purpose = "Inspect official product documentation."
+            )
+        )
+
+        assertTrue(result.startsWith("REDIRECT_BLOCKED"), result)
+        assertTrue(result.contains("https://tracker.example.net/collect"))
+        assertEquals(listOf("https://docs.example.org/start"), requested)
+        val records = SourceAccessDecisionStore(auditFile).readAll()
+        assertEquals(listOf(true, false), records.map { it.allowed })
+    }
+
+    @Test
+    fun `redirect loops and excessive hops stop without unbounded requests`() = runTest {
+        val auditFile = createTempDirectory("fetch-source-tool-redirect-loop-").toFile()
+            .resolve(SourceAccessDecisionStore.FILE_NAME)
+        val loopRequests = mutableListOf<String>()
+        val loopTool = redirectTool(
+            auditFile = auditFile,
+            allowedHosts = setOf("docs.example.org"),
+            responses = mapOf(
+                "https://docs.example.org/a" to FetchedSource(301, null, "", "https://docs.example.org/b"),
+                "https://docs.example.org/b" to FetchedSource(301, null, "", "https://docs.example.org/a")
+            ),
+            requested = loopRequests
+        )
+        val loop = loopTool.execute(
+            FetchSourceTool.Args(url = "https://docs.example.org/a", purpose = "Inspect looping documentation.")
+        )
+        assertTrue(loop.startsWith("FETCH_FAILED") && loop.contains("loop"), loop)
+        assertEquals(2, loopRequests.size)
+
+        val chainRequests = mutableListOf<String>()
+        val chain = (0..MAX_REDIRECT_HOPS + 1).associate { index ->
+            "https://docs.example.org/hop$index" to
+                FetchedSource(302, null, "", "https://docs.example.org/hop${index + 1}")
+        }
+        val chainTool = redirectTool(
+            auditFile = createTempDirectory("fetch-source-tool-redirect-chain-").toFile()
+                .resolve(SourceAccessDecisionStore.FILE_NAME),
+            allowedHosts = setOf("docs.example.org"),
+            responses = chain,
+            requested = chainRequests
+        )
+        val longChain = chainTool.execute(
+            FetchSourceTool.Args(url = "https://docs.example.org/hop0", purpose = "Inspect long redirect chain.")
+        )
+        assertTrue(longChain.startsWith("FETCH_FAILED") && longChain.contains("redirects"), longChain)
+        assertEquals(MAX_REDIRECT_HOPS + 1, chainRequests.size)
+    }
+
+    private fun redirectTool(
+        auditFile: java.io.File,
+        allowedHosts: Set<String>,
+        responses: Map<String, FetchedSource>,
+        requested: MutableList<String>
+    ) = FetchSourceTool(
+        runId = "run-source-redirect",
+        groupId = "group-0",
+        agentId = "agent-1",
+        role = "Researcher",
+        generation = 1,
+        runObjective = "Compare official terrain and weather data sources.",
+        currentAllowedHosts = allowedHosts,
+        auditFilePath = auditFile.absolutePath,
+        fetcher = SourceFetcher { url ->
+            requested += url
+            responses[url] ?: error("unexpected request to $url")
+        }
+    )
 }

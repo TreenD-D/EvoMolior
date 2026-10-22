@@ -17,6 +17,14 @@ interface MetaArchiveDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(entries: List<MetaArchiveEntryEntity>)
 
+    /** Inserts immutable completion authority without replacing an existing identity. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertImmutable(entry: MetaArchiveEntryEntity): Long
+
+    /** Returns one exact archive entry by stable identity. */
+    @Query("SELECT * FROM meta_archive WHERE id = :id")
+    suspend fun getById(id: String): MetaArchiveEntryEntity?
+
     /** Replaces the singleton run-level entry for [entry.entryType] atomically. */
     @Transaction
     suspend fun replaceRunSingleton(entry: MetaArchiveEntryEntity) {

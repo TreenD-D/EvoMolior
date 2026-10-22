@@ -1,6 +1,8 @@
 package com.achulkov.evomolior.cli
 
+import com.achulkov.evomolior.api.service.RunOutcomePresentation
 import com.achulkov.evomolior.core.config.LlmBackend
+import com.achulkov.evomolior.core.deliverable.RunOutcomeClass
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermission
@@ -14,6 +16,65 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class CliPipelineStartupRejectionPublicationTest {
+    @Test
+    fun `startup rejection summary preserves the verified diagnostic terminal outcome`() {
+        val outputRoot = createTempDirectory("startup-diagnostic-cli-output-")
+        val runOutput = outputRoot.resolve("run")
+        val stage = CliStagePlan(
+            id = "startup-diagnostic-stage",
+            prompt = "Reject this run before startup.",
+            inputDir = createTempDirectory("startup-diagnostic-cli-input-"),
+            outputDir = runOutput,
+            runId = "startup-diagnostic-cli",
+            fast = false,
+            rounds = 1,
+            groupCount = 2,
+            maxAgentsPerGroup = null,
+            roundDurationMinutes = null,
+            budgetOverride = null,
+            inheritsPreviousOutputs = false,
+            modelOverrides = emptyMap(),
+            finalOutputSpec = null,
+            finalOutputExplicit = false,
+            enforceProviderMonetaryCostCap = false,
+        )
+        val bundle = "verified-startup-diagnostic-zip".toByteArray()
+        val outcome = RunOutcomePresentation(
+            runId = stage.runId,
+            outcomeClass = RunOutcomeClass.STARTUP_DIAGNOSTIC_PACKAGE,
+            manifestHash = "a".repeat(64),
+            artifactPaths = listOf("outcome-manifest.json"),
+        )
+
+        val persisted = persistCliStartupRejection(
+            stage = stage,
+            preferredOutputDir = runOutput,
+            outputRoot = outputRoot,
+            error = IllegalStateException("Admission rejected"),
+            artifact = null,
+            modelOverrides = emptyMap(),
+            terminalBundle = bundle,
+            terminalOutcome = outcome,
+        )
+
+        assertContentEquals(
+            bundle,
+            Files.readAllBytes(persisted.outputDirectory.resolve("startup-diagnostic.zip")),
+        )
+        assertEquals(
+            persisted.outputDirectory.resolve("startup-diagnostic.zip")
+                .toAbsolutePath()
+                .toString(),
+            persisted.summary.resultsBundlePath,
+        )
+        assertEquals(outcome, persisted.summary.outcome)
+        assertEquals("REJECTED", persisted.summary.status)
+        assertTrue(
+            Files.readString(persisted.outputDirectory.resolve("summary.json"))
+                .contains("STARTUP_DIAGNOSTIC_PACKAGE")
+        )
+    }
+
     @Test
     fun `startup rejection publishes an immutable byte-identical public copy before its summary`() {
         val input = createTempDirectory("startup-rejection-public-copy-input-")

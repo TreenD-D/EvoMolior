@@ -4,6 +4,7 @@ import com.achulkov.evomolior.core.atlas.FinalOutputSpec
 import com.achulkov.evomolior.core.config.AcceptanceProfile
 import com.achulkov.evomolior.core.config.CouncilExecutionPurpose
 import com.achulkov.evomolior.core.contract.GroupTopologyKind
+import com.achulkov.evomolior.core.model.GroupProfile
 import com.achulkov.evomolior.core.model.GroupProfileType
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -126,6 +127,9 @@ data class SandboxCapabilitySummary(
  * @param atomicNodeEffortBound Maximum effort allocated to one atomic node.
  * @param councilExecutionPurpose Persisted operator purpose projected into runtime authority.
  * @param acceptanceProfile Explicit executable-topology and acceptance-obligation profile.
+ * @param codexReasoningEffort Per-run Codex reasoning authority.
+ * @param codexRuntimePreset Optional operator-owned model distribution and reasoning tiers.
+ * @param quantitativeToolObligation Optional operator-owned typed quantitative-tool authority.
  * @param operatorOverrides Explicit operator-owned configuration.
  */
 @OptIn(ExperimentalSerializationApi::class)
@@ -149,8 +153,52 @@ data class ExecutionEnvelope(
     val councilExecutionPurpose: CouncilExecutionPurpose = CouncilExecutionPurpose.STANDARD,
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val acceptanceProfile: AcceptanceProfile = AcceptanceProfile.NORMAL,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    val codexReasoningEffort: com.achulkov.evomolior.core.config.CodexReasoningEffort =
+        com.achulkov.evomolior.core.config.CodexReasoningEffort.HIGH,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val quantitativeToolObligation: QuantitativeToolObligation? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val codexRuntimePreset: com.achulkov.evomolior.core.config.CodexRuntimePreset? = null,
     val operatorOverrides: Map<String, String> = emptyMap()
-)
+) {
+    init {
+        require(
+            quantitativeToolObligation == null ||
+                acceptanceProfile != AcceptanceProfile.RUNTIME_USABILITY_SMOKE
+        ) {
+            "Runtime-usability-smoke forbids tool opportunities and cannot carry a " +
+                "quantitative-tool obligation"
+        }
+    }
+}
+
+/**
+ * Upper bound on ordinary workers one group can actually fund per round.
+ *
+ * Mirrors the runtime allocator: each worker is granted at least the cheapest permitted profile's
+ * spawn budget, and a per-round credit share below two such grants funds a single worker. The
+ * nominal [ExecutionEnvelope.maxAgentsPerGroupPerRound] overstated capacity 3x in the October 2026
+ * mixed run (300 credits over 2 groups x 4 rounds funded one Builder per group-round), so
+ * feasibility planning must use this bound instead. It never exceeds the nominal slot count.
+ */
+val ExecutionEnvelope.creditAffordableWorkerSlots: Int
+    get() {
+        val nominal = maxAgentsPerGroupPerRound
+        if (nominal <= 1) return nominal.coerceAtLeast(0)
+        val cheapestGrant = permittedProfiles
+            .minOfOrNull { GroupProfile.default(it).spawnBudget }
+            ?.takeIf { it > 0.0 }
+            ?: return nominal
+        val groups = requiredWorkerGroupCount.maximum.coerceAtLeast(1)
+        val perGroupRoundCredits = cumulativeCostCap
+            ?.takeIf { it.isFinite() && it >= 0.0 }
+            ?.div(groups)
+            ?.div(maxRounds.coerceAtLeast(1))
+            ?: return nominal
+        if (perGroupRoundCredits < 2 * cheapestGrant) return 1
+        return minOf(nominal, (perGroupRoundCredits / cheapestGrant).toInt()).coerceAtLeast(1)
+    }
 
 /** Monetary provider cap enforced by runtime cost authority, or null in explicit iso-latency mode. */
 val ExecutionEnvelope.providerCostCapUsd: Double?

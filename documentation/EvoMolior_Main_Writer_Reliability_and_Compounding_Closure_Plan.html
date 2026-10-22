@@ -1,0 +1,1657 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>EvoMolior Main-Writer Reliability and Compounding Closure Plan</title><style>
+:root{--bg:#f5f7fb;--surface:#fff;--surface2:#eef2f8;--text:#162033;--muted:#596579;--border:#d8dfeb;--accent:#155eef;--accent2:#7c3aed;--good:#067647;--warn:#b54708;--bad:#b42318;--code:#0d1321;--shadow:0 12px 35px rgba(22,32,51,.09)}
+html[data-theme="dark"]{--bg:#09111f;--surface:#0f1a2b;--surface2:#152238;--text:#eaf0fa;--muted:#a7b2c5;--border:#273750;--accent:#61a0ff;--accent2:#b18cff;--good:#55d99d;--warn:#ffb66d;--bad:#ff8585;--code:#050912;--shadow:0 15px 38px rgba(0,0,0,.32)}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.progress{position:fixed;z-index:100;top:0;left:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0}.topbar{position:sticky;top:0;z-index:90;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 22px;background:color-mix(in srgb,var(--surface) 93%,transparent);backdrop-filter:blur(15px);border-bottom:1px solid var(--border)}.brand{display:flex;align-items:center;gap:11px;font-weight:800}.mark{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:var(--shadow)}.actions{display:flex;gap:8px}.actions button,.toc-toggle{border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:9px;padding:8px 11px;font-weight:650;cursor:pointer}.layout{display:grid;grid-template-columns:285px minmax(0,1fr);max-width:1500px;margin:0 auto}.sidebar{position:sticky;top:62px;height:calc(100vh - 62px);overflow:auto;padding:25px 18px;border-right:1px solid var(--border)}.sidebar h2{font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:0 0 12px}.search{width:100%;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:9px;padding:9px;margin-bottom:13px}.toc{list-style:none;padding:0;margin:0}.toc li{margin:2px 0}.toc a{display:block;padding:5px 8px;border-radius:7px;color:var(--muted);text-decoration:none;font-size:13px;line-height:1.35}.toc a:hover,.toc a.active{background:var(--surface2);color:var(--accent)}.toc .l3 a{padding-left:20px}.toc .l4 a{padding-left:32px;font-size:12px}main{min-width:0;padding:45px 45px 90px}.article{max-width:1080px;margin:0 auto;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);border-radius:18px;padding:54px 62px}.article>h1:first-of-type{font-size:clamp(36px,5vw,68px);line-height:1.03;letter-spacing:-.045em;margin-top:0;background:linear-gradient(100deg,var(--text),var(--accent),var(--accent2));-webkit-background-clip:text;color:transparent}.article>h2:first-of-type{margin-top:-20px;color:var(--muted);font-weight:600;border:0;padding:0;font-size:22px}.meta-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:25px 0 35px}.meta-grid>div{padding:13px 15px;border:1px solid var(--border);background:var(--surface2);border-radius:12px}.meta-grid span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.meta-grid strong{display:block;margin-top:3px;font-size:14px}h2{margin-top:55px;padding-top:8px;border-top:1px solid var(--border);font-size:30px;letter-spacing:-.025em}h3{margin-top:35px;font-size:22px}h4{margin-top:28px;font-size:17px}.heading-anchor{opacity:0;margin-left:8px;text-decoration:none;color:var(--accent);font-size:.7em}.article h2:hover .heading-anchor,.article h3:hover .heading-anchor,.article h4:hover .heading-anchor{opacity:1}p{margin:12px 0}strong{font-weight:750}a{color:var(--accent)}blockquote{margin:24px 0;padding:18px 21px;border-left:5px solid var(--accent);background:linear-gradient(120deg,color-mix(in srgb,var(--accent) 10%,var(--surface)),color-mix(in srgb,var(--accent2) 7%,var(--surface)));border-radius:0 12px 12px 0;font-size:18px}pre{position:relative;overflow:auto;background:var(--code);color:#e6edf7;border-radius:12px;padding:19px 21px;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)}code{font:0.9em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--surface2);padding:.12em .32em;border-radius:5px}pre code{background:none;padding:0;font-size:inherit}table{width:100%;border-collapse:separate;border-spacing:0;margin:20px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;font-size:14px}th,td{padding:10px 12px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);vertical-align:top}th:last-child,td:last-child{border-right:0}tr:last-child td{border-bottom:0}th{background:var(--surface2);text-align:left;font-weight:750}tbody tr:hover td{background:color-mix(in srgb,var(--accent) 4%,var(--surface))}ul,ol{padding-left:24px}li{margin:5px 0}hr{border:0;border-top:1px solid var(--border);margin:38px 0}.cite{white-space:nowrap;color:var(--accent2);font-size:.9em;font-weight:700}.callout{padding:15px 18px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);margin:20px 0}.toc-toggle{display:none}@media(max-width:1050px){.layout{grid-template-columns:1fr}.sidebar{position:fixed;z-index:95;left:0;top:61px;width:300px;transform:translateX(-105%);transition:.2s;background:var(--surface);box-shadow:var(--shadow)}.sidebar.open{transform:translateX(0)}.toc-toggle{display:inline-block}main{padding:25px}.article{padding:38px}.meta-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:650px){main{padding:12px}.article{border-radius:0;padding:25px 19px}.topbar{padding:10px 12px}.brand span:last-child{display:none}.meta-grid{grid-template-columns:1fr}h2{font-size:25px}table{font-size:12px;display:block;overflow-x:auto}.actions button{padding:7px}.article>h1:first-of-type{font-size:40px}}@media print{.topbar,.sidebar,.progress,.heading-anchor{display:none!important}.layout{display:block}main{padding:0}.article{max-width:none;border:0;box-shadow:none;padding:0;color:#111}.article>h1:first-of-type{color:#111;background:none;-webkit-text-fill-color:initial}h2{break-before:page}h2:first-of-type{break-before:auto}table,pre,blockquote{break-inside:avoid}body{background:#fff}}
+</style></head><body><div class="progress" id="progress"></div><header class="topbar"><div class="brand"><span class="mark">EM</span><span>EvoMolior writer & compounding closure</span></div><div class="actions"><button class="toc-toggle" id="tocBtn">Contents</button><button id="printBtn">Print / PDF</button><button id="themeBtn">Dark</button></div></header><div class="layout"><aside class="sidebar" id="sidebar"><h2>Contents</h2><input class="search" id="search" type="search" placeholder="Filter sections…"><ol class="toc" id="toc"></ol></aside><main><article class="article"><h1 id="evomolior-final-output-closure-plan">EvoMolior Final-Output Closure Plan<a class="heading-anchor" href="#evomolior-final-output-closure-plan" aria-label="Link to section">#</a></h1>
+<h2 id="reliable-codex-luna-runs-a-guaranteed-main-writer-artifact-and-working-compounding">Reliable Codex/Luna runs, a guaranteed main-writer artifact, and working compounding<a class="heading-anchor" href="#reliable-codex-luna-runs-a-guaranteed-main-writer-artifact-and-working-compounding" aria-label="Link to section">#</a></h2>
+<div class="meta-grid">
+  <div><span>Evidence cut</span><strong>2 August 2026</strong></div>
+  <div><span>Primary run</span><strong>Gate-D ARC-AGI-2 v28-r3</strong></div>
+  <div><span>Backend constraint</span><strong>Codex / gpt-5.6-luna retained</strong></div>
+  <div><span>Architectural invariant</span><strong>Council → competitive groups + graders → check-in → repeat</strong></div>
+</div>
+
+<blockquote>
+<p><strong>Executive decision:</strong> stop treating the final notebook as something that may be generated only after strict winner acceptance. The current order creates a circular dependency: strict acceptance needs a valid notebook, while the normal writer is withheld until accepted writer authority exists. Make the notebook a continuously maintained, provisional run artifact; run the main writer before final acceptance; then use deterministic validation to upgrade the artifact to accepted authority or publish it honestly as provisional.</p>
+</blockquote>
+<hr />
+<h2 id="1-current-verdict">1. Current verdict<a class="heading-anchor" href="#1-current-verdict" aria-label="Link to section">#</a></h2>
+<p>The latest run is not primarily an evaluation failure anymore. The scorer, replay, isolated grading, lifecycle reconciliation, admission, and recovery-manifest machinery are functioning. The remaining blocker is the <strong>delivery control plane</strong>.</p>
+<table>
+<thead>
+<tr>
+  <th>Area</th>
+  <th style="text-align:right">v28-r3 result</th>
+  <th>Interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Provider/runtime admission</td>
+  <td style="text-align:right">Immutable package admitted; exact Codex/Luna route; sandbox and scoring child healthy</td>
+  <td>Infrastructure preconditions passed; the main failure is above admission [E5]</td>
+</tr>
+<tr>
+  <td>Comparative round resolution</td>
+  <td style="text-align:right">6/6 rounds resolved</td>
+  <td>The ranking split from strict mandatory gates worked [E1][E2]</td>
+</tr>
+<tr>
+  <td>Replay</td>
+  <td style="text-align:right">6/6 exact, maximum absolute error 0</td>
+  <td>Scoring is reproducible [E1]</td>
+</tr>
+<tr>
+  <td>Grader bundles</td>
+  <td style="text-align:right">54/54 valid</td>
+  <td>Grader transport/cardinality is no longer the bottleneck [E4][E6]</td>
+</tr>
+<tr>
+  <td>Mandatory tests</td>
+  <td style="text-align:right">0/6 for every group in every round</td>
+  <td>No group had an artifact capable of satisfying the final receiver contract [E1][E2]</td>
+</tr>
+<tr>
+  <td>Normal main writer</td>
+  <td style="text-align:right">0 spawns</td>
+  <td>The normal artifact path was never entered [E1][E2]</td>
+</tr>
+<tr>
+  <td>Recovery writers</td>
+  <td style="text-align:right">2 attempts</td>
+  <td>Attempt 1 timed out; attempt 2 failed public notebook structure/signals [E1][E2]</td>
+</tr>
+<tr>
+  <td>Fresh <code>submission.ipynb</code></td>
+  <td style="text-align:right">Absent</td>
+  <td>The actual receiver artifact was not produced [E1]</td>
+</tr>
+<tr>
+  <td>Terminal result</td>
+  <td style="text-align:right"><code>RECOVERED</code>, exit 1, provisional package</td>
+  <td>Safety worked; product completion did not [E1][E4]</td>
+</tr>
+<tr>
+  <td>Visible 358-row benchmark</td>
+  <td style="text-align:right">Not run</td>
+  <td>No candidate notebook existed [E1][E2]</td>
+</tr>
+</tbody>
+</table>
+<p>The most important conclusion is:</p>
+<blockquote>
+<p><strong>EvoMolior successfully ran a 17.55-hour society and a complete evaluation institution, but it never materialized the primary artifact that the institution was supposed to improve.</strong></p>
+</blockquote>
+<p>That is an orchestration and artifact-contract defect, not evidence that more agent roles, stronger grading, or another full provider retry is needed.</p>
+<hr />
+<h2 id="2-evidence-derived-diagnosis">2. Evidence-derived diagnosis<a class="heading-anchor" href="#2-evidence-derived-diagnosis" aria-label="Link to section">#</a></h2>
+<h3 id="2-1-the-writer-acceptance-cycle-is-deadlocked">2.1 The writer–acceptance cycle is deadlocked<a class="heading-anchor" href="#2-1-the-writer-acceptance-cycle-is-deadlocked" aria-label="Link to section">#</a></h3>
+<p>The observed sequence is effectively:</p>
+<pre><code class="language-text">worker rounds
+  → strict mandatory tests evaluate missing/incomplete final artifact
+  → every group receives 0/6 and mandatoryFailure=true
+  → no accepted winner/writer authority
+  → normal final writer is not spawned
+  → no notebook exists to pass the mandatory tests
+  → recovery tries to generate the whole notebook from scratch
+  → timeout or contract rejection
+</code></pre>
+<p>The v28-r3 comparative fix resolved a leader every round, including a final-round comparative candidate, but normal writer spawning remained zero because accepted authority was withheld. That proves comparative source selection and accepted publication are still coupled at the wrong point. [E1][E2]</p>
+<p><strong>Required inversion:</strong></p>
+<pre><code class="language-text">comparative source selection
+  → provisional main-writer candidate
+  → concrete notebook compilation
+  → structural/execution/benchmark validation
+  → strict accepted-authority resolution
+  → accepted or provisional publication
+</code></pre>
+<p>The writer is a <strong>candidate producer</strong>. Passing the gates upgrades its authority; the gates must not be prerequisites for invoking it.</p>
+<h3 id="2-2-the-primary-deliverable-contract-does-not-describe-the-primary-deliverable">2.2 The primary deliverable contract does not describe the primary deliverable<a class="heading-anchor" href="#2-2-the-primary-deliverable-contract-does-not-describe-the-primary-deliverable" aria-label="Link to section">#</a></h3>
+<p>The archived <code>DeliverableBlueprint</code> says:</p>
+<ul>
+<li>the receiver intends to use a staged <code>submission.ipynb</code>;</li>
+<li><code>primaryFormat</code> is <code>JSON</code>;</li>
+<li>companion format is Markdown;</li>
+<li>all 13 component specifications have empty <code>sourceNodeIds</code>;</li>
+<li>no first-class notebook artifact is declared. [E4][E6]</li>
+</ul>
+<p>This is a direct semantic mismatch. The decision package can describe a notebook but cannot require, track, validate, or archive one as the primary output.</p>
+<p>The current generic package is therefore capable of becoming structurally complete while the actual requested artifact is absent. The run reported recovery component coverage of 7/8, yet the package mostly contains authority placeholders and no notebook. That metric measures file/component presence, not receiver value.</p>
+<h3 id="2-3-interim-snapshots-are-present-but-not-usable">2.3 Interim snapshots are present but not usable<a class="heading-anchor" href="#2-3-interim-snapshots-are-present-but-not-usable" aria-label="Link to section">#</a></h3>
+<p>The run reports 18/18 interim snapshot coverage. However, the recovery source set contains only:</p>
+<ul>
+<li>three group IDs;</li>
+<li>three snapshot hashes;</li>
+<li>no public evidence references;</li>
+<li>no candidate notebook path;</li>
+<li>no benchmark report;</li>
+<li>no artifact module references. [E4][E6]</li>
+</ul>
+<p>Consequently the provisional compiler can render only statements such as “no accepted winner exists.” It cannot recover the best notebook, code module, experiment, or benchmark progress from earlier rounds.</p>
+<p><strong>Current metric failure:</strong> <code>interim_snapshot_coverage=1.0</code> is true syntactically and false semantically.</p>
+<h3 id="2-4-delivery-roles-were-starved-by-summary-and-review-roles">2.4 Delivery roles were starved by summary and review roles<a class="heading-anchor" href="#2-4-delivery-roles-were-starved-by-summary-and-review-roles" aria-label="Link to section">#</a></h3>
+<p>Derived from the 48 ordinary-exit references in <code>run-metrics-v1.json</code>:</p>
+<table>
+<thead>
+<tr>
+  <th>Role</th>
+  <th style="text-align:right">Exits</th>
+  <th style="text-align:right">Share</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Archivist</td>
+  <td style="text-align:right">21</td>
+  <td style="text-align:right">43.75%</td>
+</tr>
+<tr>
+  <td>Critic</td>
+  <td style="text-align:right">12</td>
+  <td style="text-align:right">25.00%</td>
+</tr>
+<tr>
+  <td>Outlier</td>
+  <td style="text-align:right">6</td>
+  <td style="text-align:right">12.50%</td>
+</tr>
+<tr>
+  <td>Builder</td>
+  <td style="text-align:right">6</td>
+  <td style="text-align:right">12.50%</td>
+</tr>
+<tr>
+  <td>Researcher</td>
+  <td style="text-align:right">2</td>
+  <td style="text-align:right">4.17%</td>
+</tr>
+<tr>
+  <td>PerspectiveTaker</td>
+  <td style="text-align:right">1</td>
+  <td style="text-align:right">2.08%</td>
+</tr>
+</tbody>
+</table>
+<p>Only 8 of 48 exits—16.67%—were Builders or Researchers. The useful-exit numerator was 12, consisting of ten Critics and only two Builders. No Researcher, Archivist, or Outlier counted as a useful exit. [E4][E6]</p>
+<p>This does not mean Critics are bad; it means the system built an excellent review institution around too little artifact production. Seven Archivists per group are especially expensive for a run whose primary output never existed.</p>
+<h3 id="2-5-the-evaluation-institution-is-overproducing-relative-to-the-delivery-institution">2.5 The evaluation institution is overproducing relative to the delivery institution<a class="heading-anchor" href="#2-5-the-evaluation-institution-is-overproducing-relative-to-the-delivery-institution" aria-label="Link to section">#</a></h3>
+<p>The run produced:</p>
+<ul>
+<li>54/54 valid grader bundles;</li>
+<li>18 criteria freezes;</li>
+<li>204 unique grader requirements;</li>
+<li>calibration 18/18;</li>
+<li>score replay error 0;</li>
+<li>only 2/11 mandatory-node coverage;</li>
+<li>no notebook. [E4][E6]</li>
+</ul>
+<p>There were roughly 18.5 unique grader requirements per mandatory node, or 102 requirements per covered mandatory node. This is not evidence that grading caused the failure, but it is strong evidence that the current budget distribution is inverted: evaluator sophistication is no longer the marginal bottleneck.</p>
+<h3 id="2-6-compounding-mechanisms-activate-but-do-not-feed-later-work">2.6 Compounding mechanisms activate but do not feed later work<a class="heading-anchor" href="#2-6-compounding-mechanisms-activate-but-do-not-feed-later-work" aria-label="Link to section">#</a></h3>
+<table>
+<thead>
+<tr>
+  <th>Mechanism</th>
+  <th style="text-align:right">Observed</th>
+  <th>Missing link</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Outlier acceptance</td>
+  <td style="text-align:right">4/6</td>
+  <td>0/4 downstream adoption</td>
+</tr>
+<tr>
+  <td>Tool transport</td>
+  <td style="text-align:right">4 attempts, 2 failures</td>
+  <td>50% transport failure rate</td>
+</tr>
+<tr>
+  <td>Tool repair</td>
+  <td style="text-align:right">1 typed diagnostic emitted</td>
+  <td>0/1 diagnostic consumption</td>
+</tr>
+<tr>
+  <td>Competitive capture</td>
+  <td style="text-align:right">Activated</td>
+  <td>No downstream resource use</td>
+</tr>
+<tr>
+  <td>Instrumental reward</td>
+  <td style="text-align:right">None spent</td>
+  <td><code>reward_usefulness</code> not applicable</td>
+</tr>
+<tr>
+  <td>Tool reuse</td>
+  <td style="text-align:right">No promoted tool</td>
+  <td>No later execution or simulation influence</td>
+</tr>
+</tbody>
+</table>
+<p>The architecture is recording potential compounding objects, but the scheduler does not convert them into compulsory next-round work. Accepted Outlier proposals and typed repair diagnostics can simply die in the substrate.</p>
+<h3 id="2-7-the-recovery-writer-is-solving-the-wrong-problem-at-the-wrong-time">2.7 The recovery writer is solving the wrong problem at the wrong time<a class="heading-anchor" href="#2-7-the-recovery-writer-is-solving-the-wrong-problem-at-the-wrong-time" aria-label="Link to section">#</a></h3>
+<p>Recovery attempt 2 failed for:</p>
+<ul>
+<li>blank/missing cell IDs;</li>
+<li>missing <code>challenge_data</code>;</li>
+<li>missing <code>prior_data</code>;</li>
+<li>missing <code>counterfactual.baseline</code>;</li>
+<li>missing <code>sample_submission</code>;</li>
+<li>missing one-result-row-per-test-input evidence. [E1][E2]</li>
+</ul>
+<p>These are mostly deterministic serialization, symbol, metadata, and execution-contract obligations. They should not depend on a model remembering every requirement in a one-shot recovery call. The host should generate notebook structure and IDs, inject immutable metadata, and run typed validation. Luna should write and repair solver semantics, not manually serialize nbformat.</p>
+<hr />
+<h2 id="3-non-negotiable-target-architecture">3. Non-negotiable target architecture<a class="heading-anchor" href="#3-non-negotiable-target-architecture" aria-label="Link to section">#</a></h2>
+<p>Retain the project loop:</p>
+<pre><code class="language-text">INPUT
+  → GENESIS COUNCIL
+  → COMPETITIVE WORK / DELIVERY GROUPS
+      + PARALLEL COMPETITIVE GRADER GROUPS
+  → SEALED ROUND CHECK-IN AND EVALUATION
+  → CAPTURE / DISCLOSURE / REPAIR / RESOURCE UPDATE
+  → NEXT ROUND
+  → MAIN WRITER + VALIDATION
+  → ACCEPTED OR PROVISIONAL PUBLICATION
+</code></pre>
+<p>Add a persistent artifact spine through the entire loop:</p>
+<pre><code class="language-text">                         ┌──────────────────────────────────────┐
+                         │ Persistent Primary Artifact Spine   │
+                         │ scaffold → patches → snapshots      │
+                         │ → benchmarks → best-so-far → final  │
+                         └──────────────────────────────────────┘
+                                      ▲              │
+Input → Council → Groups + Graders → Check-in ───────┘
+                                      │
+                                      └→ next-round repair / experiment tasks
+</code></pre>
+<h3 id="core-invariant">Core invariant<a class="heading-anchor" href="#core-invariant" aria-label="Link to section">#</a></h3>
+<blockquote>
+<p><strong>After admission and primary-artifact scaffold creation, a terminal post-runtime outcome may not lack a primary artifact reference.</strong></p>
+</blockquote>
+<p>Strict acceptance may be withheld. The notebook may be provisional and may fail to improve the baseline. But a healthy admitted run must not finish with only an administrative package.</p>
+<hr />
+<h2 id="4-separate-execution-success-from-epistemic-acceptance">4. Separate execution success from epistemic acceptance<a class="heading-anchor" href="#4-separate-execution-success-from-epistemic-acceptance" aria-label="Link to section">#</a></h2>
+<p>The current terminal status conflates “strict acceptance failed” with “the run process failed.” Replace one status field with two axes.</p>
+<pre><code class="language-kotlin">@Serializable
+enum class ExecutionCompletionStatus {
+    COMPLETED,
+    FAILED_PRE_ADMISSION,
+    FAILED_CORRUPT_STATE,
+    FAILED_UNWRITABLE_OUTPUT,
+}
+
+@Serializable
+enum class AcceptanceStatus {
+    ACCEPTED,
+    PROVISIONAL,
+    REJECTED_STRICT_GATES,
+    NOT_EVALUATED,
+}
+
+@Serializable
+data class RunTerminalOutcomeV2(
+    val executionStatus: ExecutionCompletionStatus,
+    val acceptanceStatus: AcceptanceStatus,
+    val primaryArtifactRef: ArtifactRef?,
+    val decisionPackageRef: ArtifactRef?,
+    val acceptedWinnerId: String?,
+    val writerSourceAuthority: WriterSourceAuthority?,
+    val failedGateIds: List&lt;String&gt;,
+)
+</code></pre>
+<h3 id="cli-behavior">CLI behavior<a class="heading-anchor" href="#cli-behavior" aria-label="Link to section">#</a></h3>
+<table>
+<thead>
+<tr>
+  <th>Outcome</th>
+  <th style="text-align:right">Exit code</th>
+  <th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>COMPLETED + ACCEPTED</code></td>
+  <td style="text-align:right">0</td>
+  <td>Valid artifact, strict acceptance passed</td>
+</tr>
+<tr>
+  <td><code>COMPLETED + PROVISIONAL</code></td>
+  <td style="text-align:right">0</td>
+  <td>Valid receiver artifact exists, strict claims withheld</td>
+</tr>
+<tr>
+  <td><code>COMPLETED + REJECTED_STRICT_GATES</code></td>
+  <td style="text-align:right">0</td>
+  <td>Process and output succeeded; benchmark/gates did not</td>
+</tr>
+<tr>
+  <td>Infrastructure/corruption/unwritable output</td>
+  <td style="text-align:right">non-zero</td>
+  <td>The system truly failed to complete its product contract</td>
+</tr>
+</tbody>
+</table>
+<p>For Appendix-B reporting, <code>accepted=false</code> remains explicit. This change does not weaken acceptance; it prevents a useful provisional output from being mislabeled as a process crash.</p>
+<hr />
+<h2 id="5-make-primary-artifacts-first-class">5. Make primary artifacts first-class<a class="heading-anchor" href="#5-make-primary-artifacts-first-class" aria-label="Link to section">#</a></h2>
+<h3 id="5-1-replace-primaryformat-with-primary-artifact-specifications">5.1 Replace <code>primaryFormat</code> with primary artifact specifications<a class="heading-anchor" href="#5-1-replace-primaryformat-with-primary-artifact-specifications" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+data class PrimaryArtifactSpec(
+    val artifactId: String,
+    val relativePath: String,
+    val mediaType: String,
+    val profileId: String,
+    val requiredFromRound: Int,
+    val requiredForCompletedOutcome: Boolean,
+    val sourceNodeIds: Set&lt;String&gt;,
+    val structuralValidatorIds: Set&lt;String&gt;,
+    val executionValidatorIds: Set&lt;String&gt;,
+    val benchmarkIds: Set&lt;String&gt;,
+)
+
+@Serializable
+data class DeliverableBlueprintV2(
+    val blueprintId: String,
+    val receiverContractHash: String,
+    val primaryArtifacts: List&lt;PrimaryArtifactSpec&gt;,
+    val narrativePackageFormats: Set&lt;DeliverableFormat&gt;,
+    val componentSpecs: List&lt;DeliverableComponentSpec&gt;,
+    val recoveryPolicy: DeliverableRecoveryPolicy,
+    val blueprintHash: String,
+)
+</code></pre>
+<h3 id="5-2-arc-profile">5.2 ARC profile<a class="heading-anchor" href="#5-2-arc-profile" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">PrimaryArtifactSpec(
+    artifactId = &quot;arc-submission-notebook&quot;,
+    relativePath = &quot;primary/submission.ipynb&quot;,
+    mediaType = &quot;application/x-ipynb+json&quot;,
+    profileId = &quot;arc-agi-2-notebook-v2&quot;,
+    requiredFromRound = 0,
+    requiredForCompletedOutcome = true,
+    sourceNodeIds = setOf(
+        &quot;notebook-scaffold&quot;,
+        &quot;solver-portfolio&quot;,
+        &quot;loo-validation&quot;,
+        &quot;receiver-generation&quot;,
+    ),
+    structuralValidatorIds = setOf(&quot;nbformat-4.5&quot;, &quot;arc-required-symbols&quot;),
+    executionValidatorIds = setOf(&quot;compile-each-cell&quot;, &quot;self-tests&quot;, &quot;challenge-execution&quot;),
+    benchmarkIds = setOf(&quot;visible-loo-358&quot;),
+)
+</code></pre>
+<p>Companion artifacts:</p>
+<pre><code class="language-text">primary/submission.ipynb
+primary/submission.sha256
+reports/notebook-contract-v2.json
+reports/receiver-validation-v2.json
+reports/loo-358.json
+reports/loo-358.csv
+reports/candidate-lineage.json
+</code></pre>
+<p>The decision package references these artifacts. It never substitutes for them.</p>
+<h3 id="5-3-compile-time-council-rules">5.3 Compile-time Council rules<a class="heading-anchor" href="#5-3-compile-time-council-rules" aria-label="Link to section">#</a></h3>
+<p>Reject a StartingField when:</p>
+<ul>
+<li>a receiver explicitly requests a file artifact but no <code>PrimaryArtifactSpec</code> exists;</li>
+<li>a required primary artifact has no source-node lineage;</li>
+<li>the earliest artifact round is later than a gate that depends on it;</li>
+<li>all writer-capable roles can be omitted by the selector;</li>
+<li>the round horizon cannot reach a structurally valid artifact and its validation node;</li>
+<li>a required artifact profile is unsupported by the runtime.</li>
+</ul>
+<hr />
+<h2 id="6-build-a-persistent-artifact-workspace-for-every-competing-group">6. Build a persistent artifact workspace for every competing group<a class="heading-anchor" href="#6-build-a-persistent-artifact-workspace-for-every-competing-group" aria-label="Link to section">#</a></h2>
+<p>Luna should edit code, not emit an entire notebook JSON blob.</p>
+<h3 id="6-1-workspace-layout">6.1 Workspace layout<a class="heading-anchor" href="#6-1-workspace-layout" aria-label="Link to section">#</a></h3>
+<pre><code class="language-text">group-artifact-workspace/
+  contract/
+    primary-artifact-spec.json       # read-only
+    receiver-contract.json           # read-only
+    required-symbols.json            # read-only
+    input-hashes.json                 # read-only
+  src/
+    arc_grid.py
+    arc_objects.py
+    solver_families.py
+    candidate_search.py
+    ranking.py
+    receiver.py
+    validation.py
+    self_tests.py
+  notebook/
+    cell-manifest.json
+    narrative-sections.json
+  generated/
+    submission.ipynb
+    notebook-contract.json
+    receiver-validation.json
+    loo-358.json
+  state/
+    artifact-workspace-state.json
+    repair-queue.json
+    patch-lineage.jsonl
+</code></pre>
+<h3 id="6-2-durable-state">6.2 Durable state<a class="heading-anchor" href="#6-2-durable-state" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+data class ArtifactWorkspaceState(
+    val runId: String,
+    val groupId: String,
+    val artifactSpecHash: String,
+    val baseSnapshotHash: String,
+    val sourceFileHashes: Map&lt;String, String&gt;,
+    val compiledArtifactHash: String?,
+    val latestValidationReportHash: String?,
+    val latestBenchmarkReportHash: String?,
+    val bestSnapshotId: String?,
+    val stateVersion: Long,
+    val stateHash: String,
+)
+</code></pre>
+<p>Every mortal Builder receives the current workspace snapshot and a narrow patch objective. Its death does not destroy the workspace.</p>
+<h3 id="6-3-one-mandatory-artifact-owner-per-group">6.3 One mandatory artifact owner per group<a class="heading-anchor" href="#6-3-one-mandatory-artifact-owner-per-group" aria-label="Link to section">#</a></h3>
+<p>Until the group has a structurally valid candidate:</p>
+<ul>
+<li>spawn one <code>ArtifactOwner</code> Builder before Critic, Archivist, and optional roles;</li>
+<li>reserve enough action/provider budget for at least one artifact patch;</li>
+<li>forbid a generation containing only review/summary roles;</li>
+<li>after two failed attempts, enter <code>ARTIFACT_RESCUE</code> mode.</li>
+</ul>
+<pre><code class="language-kotlin">enum class GroupArtifactHealth {
+    NO_SCAFFOLD,
+    SCAFFOLDED,
+    STRUCTURALLY_VALID,
+    EXECUTABLE,
+    BENCHMARKED,
+    IMPROVED,
+}
+</code></pre>
+<h3 id="6-4-remove-ordinary-archivist-inflation">6.4 Remove ordinary Archivist inflation<a class="heading-anchor" href="#6-4-remove-ordinary-archivist-inflation" aria-label="Link to section">#</a></h3>
+<p>The 21 Archivist exits should become one of:</p>
+<ol>
+<li>deterministic round-summary compilation in the Summary plane;</li>
+<li>a single bounded Summary agent per run/stage, excluded from worker fitness and node budgets;</li>
+<li>an Archivist only when the selector detects unresolved retrieval/indexing work.</li>
+</ol>
+<p>Do not spawn an ordinary Archivist automatically for every group and round. The substrate already contains exact events and snapshots; most summary content can be compiled deterministically.</p>
+<hr />
+<h2 id="7-deterministic-notebook-compiler">7. Deterministic notebook compiler<a class="heading-anchor" href="#7-deterministic-notebook-compiler" aria-label="Link to section">#</a></h2>
+<h3 id="7-1-the-model-never-assigns-cell-ids">7.1 The model never assigns cell IDs<a class="heading-anchor" href="#7-1-the-model-never-assigns-cell-ids" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+data class NotebookCellSpec(
+    val cellHandle: String,
+    val kind: NotebookCellKind,
+    val sourceFile: String?,
+    val sourceSection: String?,
+    val requiredSymbols: Set&lt;String&gt;,
+    val order: Int,
+)
+</code></pre>
+<p><code>NotebookScaffoldCompiler</code> must:</p>
+<ul>
+<li>generate nbformat 4.5;</li>
+<li>assign deterministic, unique, nonblank cell IDs from <code>(profile, cellHandle, version)</code>;</li>
+<li>set <code>execution_count=null</code>;</li>
+<li>set <code>outputs=[]</code>;</li>
+<li>inject immutable metadata and input hashes;</li>
+<li>serialize canonical JSON;</li>
+<li>reparse and validate its own output.</li>
+</ul>
+<p>This makes the exact v28-r3 blank-cell-ID failure impossible.</p>
+<h3 id="7-2-required-receiver-signals-are-host-owned-contract-data">7.2 Required receiver signals are host-owned contract data<a class="heading-anchor" href="#7-2-required-receiver-signals-are-host-owned-contract-data" aria-label="Link to section">#</a></h3>
+<p>Add configurable signal definitions rather than prompt prose.</p>
+<pre><code class="language-kotlin">@Serializable
+sealed interface ReceiverSignalSpec {
+    val signalId: String
+
+    data class PythonSymbol(
+        override val signalId: String,
+        val symbolName: String,
+        val expectedKind: PythonSymbolKind,
+    ) : ReceiverSignalSpec
+
+    data class NotebookMetadataPointer(
+        override val signalId: String,
+        val jsonPointer: String,
+    ) : ReceiverSignalSpec
+
+    data class RuntimePredicate(
+        override val signalId: String,
+        val validatorId: String,
+    ) : ReceiverSignalSpec
+}
+</code></pre>
+<p>For this profile:</p>
+<pre><code class="language-text">challenge_data                  Python symbol
+prior_data                      Python symbol
+sample_submission               Python symbol
+counterfactual.baseline         notebook metadata or audit object path
+one-result-row-per-test-input   runtime predicate
+</code></pre>
+<p>The scaffold owns the symbol declarations and metadata location. Luna implements their semantics.</p>
+<h3 id="7-3-notebook-validation-phases">7.3 Notebook validation phases<a class="heading-anchor" href="#7-3-notebook-validation-phases" aria-label="Link to section">#</a></h3>
+<h4 id="phase-a-serialization">Phase A — serialization<a class="heading-anchor" href="#phase-a-serialization" aria-label="Link to section">#</a></h4>
+<ul>
+<li>valid JSON;</li>
+<li>nbformat 4, minor 5;</li>
+<li>unique nonblank IDs;</li>
+<li>code cell outputs empty;</li>
+<li>no execution counts;</li>
+<li>canonical path and hash.</li>
+</ul>
+<h4 id="phase-b-static-python">Phase B — static Python<a class="heading-anchor" href="#phase-b-static-python" aria-label="Link to section">#</a></h4>
+<ul>
+<li>every code cell compiles independently;</li>
+<li>required functions and signatures exist;</li>
+<li>required symbols exist;</li>
+<li>no network/package-install/shell escape;</li>
+<li>no undeclared file access;</li>
+<li>no module-scope dependence that prevents benchmark imports.</li>
+</ul>
+<h4 id="phase-c-deterministic-smoke">Phase C — deterministic smoke<a class="heading-anchor" href="#phase-c-deterministic-smoke" aria-label="Link to section">#</a></h4>
+<ul>
+<li><code>callable_signature_smoke_test()</code>;</li>
+<li><code>run_self_tests()</code>;</li>
+<li>synthetic cumulative receiver execution;</li>
+<li>rotate-grid assertion;</li>
+<li>malformed-grid rejection;</li>
+<li>exactly two one-grid callables from <code>build_task_solvers</code>.</li>
+</ul>
+<h4 id="phase-d-full-visible-run">Phase D — full visible run<a class="heading-anchor" href="#phase-d-full-visible-run" aria-label="Link to section">#</a></h4>
+<ul>
+<li>load 120 tasks;</li>
+<li>produce 172 test rows;</li>
+<li>produce exactly one result entry per test input;</li>
+<li>validate the exact <code>attempt_1</code> / <code>attempt_2</code> schema;</li>
+<li>serialize, reparse, and compare.</li>
+</ul>
+<h4 id="phase-e-358-row-leave-one-pair-out-benchmark">Phase E — 358-row leave-one-pair-out benchmark<a class="heading-anchor" href="#phase-e-358-row-leave-one-pair-out-benchmark" aria-label="Link to section">#</a></h4>
+<ul>
+<li>execute the exact independent definition-cell interface;</li>
+<li>preserve top-1 and any-two counts;</li>
+<li>persist every row and candidate family;</li>
+<li>run twice before an improvement claim.</li>
+</ul>
+<hr />
+<h2 id="8-break-the-circular-writer-gate">8. Break the circular writer gate<a class="heading-anchor" href="#8-break-the-circular-writer-gate" aria-label="Link to section">#</a></h2>
+<h3 id="8-1-distinguish-source-authority-from-accepted-authority">8.1 Distinguish source authority from accepted authority<a class="heading-anchor" href="#8-1-distinguish-source-authority-from-accepted-authority" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+enum class WriterSourceAuthorityClass {
+    ACCEPTED_WINNER,
+    FINAL_COMPARATIVE_LEADER,
+    CUMULATIVE_COMPARATIVE_LEADER,
+    BEST_VALID_ARTIFACT,
+    MULTI_SOURCE_PROVISIONAL,
+    SCAFFOLD_ONLY,
+}
+
+@Serializable
+data class WriterSourceSet(
+    val primaryGroupId: String?,
+    val authorityClass: WriterSourceAuthorityClass,
+    val sourceSnapshotIds: List&lt;String&gt;,
+    val donorArtifactRefs: List&lt;String&gt;,
+    val failedGateDiagnostics: List&lt;String&gt;,
+    val sourceSetHash: String,
+)
+</code></pre>
+<p><code>WriterSourceAuthorityClass</code> permits a writer to create a <strong>provisional candidate</strong>. It does not create accepted winner authority.</p>
+<h3 id="8-2-source-resolution-order">8.2 Source resolution order<a class="heading-anchor" href="#8-2-source-resolution-order" aria-label="Link to section">#</a></h3>
+<ol>
+<li>Best structurally valid and executable group artifact across all rounds.</li>
+<li>Best benchmarked artifact, using actual LOO metrics first and comparative score second.</li>
+<li>Final comparative leader’s latest artifact.</li>
+<li>Cumulative comparative leader’s best historical artifact.</li>
+<li>Multi-source provisional integration of public committed modules.</li>
+<li>Deterministic baseline scaffold.</li>
+</ol>
+<p>No completed work cycle may return <code>null</code> from this resolver.</p>
+<h3 id="8-3-main-writer-state-machine">8.3 Main writer state machine<a class="heading-anchor" href="#8-3-main-writer-state-machine" aria-label="Link to section">#</a></h3>
+<pre><code class="language-text">WRITER_SOURCE_SET_SEALED
+  → WRITER_WORKSPACE_CLONED
+  → WRITER_PLAN_COMMITTED
+  → WRITER_PATCH_APPLIED
+  → PRIMARY_ARTIFACT_COMPILED
+  → STRUCTURE_VALIDATED
+  → EXECUTION_SMOKE_VALIDATED
+  → FULL_VISIBLE_RUN_VALIDATED
+  → LOO_BENCHMARKED
+  → REPAIR_REQUIRED? ── yes → WRITER_REPAIR_N
+  → FINAL_ARTIFACT_SEALED
+  → STRICT_ACCEPTANCE_RESOLVED
+  → PUBLISHED_ACCEPTED or PUBLISHED_PROVISIONAL
+</code></pre>
+<h3 id="8-4-accepted-writer-authority-is-an-upgrade">8.4 Accepted writer authority is an upgrade<a class="heading-anchor" href="#8-4-accepted-writer-authority-is-an-upgrade" aria-label="Link to section">#</a></h3>
+<pre><code class="language-text">candidate writer identity
+  + final artifact hash
+  + all required validator hashes
+  + mandatory sealed-test pass
+  + final source lineage
+  = accepted writer authority
+</code></pre>
+<p>Do not require accepted writer authority to create the candidate that will be tested.</p>
+<hr />
+<h2 id="9-make-the-writer-incremental-and-timeout-resilient-on-codex-luna">9. Make the writer incremental and timeout-resilient on Codex/Luna<a class="heading-anchor" href="#9-make-the-writer-incremental-and-timeout-resilient-on-codex-luna" aria-label="Link to section">#</a></h2>
+<h3 id="9-1-do-not-generate-the-notebook-in-one-call">9.1 Do not generate the notebook in one call<a class="heading-anchor" href="#9-1-do-not-generate-the-notebook-in-one-call" aria-label="Link to section">#</a></h3>
+<p>Use bounded, persistent steps:</p>
+<ol>
+<li>inspect source bundle and existing workspace;</li>
+<li>author/repair grid and object primitives;</li>
+<li>author/repair candidate families;</li>
+<li>author/repair ranking and LOO evaluator;</li>
+<li>author/repair receiver generation;</li>
+<li>run local validation and write a typed failure report;</li>
+<li>repair only failed modules;</li>
+<li>compile the notebook host-side.</li>
+</ol>
+<p>Every step writes files and <code>writer-progress.json</code> before the Codex process exits.</p>
+<h3 id="9-2-persist-partial-work-on-timeout">9.2 Persist partial work on timeout<a class="heading-anchor" href="#9-2-persist-partial-work-on-timeout" aria-label="Link to section">#</a></h3>
+<p>The first recovery attempt timed out and no valid deliverable was recorded. Change timeout handling:</p>
+<ul>
+<li>never delete the writer workspace on timeout;</li>
+<li>hash all modified files;</li>
+<li>run host validators on the partial workspace;</li>
+<li>if it improves the best valid snapshot, preserve it;</li>
+<li>issue a narrow continuation task against the exact failures;</li>
+<li>if no continuation succeeds, publish the last valid snapshot.</li>
+</ul>
+<h3 id="9-3-typed-repair-request">9.3 Typed repair request<a class="heading-anchor" href="#9-3-typed-repair-request" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+data class ArtifactContractViolation(
+    val code: ArtifactViolationCode,
+    val cellHandle: String?,
+    val sourceFile: String?,
+    val symbol: String?,
+    val publicMessage: String,
+    val safeRepairHint: String,
+)
+
+@Serializable
+data class WriterRepairRequest(
+    val artifactSnapshotHash: String,
+    val violations: List&lt;ArtifactContractViolation&gt;,
+    val benchmarkRegression: BenchmarkRegression?,
+    val immutableContractRefs: List&lt;String&gt;,
+    val repairAttempt: Int,
+)
+</code></pre>
+<p>The next Luna call receives only the current workspace, exact contract, and typed violations. It does not regenerate the full notebook.</p>
+<h3 id="9-4-protected-writer-budget">9.4 Protected writer budget<a class="heading-anchor" href="#9-4-protected-writer-budget" aria-label="Link to section">#</a></h3>
+<p>Reserve at run admission:</p>
+<ul>
+<li>one main integration call;</li>
+<li>at least two repair calls;</li>
+<li>deterministic compiler/validator compute;</li>
+<li>final archive compute.</li>
+</ul>
+<p>Worker and grader allocation cannot consume this reserve. Provider-wide capacity cannot be guaranteed, but the artifact spine means late provider unavailability still publishes the last valid notebook.</p>
+<h3 id="9-5-codex-execution-mode">9.5 Codex execution mode<a class="heading-anchor" href="#9-5-codex-execution-mode" aria-label="Link to section">#</a></h3>
+<p>Retain exact <code>codex-chatgpt:gpt-5.6-luna</code>, with no fallback. Use:</p>
+<ul>
+<li>file-editing/code mode for Builders and main writer;</li>
+<li>structured JSON only for small plans, patch manifests, and diagnostics;</li>
+<li>medium reasoning for routine Researcher/Critic/Grader work;</li>
+<li>high reasoning selectively for main integration and difficult semantic repair;</li>
+<li>session-independent calls with durable workspace state, so a model-refresh/session loss does not erase work.</li>
+</ul>
+<hr />
+<h2 id="10-reclassify-gates-by-phase">10. Reclassify gates by phase<a class="heading-anchor" href="#10-reclassify-gates-by-phase" aria-label="Link to section">#</a></h2>
+<p>The current six mandatory tests appear to behave as final-output tests during all rounds. That is acceptable for acceptance reporting but not as the only progress authority.</p>
+<pre><code class="language-kotlin">@Serializable
+enum class GatePhase {
+    ROUND_PROGRESS,
+    PRE_WRITER,
+    POST_WRITER_STRUCTURE,
+    POST_WRITER_EXECUTION,
+    ACCEPTANCE_BENCHMARK,
+    PUBLICATION_INTEGRITY,
+}
+</code></pre>
+<h3 id="10-1-round-progress-gates">10.1 Round-progress gates<a class="heading-anchor" href="#10-1-round-progress-gates" aria-label="Link to section">#</a></h3>
+<p>Examples:</p>
+<ul>
+<li>workspace exists;</li>
+<li>a fresh candidate differs from the supplied baseline;</li>
+<li>required source modules compile;</li>
+<li>at least one real solver family exists;</li>
+<li>partial LOO report has exact provenance;</li>
+<li>repair diagnostic was consumed.</li>
+</ul>
+<p>They guide scheduling and comparison. They do not create accepted publication.</p>
+<h3 id="10-2-post-writer-gates">10.2 Post-writer gates<a class="heading-anchor" href="#10-2-post-writer-gates" aria-label="Link to section">#</a></h3>
+<p>Examples:</p>
+<ul>
+<li>notebook structure and cell IDs;</li>
+<li>required functions/signals;</li>
+<li>self-tests;</li>
+<li>exact receiver schema and row count;</li>
+<li>full local challenge execution.</li>
+</ul>
+<p>These run after the main writer has materialized the candidate.</p>
+<h3 id="10-3-acceptance-gates">10.3 Acceptance gates<a class="heading-anchor" href="#10-3-acceptance-gates" aria-label="Link to section">#</a></h3>
+<p>Examples:</p>
+<ul>
+<li>complete 358-row benchmark;</li>
+<li>repeated byte-identical report;</li>
+<li>improvement over v18 baseline;</li>
+<li>no held-out leakage;</li>
+<li>exact lineage and final manifest.</li>
+</ul>
+<p>These determine accepted status, never writer invocation.</p>
+<h3 id="10-4-gate-liveness-compiler">10.4 Gate liveness compiler<a class="heading-anchor" href="#10-4-gate-liveness-compiler" aria-label="Link to section">#</a></h3>
+<p>At Council compilation, calculate:</p>
+<pre><code class="language-text">earliest producer round
+→ earliest artifact compilation round
+→ earliest validator round
+→ earliest gate evaluation round
+</code></pre>
+<p>Reject any test whose scheduled evaluation precedes its producer. This prevents a final-output gate from permanently starving its own writer.</p>
+<hr />
+<h2 id="11-rewrite-the-round-loop-around-artifact-progress">11. Rewrite the round loop around artifact progress<a class="heading-anchor" href="#11-rewrite-the-round-loop-around-artifact-progress" aria-label="Link to section">#</a></h2>
+<h3 id="round-0-establish-viable-artifacts">Round 0 — establish viable artifacts<a class="heading-anchor" href="#round-0-establish-viable-artifacts" aria-label="Link to section">#</a></h3>
+<p>For every group:</p>
+<ol>
+<li>instantiate deterministic notebook scaffold;</li>
+<li>spawn <code>ArtifactOwner</code> Builder first;</li>
+<li>spawn one Researcher/algorithm specialist;</li>
+<li>optionally spawn one Outlier;</li>
+<li>compile and validate candidate at round end;</li>
+<li>persist an artifact snapshot even when benchmark is zero.</li>
+</ol>
+<p><strong>Round-0 exit condition:</strong> every group has a fresh notebook candidate or an explicit artifact-rescue record.</p>
+<h3 id="rounds-1-2-repair-and-broaden">Rounds 1–2 — repair and broaden<a class="heading-anchor" href="#rounds-1-2-repair-and-broaden" aria-label="Link to section">#</a></h3>
+<ul>
+<li>consume structural/semantic diagnostics before new optional work;</li>
+<li>schedule accepted Outlier proposals as concrete experiment tasks;</li>
+<li>add distinct solver families;</li>
+<li>execute the 358-row benchmark;</li>
+<li>preserve best-so-far snapshots.</li>
+</ul>
+<h3 id="rounds-3-4-adversarial-validation-and-integration">Rounds 3–4 — adversarial validation and integration<a class="heading-anchor" href="#rounds-3-4-adversarial-validation-and-integration" aria-label="Link to section">#</a></h3>
+<ul>
+<li>red-team candidate failure signatures;</li>
+<li>compare branches using real LOO metrics;</li>
+<li>use resource yields for Builder continuation and validation compute;</li>
+<li>integrate only changes that improve or expand pass@2 coverage.</li>
+</ul>
+<h3 id="round-5-final-candidate-preparation">Round 5 — final candidate preparation<a class="heading-anchor" href="#round-5-final-candidate-preparation" aria-label="Link to section">#</a></h3>
+<ul>
+<li>no new broad exploration unless the artifact is already valid;</li>
+<li>compile the final source set;</li>
+<li>run main writer/integrator;</li>
+<li>run post-writer validators;</li>
+<li>resolve accepted/provisional status;</li>
+<li>archive both final and best historical candidate if different.</li>
+</ul>
+<h3 id="artifact-rescue-mode">Artifact-rescue mode<a class="heading-anchor" href="#artifact-rescue-mode" aria-label="Link to section">#</a></h3>
+<p>Trigger when a group has no structurally valid candidate after a productive round:</p>
+<pre><code class="language-text">suspend optional Archivist, Outlier, PerspectiveTaker, and duplicate Critic calls
+reserve Builder + validator budget
+clone deterministic scaffold + best public modules
+run bounded writer repair
+compile notebook
+</code></pre>
+<p>If rescue still cannot improve the candidate, retain the scaffold, mark the group provisional, and stop spending later rounds pretending output progress exists.</p>
+<hr />
+<h2 id="12-fix-role-allocation-and-competition-design">12. Fix role allocation and competition design<a class="heading-anchor" href="#12-fix-role-allocation-and-competition-design" aria-label="Link to section">#</a></h2>
+<h3 id="12-1-productive-role-floor">12.1 Productive-role floor<a class="heading-anchor" href="#12-1-productive-role-floor" aria-label="Link to section">#</a></h3>
+<p>For an artifact-required group, per round:</p>
+<pre><code class="language-text">1 mandatory ArtifactOwner Builder
+1 Builder or Researcher for the highest-priority open/repair node
+0–1 Critic after a candidate exists
+0–1 Outlier in exploration rounds
+0 ordinary Archivist by default
+</code></pre>
+<p>The selector may add roles, but it cannot remove the artifact owner while the primary artifact is below <code>BENCHMARKED</code>.</p>
+<h3 id="12-2-summary-plane">12.2 Summary plane<a class="heading-anchor" href="#12-2-summary-plane" aria-label="Link to section">#</a></h3>
+<p>Move round summarization out of ordinary worker competition:</p>
+<ul>
+<li>deterministic event-to-summary compiler;</li>
+<li>optional Summary agent only for compression/receiver language;</li>
+<li>no worker node, capture, or productive-role slot;</li>
+<li>separate Summary fitness.</li>
+</ul>
+<h3 id="12-3-structured-overlap-instead-of-zero-overlap">12.3 Structured overlap instead of zero overlap<a class="heading-anchor" href="#12-3-structured-overlap-instead-of-zero-overlap" aria-label="Link to section">#</a></h3>
+<p>The observed portfolio overlap was 0.0. Complete disjointness supports diversity but can prevent any group from constructing a complete candidate.</p>
+<p>For ARC use:</p>
+<p><strong>Replicated backbone in every group</strong></p>
+<ul>
+<li>valid notebook scaffold;</li>
+<li>required API and receiver contract;</li>
+<li>LOO harness;</li>
+<li>final integration node.</li>
+</ul>
+<p><strong>Divergent branches</strong></p>
+<ul>
+<li>object/connected-component DSL;</li>
+<li>geometric/palette programs;</li>
+<li>relation/topology programs;</li>
+<li>refinement/mutation family;</li>
+<li>MDL/object-perspective family.</li>
+</ul>
+<p>Recommended design target: a common artifact backbone plus disjoint solver families, not 0% or 100% semantic overlap.</p>
+<h3 id="12-4-comparative-score-uses-artifact-facts">12.4 Comparative score uses artifact facts<a class="heading-anchor" href="#12-4-comparative-score-uses-artifact-facts" aria-label="Link to section">#</a></h3>
+<p>Grader broad scores remain useful, but candidate selection should prioritize:</p>
+<ol>
+<li>structural validity;</li>
+<li>execution validity;</li>
+<li>358-row top-1 / any-two;</li>
+<li>runtime and fallback rate;</li>
+<li>marginal diversity of second attempt;</li>
+<li>comparative grader score.</li>
+</ol>
+<p>A group with beautiful prose and no notebook cannot outrank a group with a valid executable candidate.</p>
+<hr />
+<h2 id="13-make-compounding-compulsory-rather-than-optional">13. Make compounding compulsory rather than optional<a class="heading-anchor" href="#13-make-compounding-compulsory-rather-than-optional" aria-label="Link to section">#</a></h2>
+<h3 id="13-1-best-so-far-artifact-archive">13.1 Best-so-far artifact archive<a class="heading-anchor" href="#13-1-best-so-far-artifact-archive" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+data class ArtifactSnapshot(
+    val snapshotId: String,
+    val runId: String,
+    val groupId: String,
+    val round: Int,
+    val artifactHash: String,
+    val sourceTreeHash: String,
+    val structureReportHash: String,
+    val executionReportHash: String?,
+    val benchmarkReportHash: String?,
+    val top1: Int?,
+    val anyTwo: Int?,
+    val runtimeMs: Long?,
+    val authorityClass: ComponentAuthorityClass,
+    val sourceNodeIds: Set&lt;String&gt;,
+    val patchLineageIds: Set&lt;String&gt;,
+    val snapshotHash: String,
+)
+</code></pre>
+<p>Never overwrite a better earlier candidate with a worse final-round candidate. The final writer selects from the complete historical Pareto set.</p>
+<h3 id="13-2-repair-diagnostics-create-scheduled-work">13.2 Repair diagnostics create scheduled work<a class="heading-anchor" href="#13-2-repair-diagnostics-create-scheduled-work" aria-label="Link to section">#</a></h3>
+<p>Current: one diagnostic emitted, none consumed.</p>
+<p>New invariant:</p>
+<pre><code class="language-text">typed diagnostic emitted
+  → next-round repair task created
+  → Builder budget reserved
+  → task consumed, explicitly deferred, or invalidated
+</code></pre>
+<p>A diagnostic cannot remain silently unused.</p>
+<h3 id="13-3-accepted-outlier-proposal-creates-an-experiment-node">13.3 Accepted Outlier proposal creates an experiment node<a class="heading-anchor" href="#13-3-accepted-outlier-proposal-creates-an-experiment-node" aria-label="Link to section">#</a></h3>
+<p>Current: 4 accepted, 0 adopted.</p>
+<p>New invariant:</p>
+<pre><code class="language-text">Outlier shadow verdict ACCEPT
+  → bounded falsifiable experiment node
+  → assigned Researcher/Builder next round
+  → outcome ADOPTED / REJECTED / DEFERRED_WITH_REASON
+</code></pre>
+<p>Acceptance without downstream disposition is not compounding.</p>
+<h3 id="13-4-capture-rewards-must-be-spendable">13.4 Capture rewards must be spendable<a class="heading-anchor" href="#13-4-capture-rewards-must-be-spendable" aria-label="Link to section">#</a></h3>
+<p>Current capture activated with no downstream use and no instrumental reward spending.</p>
+<p>Translate captured yield into exact actions:</p>
+<ul>
+<li>one additional Builder patch budget;</li>
+<li>one benchmark execution budget;</li>
+<li>one independent validator call;</li>
+<li>one repair continuation.</li>
+</ul>
+<p>Persist <code>rewardSpendPurpose</code> and later score/artifact delta. If no permitted action can consume a yield, do not report the capture as useful compounding.</p>
+<h3 id="13-5-tool-infrastructure-versus-agent-authored-tools">13.5 Tool infrastructure versus agent-authored tools<a class="heading-anchor" href="#13-5-tool-infrastructure-versus-agent-authored-tools" aria-label="Link to section">#</a></h3>
+<p>The independent notebook validator and 358-row benchmark are <strong>runtime-owned task tools</strong>. They must always be available and must not depend on an agent-authored tool reaching promotion.</p>
+<p>Keep <code>arc_candidate_portfolio_audit</code> as an agent-authored compounding opportunity, but separate it from minimum receiver validation:</p>
+<pre><code class="language-text">SYSTEM VALIDATOR
+  validates every candidate notebook
+  cannot be blocked by tool promotion
+
+AGENT-AUTHORED AUDIT TOOL
+  may add reusable analysis and later-agent value
+  earns tool/reuse fitness only after promotion and use
+</code></pre>
+<p>This prevents tool-compounding failure from eliminating the primary output.</p>
+<h3 id="13-6-archive-archaeology-integration">13.6 Archive archaeology integration<a class="heading-anchor" href="#13-6-archive-archaeology-integration" aria-label="Link to section">#</a></h3>
+<p>For the immediate ARC profile, import the supplied v14 notebook and v18 reports as provenance-bound heritage candidates:</p>
+<ul>
+<li>immutable source hashes;</li>
+<li><code>NON_ACCEPTED_HISTORICAL</code> status;</li>
+<li>candidate code may be forked into group workspaces;</li>
+<li>old scores do not transfer;</li>
+<li>every current candidate must rerun current validators and benchmark;</li>
+<li>the fresh output must have a new artifact hash and explicit lineage.</li>
+</ul>
+<p>Do not implement unrestricted cross-run archaeology before the writer spine is stable. Add the heritage reference contract now so broader archive archaeology can plug in later without bypassing current-run authority.</p>
+<hr />
+<h2 id="14-redesign-interim-snapshots-and-recovery">14. Redesign interim snapshots and recovery<a class="heading-anchor" href="#14-redesign-interim-snapshots-and-recovery" aria-label="Link to section">#</a></h2>
+<h3 id="14-1-snapshot-v2-must-contain-actual-reusable-content">14.1 Snapshot v2 must contain actual reusable content<a class="heading-anchor" href="#14-1-snapshot-v2-must-contain-actual-reusable-content" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+data class InterimArtifactSnapshotV2(
+    val runId: String,
+    val groupId: String,
+    val round: Int,
+    val primaryArtifactRef: ArtifactRef,
+    val sourceTreeRef: ArtifactRef,
+    val publicComponentRefs: List&lt;ArtifactRef&gt;,
+    val publicEvidenceRefs: List&lt;String&gt;,
+    val validationReportRef: ArtifactRef,
+    val benchmarkReportRef: ArtifactRef?,
+    val acceptedNodeIds: List&lt;String&gt;,
+    val provisionalNodeIds: List&lt;String&gt;,
+    val failedGateIds: List&lt;String&gt;,
+    val snapshotHash: String,
+)
+</code></pre>
+<p>A snapshot with only a hash and group ID does not count as usable coverage.</p>
+<h3 id="14-2-metric-replacement">14.2 Metric replacement<a class="heading-anchor" href="#14-2-metric-replacement" aria-label="Link to section">#</a></h3>
+<p>Replace or complement <code>interim_snapshot_coverage</code> with:</p>
+<ul>
+<li><code>artifact_snapshot_coverage</code>;</li>
+<li><code>snapshot_primary_artifact_validity_rate</code>;</li>
+<li><code>snapshot_public_payload_bytes</code>;</li>
+<li><code>snapshot_evidence_reference_coverage</code>;</li>
+<li><code>best_snapshot_benchmark_availability</code>;</li>
+<li><code>placeholder_component_rate</code>.</li>
+</ul>
+<h3 id="14-3-recovery-no-longer-authors-the-notebook">14.3 Recovery no longer authors the notebook<a class="heading-anchor" href="#14-3-recovery-no-longer-authors-the-notebook" aria-label="Link to section">#</a></h3>
+<p>Normal main-writer pipeline always creates and seals the notebook candidate. Recovery only:</p>
+<ul>
+<li>selects the last valid primary artifact;</li>
+<li>labels it provisional;</li>
+<li>compiles caveats, failed gates, and next evidence;</li>
+<li>archives it with the same artifact hash.</li>
+</ul>
+<p>Deprecate <code>recovery_deliverable_spawn</code> for primary artifact generation. A recovery LLM may improve narrative explanation, never create the only notebook.</p>
+<h3 id="14-4-required-recovery-package">14.4 Required recovery package<a class="heading-anchor" href="#14-4-required-recovery-package" aria-label="Link to section">#</a></h3>
+<pre><code class="language-text">recovery-results.zip
+  primary/submission.ipynb
+  primary/submission.sha256
+  reports/notebook-contract-v2.json
+  reports/receiver-validation-v2.json
+  reports/loo-358.json                # if reached, else explicit unavailable record
+  README-NON-ACCEPTED.md
+  provisional-decision-package.md
+  failed-mandatory-tests.md
+  missing-authority.md
+  artifact-lineage.json
+  run-metrics-v2.json
+  run-outcome-manifest-v2.json
+</code></pre>
+<p>A recovery package for an artifact-required profile is invalid if <code>primary/submission.ipynb</code> is missing.</p>
+<hr />
+<h2 id="15-codex-luna-execution-profile">15. Codex/Luna execution profile<a class="heading-anchor" href="#15-codex-luna-execution-profile" aria-label="Link to section">#</a></h2>
+<h3 id="15-1-keep-the-backend-change-how-it-is-used">15.1 Keep the backend, change how it is used<a class="heading-anchor" href="#15-1-keep-the-backend-change-how-it-is-used" aria-label="Link to section">#</a></h3>
+<p>The admission record proves the exact Codex/Luna path, immutable classpath, sandbox, scoring child, JDK, and storage checks passed. [E5] Do not switch backend while closing this issue.</p>
+<p>Use Luna where semantic work is valuable:</p>
+<table>
+<thead>
+<tr>
+  <th>Role</th>
+  <th>Mode</th>
+  <th>Input</th>
+  <th>Output</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Council Synthesis</td>
+  <td>structured</td>
+  <td>compact specialist contracts</td>
+  <td>final artifact/profile/Atlas plan</td>
+</tr>
+<tr>
+  <td>ArtifactOwner Builder</td>
+  <td>code workspace</td>
+  <td>one module objective + tests</td>
+  <td>source patch</td>
+</tr>
+<tr>
+  <td>Researcher</td>
+  <td>structured/prose</td>
+  <td>solver-family node</td>
+  <td>executable hypothesis manifest</td>
+</tr>
+<tr>
+  <td>Critic</td>
+  <td>structured</td>
+  <td>patch + public validators</td>
+  <td>typed repair diagnosis</td>
+</tr>
+<tr>
+  <td>Outlier</td>
+  <td>structured</td>
+  <td>current assumptions</td>
+  <td>falsifiable experiment proposal</td>
+</tr>
+<tr>
+  <td>Grader</td>
+  <td>structured</td>
+  <td>exact artifact/evidence snapshot</td>
+  <td>bounded criteria/scores</td>
+</tr>
+<tr>
+  <td>Main writer</td>
+  <td>code workspace</td>
+  <td>selected source set + scaffold</td>
+  <td>integrated source tree</td>
+</tr>
+</tbody>
+</table>
+<h3 id="15-2-reduce-unnecessary-end-of-run-context">15.2 Reduce unnecessary end-of-run context<a class="heading-anchor" href="#15-2-reduce-unnecessary-end-of-run-context" aria-label="Link to section">#</a></h3>
+<p>The main writer should receive:</p>
+<ul>
+<li>exact artifact contract;</li>
+<li>current best workspace;</li>
+<li>top donor modules/patches;</li>
+<li>benchmark deltas;</li>
+<li>typed failed gates;</li>
+<li>accepted node/evidence references;</li>
+<li>required output path.</li>
+</ul>
+<p>Do not send:</p>
+<ul>
+<li>full raw runtime logs;</li>
+<li>all 204 grader requirements;</li>
+<li>repeated Archivist prose;</li>
+<li>hidden private fixtures;</li>
+<li>unrelated group state.</li>
+</ul>
+<h3 id="15-3-grader-delta-reuse">15.3 Grader delta reuse<a class="heading-anchor" href="#15-3-grader-delta-reuse" aria-label="Link to section">#</a></h3>
+<p>The graders are reliable. Stop regenerating a large methodology every round when the stage and node semantics are unchanged.</p>
+<ul>
+<li>freeze methodology per stage;</li>
+<li>author only deltas for new nodes or observed failure classes;</li>
+<li>cap atomic requirements per grader/node;</li>
+<li>skip expensive model grading when no candidate artifact/evidence exists—persist deterministic <code>NO_ARTIFACT</code> instead.</li>
+</ul>
+<p>This retains independent evaluation while returning budget to delivery.</p>
+<hr />
+<h2 id="16-module-by-module-implementation-map">16. Module-by-module implementation map<a class="heading-anchor" href="#16-module-by-module-implementation-map" aria-label="Link to section">#</a></h2>
+<p>Names below are implementation-oriented suggestions; align packages with the current repository.</p>
+<table>
+<thead>
+<tr>
+  <th>Module</th>
+  <th>Add/change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>core</code></td>
+  <td><code>PrimaryArtifactSpec</code>, <code>DeliverableBlueprintV2</code>, artifact status/state, writer source authority, validation violations, two-axis terminal outcome</td>
+</tr>
+<tr>
+  <td><code>substrate</code></td>
+  <td>artifact workspace/snapshot/patch/writer-attempt tables; best-so-far queries; required primary artifact manifest entries</td>
+</tr>
+<tr>
+  <td><code>orchestration</code></td>
+  <td><code>ArtifactWorkspaceManager</code>, productive-role floor, artifact rescue, diagnostic/outlier scheduling, protected writer reserve</td>
+</tr>
+<tr>
+  <td><code>agents</code></td>
+  <td>artifact-owner prompt, module patch tool, typed writer repair contract, concise main-writer bundle, remove manual notebook JSON authorship</td>
+</tr>
+<tr>
+  <td><code>api</code></td>
+  <td><code>PrimaryArtifactProfile</code>, <code>ArcNotebookDeliverableProfile</code>, main writer coordinator, source resolver, publication acceptance upgrade</td>
+</tr>
+<tr>
+  <td><code>runtime</code></td>
+  <td>deterministic notebook compiler, AST/static validator, sandbox execution, benchmark service, persistent timeout checkpoints</td>
+</tr>
+<tr>
+  <td><code>competition</code></td>
+  <td>artifact-aware scoring, structured portfolio overlap, repair/adoption priorities, capture reward spend plans</td>
+</tr>
+<tr>
+  <td><code>cli</code></td>
+  <td>separate execution/acceptance summaries; completed-provisional exit 0; always print primary artifact path and validation status</td>
+</tr>
+<tr>
+  <td><code>desktop/Compose</code></td>
+  <td>artifact progress per group/round, writer state, benchmark chart, accepted/provisional badges</td>
+</tr>
+</tbody>
+</table>
+<h3 id="suggested-files">Suggested files<a class="heading-anchor" href="#suggested-files" aria-label="Link to section">#</a></h3>
+<pre><code class="language-text">engine/core/.../deliverable/PrimaryArtifactContracts.kt
+engine/core/.../deliverable/ArtifactSnapshotContracts.kt
+engine/core/.../publication/RunTerminalOutcomeV2.kt
+engine/orchestration/.../artifact/ArtifactWorkspaceManager.kt
+engine/orchestration/.../artifact/ArtifactProgressScheduler.kt
+engine/api/.../deliverable/MainWriterCoordinator.kt
+engine/api/.../deliverable/WriterSourceResolver.kt
+engine/runtime/.../notebook/NotebookScaffoldCompiler.kt
+engine/runtime/.../notebook/NotebookContractValidator.kt
+engine/runtime/.../notebook/ArcVisibleLooBenchmark.kt
+engine/substrate/.../artifact/ArtifactSnapshotDao.kt
+</code></pre>
+<hr />
+<h2 id="17-commit-by-commit-plan">17. Commit-by-commit plan<a class="heading-anchor" href="#17-commit-by-commit-plan" aria-label="Link to section">#</a></h2>
+<table>
+<thead>
+<tr>
+  <th style="text-align:right">Commit</th>
+  <th>Implementation</th>
+  <th>Exit condition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td style="text-align:right">1</td>
+  <td>Add two-axis execution/acceptance outcome</td>
+  <td>A valid provisional artifact returns process success without accepted authority</td>
+</tr>
+<tr>
+  <td style="text-align:right">2</td>
+  <td>Add <code>PrimaryArtifactSpec</code> and blueprint v2</td>
+  <td>ARC run cannot compile with JSON-only primary output</td>
+</tr>
+<tr>
+  <td style="text-align:right">3</td>
+  <td>Add ARC notebook profile and deterministic scaffold</td>
+  <td>A fresh valid notebook exists before the first provider worker call</td>
+</tr>
+<tr>
+  <td style="text-align:right">4</td>
+  <td>Add host-owned cell IDs, metadata, required-symbol contracts</td>
+  <td>Exact v28-r3 structure failures are impossible in unit tests</td>
+</tr>
+<tr>
+  <td style="text-align:right">5</td>
+  <td>Add per-group persistent artifact workspaces</td>
+  <td>Builder death/retry does not erase source changes</td>
+</tr>
+<tr>
+  <td style="text-align:right">6</td>
+  <td>Add deterministic notebook compiler and validators A–C</td>
+  <td>Scaffold compiles and self-tests without Luna</td>
+</tr>
+<tr>
+  <td style="text-align:right">7</td>
+  <td>Add full challenge receiver validator and 358-row benchmark</td>
+  <td>Baseline scaffold produces complete reports with no hidden-label claim</td>
+</tr>
+<tr>
+  <td style="text-align:right">8</td>
+  <td>Add artifact snapshots and best-so-far archive</td>
+  <td>Every group/round emits a usable artifact snapshot or explicit rescue record</td>
+</tr>
+<tr>
+  <td style="text-align:right">9</td>
+  <td>Add productive-role floor and Summary-plane Archivist</td>
+  <td>No artifact-required generation can contain zero Builders/Researchers</td>
+</tr>
+<tr>
+  <td style="text-align:right">10</td>
+  <td>Add writer source resolver independent of accepted winner</td>
+  <td>Final comparative candidate always yields a non-null writer source set</td>
+</tr>
+<tr>
+  <td style="text-align:right">11</td>
+  <td>Add incremental <code>MainWriterCoordinator</code></td>
+  <td>Main writer edits workspace and host compiles notebook; no monolithic JSON output</td>
+</tr>
+<tr>
+  <td style="text-align:right">12</td>
+  <td>Add durable writer progress and timeout continuation</td>
+  <td>Timed-out call preserves and validates partial work</td>
+</tr>
+<tr>
+  <td style="text-align:right">13</td>
+  <td>Add typed contract repair loop</td>
+  <td>Missing symbols/signals generate narrow repair requests, not full regeneration</td>
+</tr>
+<tr>
+  <td style="text-align:right">14</td>
+  <td>Move strict output gates after candidate compilation</td>
+  <td><code>0/6</code> cannot suppress writer invocation</td>
+</tr>
+<tr>
+  <td style="text-align:right">15</td>
+  <td>Add artifact-rescue mode and protected writer reserve</td>
+  <td>Missing candidate after round 0 triggers Builder rescue, not five more empty rounds</td>
+</tr>
+<tr>
+  <td style="text-align:right">16</td>
+  <td>Force diagnostic consumption and Outlier disposition</td>
+  <td>No accepted diagnostic/proposal remains silently unused</td>
+</tr>
+<tr>
+  <td style="text-align:right">17</td>
+  <td>Bind capture yield to concrete Builder/benchmark spend</td>
+  <td>Capture can produce measurable downstream use</td>
+</tr>
+<tr>
+  <td style="text-align:right">18</td>
+  <td>Replace recovery artifact generation with best-snapshot selection</td>
+  <td>Recovery archive always includes primary notebook</td>
+</tr>
+<tr>
+  <td style="text-align:right">19</td>
+  <td>Add artifact-aware metrics and semantic snapshot coverage</td>
+  <td>Placeholder packages no longer report misleading completion</td>
+</tr>
+<tr>
+  <td style="text-align:right">20</td>
+  <td>Add deterministic end-to-end success/provisional/failure scenarios</td>
+  <td>All exact v28-r3 writer failures reproduced and closed</td>
+</tr>
+<tr>
+  <td style="text-align:right">21</td>
+  <td>Run isolated Luna writer qualification</td>
+  <td>Normal writer spawn produces a fresh validated notebook before society rerun</td>
+</tr>
+<tr>
+  <td style="text-align:right">22</td>
+  <td>Run two-round three-group qualification</td>
+  <td>Artifacts compound across rounds and final writer source is non-null</td>
+</tr>
+<tr>
+  <td style="text-align:right">23</td>
+  <td>Run full six-round Gate-D successor</td>
+  <td>Fresh notebook, validation, repeated benchmark, and manifest exist</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="18-required-tests">18. Required tests<a class="heading-anchor" href="#18-required-tests" aria-label="Link to section">#</a></h2>
+<h3 id="18-1-primary-artifact-and-contract">18.1 Primary artifact and contract<a class="heading-anchor" href="#18-1-primary-artifact-and-contract" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>ArcNotebookScaffoldIsFreshAndValidTest</code></li>
+<li><code>NotebookCompilerAssignsUniqueCellIdsTest</code></li>
+<li><code>ArcRequiredSignalsContractTest</code></li>
+<li><code>NotebookEveryCodeCellCompilesTest</code></li>
+<li><code>ArcReceiverOneRowPerTestInputTest</code></li>
+<li><code>ArcBuildTaskSolversReturnsExactlyTwoCallablesTest</code></li>
+<li><code>ArcNoNetworkOrInstallTest</code></li>
+</ul>
+<h3 id="18-2-writer-ordering">18.2 Writer ordering<a class="heading-anchor" href="#18-2-writer-ordering" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>NoAcceptedWinnerStillSpawnsMainWriterTest</code></li>
+<li><code>ComparativeLeaderCreatesProvisionalWriterSourceTest</code></li>
+<li><code>WriterRunsBeforeStrictAcceptanceResolverTest</code></li>
+<li><code>StrictGateFailureDoesNotSuppressArtifactPublicationTest</code></li>
+<li><code>AcceptedWriterAuthorityUpgradesOnlyAfterValidationTest</code></li>
+</ul>
+<h3 id="18-3-timeout-and-fallback">18.3 Timeout and fallback<a class="heading-anchor" href="#18-3-timeout-and-fallback" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>WriterTimeoutPreservesWorkspaceTest</code></li>
+<li><code>WriterRepairContinuesFromExactSnapshotTest</code></li>
+<li><code>FinalProviderUnavailablePublishesBestValidSnapshotTest</code></li>
+<li><code>ArtifactRequiredRecoveryCannotOmitNotebookTest</code></li>
+<li><code>CompletedProvisionalReturnsExitZeroTest</code></li>
+</ul>
+<h3 id="18-4-compounding">18.4 Compounding<a class="heading-anchor" href="#18-4-compounding" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>EveryRoundPersistsArtifactSnapshotTest</code></li>
+<li><code>BestHistoricalArtifactSurvivesRegressionTest</code></li>
+<li><code>TypedToolDiagnosticSchedulesRepairWorkerTest</code></li>
+<li><code>AcceptedOutlierSchedulesExperimentTest</code></li>
+<li><code>CaptureYieldFundsArtifactTaskTest</code></li>
+<li><code>SummaryAgentDoesNotConsumeWorkerRoleFloorTest</code></li>
+</ul>
+<h3 id="18-5-gate-liveness">18.5 Gate liveness<a class="heading-anchor" href="#18-5-gate-liveness" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>FinalArtifactGateCannotRunBeforeWriterTest</code></li>
+<li><code>CouncilRejectsUnschedulableArtifactTest</code></li>
+<li><code>RoundZeroArtifactBackboneReplicatedTest</code></li>
+<li><code>NoArtifactTriggersRescueNotExpensiveGradingTest</code></li>
+</ul>
+<h3 id="18-6-deterministic-full-scenarios">18.6 Deterministic full scenarios<a class="heading-anchor" href="#18-6-deterministic-full-scenarios" aria-label="Link to section">#</a></h3>
+<ol>
+<li><strong>Accepted scenario:</strong> candidate notebook → validation → positive LOO improvement → accepted publication.</li>
+<li><strong>Provisional scenario:</strong> valid notebook → 0/358/no improvement → completed provisional output, exit 0.</li>
+<li><strong>Writer-timeout scenario:</strong> partial Luna edits → timeout → prior valid snapshot published.</li>
+<li><strong>No-winner scenario:</strong> comparative leader only → main writer runs → provisional notebook.</li>
+<li><strong>Contract-repair scenario:</strong> deliberately missing symbols/signals → typed repair → valid notebook.</li>
+<li><strong>Compounding scenario:</strong> diagnostic + Outlier proposal + capture reward all create next-round work and artifact delta.</li>
+</ol>
+<hr />
+<h2 id="19-provider-qualification-ladder">19. Provider qualification ladder<a class="heading-anchor" href="#19-provider-qualification-ladder" aria-label="Link to section">#</a></h2>
+<p>Do not spend another full 17-hour run to test whether the writer can emit a notebook.</p>
+<h3 id="gate-a-deterministic-artifact-profile">Gate A — deterministic artifact profile<a class="heading-anchor" href="#gate-a-deterministic-artifact-profile" aria-label="Link to section">#</a></h3>
+<p>No provider calls.</p>
+<p>Required:</p>
+<ul>
+<li>scaffold notebook exists;</li>
+<li>validators A–D pass;</li>
+<li>358-row benchmark executes;</li>
+<li>accepted and provisional output packages verify;</li>
+<li>exact v28-r3 contract failures are regression-tested.</li>
+</ul>
+<h3 id="gate-b-isolated-luna-main-writer">Gate B — isolated Luna main writer<a class="heading-anchor" href="#gate-b-isolated-luna-main-writer" aria-label="Link to section">#</a></h3>
+<p>Input a frozen synthetic <code>WriterSourceSet</code> built from fixture modules and failed gates.</p>
+<p>Required:</p>
+<ul>
+<li><code>main_writer_spawn=1</code>;</li>
+<li>source workspace is modified;</li>
+<li>notebook compiler succeeds;</li>
+<li>typed repair works if first candidate fails;</li>
+<li>primary artifact survives process timeout;</li>
+<li>no recovery writer is used.</li>
+</ul>
+<h3 id="gate-c-one-group-two-rounds">Gate C — one group, two rounds<a class="heading-anchor" href="#gate-c-one-group-two-rounds" aria-label="Link to section">#</a></h3>
+<p>Required:</p>
+<ul>
+<li>fresh notebook after round 0;</li>
+<li>full LOO report after round 1;</li>
+<li>best-so-far snapshot preserved;</li>
+<li>final writer runs before acceptance;</li>
+<li>terminal status is completed accepted or completed provisional, never recovered solely due to strict gates.</li>
+</ul>
+<h3 id="gate-d-three-groups-two-rounds">Gate D — three groups, two rounds<a class="heading-anchor" href="#gate-d-three-groups-two-rounds" aria-label="Link to section">#</a></h3>
+<p>Required:</p>
+<ul>
+<li>common artifact backbone plus divergent solver branches;</li>
+<li>each group has ArtifactOwner activity;</li>
+<li>accepted Outlier/diagnostic disposition occurs;</li>
+<li>source resolver selects a non-null main-writer source;</li>
+<li>artifact-aware ranking works.</li>
+</ul>
+<h3 id="gate-e-six-round-gate-d-successor">Gate E — six-round Gate-D successor<a class="heading-anchor" href="#gate-e-six-round-gate-d-successor" aria-label="Link to section">#</a></h3>
+<p>Required output regardless of score:</p>
+<ul>
+<li>fresh <code>submission.ipynb</code>;</li>
+<li>structural and execution reports;</li>
+<li>exact 358-row benchmark report;</li>
+<li>repeated report or explicit failure to repeat;</li>
+<li>accepted/provisional decision package;</li>
+<li>manifest and lineage.</li>
+</ul>
+<p>Strict acceptance additionally requires positive improvement and all exact gates. No official Kaggle score or hidden-label claim is made without external evidence.</p>
+<hr />
+<h2 id="20-output-package-after-the-repair">20. Output package after the repair<a class="heading-anchor" href="#20-output-package-after-the-repair" aria-label="Link to section">#</a></h2>
+<pre><code class="language-text">results.zip or provisional-results.zip
+  README.md / README-NON-ACCEPTED.md
+  primary/
+    submission.ipynb
+    submission.sha256
+  reports/
+    notebook-contract-v2.json
+    receiver-validation-v2.json
+    loo-358.json
+    loo-358.csv
+    benchmark-repeat-comparison.json
+    artifact-lineage.json
+    failed-gates.json
+  decision/
+    decision-package.json
+    decision-package.md
+    executive-brief.md
+    implementation-checklist.md
+  authority/
+    writer-source-set.json
+    writer-attempts.json
+    publication-history.json
+    score-replay-authority.json
+  metrics/
+    run-metrics-v2.json
+    mechanism-activation-report-v2.json
+  manifest.json
+</code></pre>
+<p>The CLI must end with a concise output block:</p>
+<pre><code class="language-text">Execution: COMPLETED
+Acceptance: PROVISIONAL | ACCEPTED
+Primary artifact: .../primary/submission.ipynb
+Notebook contract: PASS
+Full visible execution: PASS
+LOO benchmark: top1=X/358 anyTwo=Y/358
+Improvement over v18: YES | NO | UNAVAILABLE
+Accepted winner: &lt;id&gt; | none
+</code></pre>
+<hr />
+<h2 id="21-metrics-and-target-thresholds">21. Metrics and target thresholds<a class="heading-anchor" href="#21-metrics-and-target-thresholds" aria-label="Link to section">#</a></h2>
+<table>
+<thead>
+<tr>
+  <th>Metric</th>
+  <th style="text-align:right">v28-r3</th>
+  <th style="text-align:right">Next qualification target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>main_writer_spawn_count</code></td>
+  <td style="text-align:right">0</td>
+  <td style="text-align:right">≥1</td>
+</tr>
+<tr>
+  <td><code>primary_artifact_present</code></td>
+  <td style="text-align:right">0</td>
+  <td style="text-align:right">1</td>
+</tr>
+<tr>
+  <td><code>primary_artifact_present_by_round_0</code></td>
+  <td style="text-align:right">unavailable</td>
+  <td style="text-align:right">100% groups or explicit rescue</td>
+</tr>
+<tr>
+  <td><code>artifact_snapshot_coverage</code></td>
+  <td style="text-align:right">not measured</td>
+  <td style="text-align:right">100% sealed group-rounds</td>
+</tr>
+<tr>
+  <td><code>snapshot_primary_artifact_validity_rate</code></td>
+  <td style="text-align:right">not measured</td>
+  <td style="text-align:right">100% or explicit failed snapshot</td>
+</tr>
+<tr>
+  <td><code>useful_exit_rate</code></td>
+  <td style="text-align:right">25%</td>
+  <td style="text-align:right">materially higher; exclude Summary-plane agents</td>
+</tr>
+<tr>
+  <td>Builder+Researcher share</td>
+  <td style="text-align:right">16.67%</td>
+  <td style="text-align:right">majority of ordinary worker budget while artifact incomplete</td>
+</tr>
+<tr>
+  <td><code>mandatory_node_coverage</code></td>
+  <td style="text-align:right">2/11</td>
+  <td style="text-align:right">all nodes required by the selected final path</td>
+</tr>
+<tr>
+  <td><code>tool_contract_transport_failure_rate</code></td>
+  <td style="text-align:right">50%</td>
+  <td style="text-align:right">decreasing, ideally zero in qualification</td>
+</tr>
+<tr>
+  <td><code>tool_repair_diagnostic_consumption_rate</code></td>
+  <td style="text-align:right">0/1</td>
+  <td style="text-align:right">100% or explicit deferral</td>
+</tr>
+<tr>
+  <td><code>outlier_downstream_adoption</code></td>
+  <td style="text-align:right">0/4</td>
+  <td style="text-align:right">every accepted proposal dispositioned</td>
+</tr>
+<tr>
+  <td><code>reward_usefulness</code></td>
+  <td style="text-align:right">N/A</td>
+  <td style="text-align:right">available when captures occur</td>
+</tr>
+<tr>
+  <td><code>recovery_component_coverage</code></td>
+  <td style="text-align:right">7/8</td>
+  <td style="text-align:right">100%, including primary artifact</td>
+</tr>
+<tr>
+  <td><code>placeholder_component_rate</code></td>
+  <td style="text-align:right">not measured</td>
+  <td style="text-align:right">0 for required receiver components</td>
+</tr>
+<tr>
+  <td><code>score_replay_error</code></td>
+  <td style="text-align:right">0</td>
+  <td style="text-align:right">remain 0</td>
+</tr>
+<tr>
+  <td><code>grader_bundle_validity</code></td>
+  <td style="text-align:right">54/54</td>
+  <td style="text-align:right">remain exact</td>
+</tr>
+</tbody>
+</table>
+<h3 id="new-leading-indicators">New leading indicators<a class="heading-anchor" href="#new-leading-indicators" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>writer_source_set_non_null_rate</code>;</li>
+<li><code>writer_first_valid_artifact_latency</code>;</li>
+<li><code>writer_repair_success_rate</code>;</li>
+<li><code>best_artifact_top1</code> and <code>best_artifact_any_two</code> by round;</li>
+<li><code>artifact_regression_count</code>;</li>
+<li><code>artifact_donor_lineage_count</code>;</li>
+<li><code>productive_role_budget_share</code>;</li>
+<li><code>grader_cost_per_artifact_delta</code>;</li>
+<li><code>semantic_snapshot_coverage</code>;</li>
+<li><code>provisional_output_usefulness_score</code>.</li>
+</ul>
+<hr />
+<h2 id="22-risks-and-trade-offs">22. Risks and trade-offs<a class="heading-anchor" href="#22-risks-and-trade-offs" aria-label="Link to section">#</a></h2>
+<table>
+<thead>
+<tr>
+  <th>Change</th>
+  <th>Benefit</th>
+  <th>Risk</th>
+  <th>Control</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Always create provisional artifact</td>
+  <td>No more empty receiver outcome</td>
+  <td>Could be mistaken for accepted</td>
+  <td>Two-axis status, banners, manifest separation</td>
+</tr>
+<tr>
+  <td>Deterministic scaffold</td>
+  <td>Eliminates notebook serialization failures</td>
+  <td>Could mask weak model work</td>
+  <td>Fresh hash, explicit baseline-only status, benchmark evidence</td>
+</tr>
+<tr>
+  <td>Persistent workspaces</td>
+  <td>Real cross-round compounding</td>
+  <td>Stale/broken patches accumulate</td>
+  <td>Best-so-far snapshots, atomic patch lineage, rollback</td>
+</tr>
+<tr>
+  <td>Productive-role floor</td>
+  <td>More actual code</td>
+  <td>Less spontaneous role ecology</td>
+  <td>Floor applies only until artifact health is sufficient</td>
+</tr>
+<tr>
+  <td>Reduce Archivists</td>
+  <td>Saves large budget</td>
+  <td>Less narrative memory</td>
+  <td>Deterministic summaries and indexed events</td>
+</tr>
+<tr>
+  <td>Delta grader methodology</td>
+  <td>Lower evaluation cost</td>
+  <td>Could miss new failure class</td>
+  <td>New-node/failure-triggered deltas and fixed anchors</td>
+</tr>
+<tr>
+  <td>Main writer before acceptance</td>
+  <td>Breaks circular dependency</td>
+  <td>Candidate exists without winner</td>
+  <td>Provisional source authority; accepted upgrade after validation</td>
+</tr>
+<tr>
+  <td>Runtime-owned ARC validator</td>
+  <td>Reliable receiver checks</td>
+  <td>Less “agent-authored tool” purity</td>
+  <td>Keep separate agent audit opportunity for compounding research</td>
+</tr>
+<tr>
+  <td>Cross-group donor integration</td>
+  <td>Better final artifact</td>
+  <td>Blurs winner credit</td>
+  <td>Primary source + donor lineage and split fitness</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="23-definition-of-done">23. Definition of done<a class="heading-anchor" href="#23-definition-of-done" aria-label="Link to section">#</a></h2>
+<h3 id="runtime-output-reliability">Runtime/output reliability<a class="heading-anchor" href="#runtime-output-reliability" aria-label="Link to section">#</a></h3>
+<ul>
+<li>admitted run creates a fresh primary notebook scaffold before ordinary worker execution;</li>
+<li>each group maintains a persistent artifact workspace;</li>
+<li>every sealed round exports an artifact-bearing snapshot;</li>
+<li>main writer is invoked for accepted and provisional source authority;</li>
+<li>writer timeout cannot erase the last valid candidate;</li>
+<li>a completed post-runtime run always includes <code>submission.ipynb</code>;</li>
+<li>strict gate failure alone does not produce process exit 1;</li>
+<li>manifest verifies accepted/provisional separation.</li>
+</ul>
+<h3 id="main-writer">Main writer<a class="heading-anchor" href="#main-writer" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>final_deliverable_spawn</code> or renamed <code>main_writer_spawn</code> occurs at least once;</li>
+<li>writer source set is persisted and non-null;</li>
+<li>Luna edits source files in a durable workspace;</li>
+<li>host compiler owns nbformat, IDs, metadata, and serialization;</li>
+<li>typed repair closes missing symbol/signal violations;</li>
+<li>final artifact hash and writer lineage are durable.</li>
+</ul>
+<h3 id="artifact-value">Artifact value<a class="heading-anchor" href="#artifact-value" aria-label="Link to section">#</a></h3>
+<ul>
+<li>notebook passes structural validation;</li>
+<li>every code cell compiles;</li>
+<li>required API functions and receiver signals exist;</li>
+<li>full local challenge execution emits the exact schema and row count;</li>
+<li>358-row benchmark executes and is persisted;</li>
+<li>v18 comparison is explicit;</li>
+<li>repeated report is required before an improvement claim.</li>
+</ul>
+<h3 id="compounding">Compounding<a class="heading-anchor" href="#compounding" aria-label="Link to section">#</a></h3>
+<ul>
+<li>best-so-far artifact survives later regressions;</li>
+<li>accepted Outlier proposals receive explicit downstream disposition;</li>
+<li>typed repair diagnostics are consumed or explicitly deferred;</li>
+<li>capture rewards fund actual next-round work;</li>
+<li>artifact changes preserve node/agent/diagnostic lineage;</li>
+<li>no ordinary Archivist flood starves Builders and Researchers.</li>
+</ul>
+<h3 id="authority">Authority<a class="heading-anchor" href="#authority" aria-label="Link to section">#</a></h3>
+<ul>
+<li>comparative ranking and score replay remain exact;</li>
+<li>mandatory gates remain strict;</li>
+<li>accepted winner/writer authority is created only after artifact validation;</li>
+<li>provisional artifact is never mislabeled accepted;</li>
+<li>no Kaggle, hidden-label, or official-score claim is made without evidence.</li>
+</ul>
+<hr />
+<h2 id="24-immediate-first-implementation-batch">24. Immediate first implementation batch<a class="heading-anchor" href="#24-immediate-first-implementation-batch" aria-label="Link to section">#</a></h2>
+<p>Implement these before any provider call:</p>
+<ol>
+<li><code>PrimaryArtifactSpec</code> and <code>DeliverableBlueprintV2</code> with an ARC notebook profile.</li>
+<li>Deterministic fresh notebook scaffold with host-generated cell IDs and required signals.</li>
+<li>Persistent group artifact workspace and <code>ArtifactSnapshot</code> persistence.</li>
+<li><code>WriterSourceResolver</code> that always returns accepted, comparative, best-valid, multi-source, or scaffold authority.</li>
+<li>Main writer invocation before strict acceptance resolution.</li>
+<li>Host notebook compiler plus structural/static validators.</li>
+<li>Completed-provisional terminal status and exit-code separation.</li>
+<li>Exact deterministic test reproducing v28-r3: all strict tests fail, comparative leader exists, main writer still produces a notebook, and the run exits completed-provisional.</li>
+</ol>
+<p>Then run the isolated Luna writer qualification—not another full society run.</p>
+<hr />
+<h2 id="25-evidence-and-source-map">25. Evidence and source map<a class="heading-anchor" href="#25-evidence-and-source-map" aria-label="Link to section">#</a></h2>
+<ul>
+<li><strong>[E1]</strong> <code>gate-d-arc-v28-r3-live-run-evidence-20260802.md</code> — terminal outcome, six comparative winners, writer/recovery failures, missing notebook, benchmark status.</li>
+<li><strong>[E2]</strong> <code>gate-d-arc-v28-r3-log-analysis-20260802.json</code> — machine-readable round, publication, and validation facts.</li>
+<li><strong>[E3]</strong> <code>gate-d-arc-v28-r1-compounding-fix-checklist-20260801.md</code> — prior writer/scheduling fixes and their observed limits.</li>
+<li><strong>[E4]</strong> <code>summary.json</code> — receiver prompt, outcome package, metrics, mechanism states, agent and evidence references.</li>
+<li><strong>[E5]</strong> <code>acceptance-admission-v1.json</code> — immutable package, exact Codex/Luna route, JDK, sandbox, scoring, storage and process checks.</li>
+<li><strong>[E6]</strong> <code>recovery-results.zip</code> — actual recovery blueprint, source set, provisional package, metrics and publication history.</li>
+<li><strong>[E7]</strong> <code>EvoMolior_Completion_Blueprint_Robust_Runs_and_Valuable_Deliverables</code> — prior semantic package, interim snapshot, recovery and strict scenario design used as the starting plan.</li>
+</ul>
+<h3 id="evidence-boundary">Evidence boundary<a class="heading-anchor" href="#evidence-boundary" aria-label="Link to section">#</a></h3>
+<p>This plan does not claim a v28-r3 notebook score, Kaggle score, hidden-label accuracy, or accepted winner. The source material explicitly establishes that no fresh notebook existed and the 358-row benchmark was not run. Proposed contracts, role ratios, state machines, and implementation order are architectural recommendations derived from the observed failure chain.</p>
+</article></main></div><script>
+const qs=(s,e=document)=>e.querySelector(s),qsa=(s,e=document)=>[...e.querySelectorAll(s)];
+const toc=qs('#toc');
+qsa('.article h2,.article h3,.article h4').forEach(h=>{const li=document.createElement('li');li.className='l'+h.tagName.substring(1);const a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent.replace(/#$/,'').trim();li.appendChild(a);toc.appendChild(li)});
+const links=qsa('#toc a');const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+e.target.id))}})},{rootMargin:'-15% 0px -75% 0px'});qsa('.article h2,.article h3,.article h4').forEach(h=>obs.observe(h));
+qs('#themeBtn').onclick=()=>{const d=document.documentElement;const next=d.dataset.theme==='dark'?'light':'dark';d.dataset.theme=next;localStorage.setItem('evomolior-plan-theme',next);qs('#themeBtn').textContent=next==='dark'?'Light':'Dark'};
+const saved=localStorage.getItem('evomolior-plan-theme');if(saved){document.documentElement.dataset.theme=saved;qs('#themeBtn').textContent=saved==='dark'?'Light':'Dark'}
+qs('#printBtn').onclick=()=>window.print();qs('#tocBtn').onclick=()=>qs('#sidebar').classList.toggle('open');
+qs('#search').addEventListener('input',e=>{const x=e.target.value.toLowerCase();qsa('#toc li').forEach(li=>li.style.display=li.textContent.toLowerCase().includes(x)?'':'none')});
+window.addEventListener('scroll',()=>{const d=document.documentElement;qs('#progress').style.width=(d.scrollTop/(d.scrollHeight-d.clientHeight)*100)+'%'});
+</script></body></html>

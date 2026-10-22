@@ -12,6 +12,32 @@ import java.security.MessageDigest
 
 class ReadRunArtifactToolTest {
     @Test
+    fun `source citation numbers exclude artifact metadata and preserve raw mode`() = runTest {
+        val root = createTempDirectory("source-line-test-").toFile()
+        try {
+            val source = "#!/bin/sh\nexec java \"\$@\""
+            val file = root.resolve("launcher").apply { writeText(source) }
+            val metadata = RunInputArtifact(
+                relativePath = "launcher",
+                sourceName = "launcher",
+                mimeType = "text/plain",
+                sizeBytes = file.length(),
+                sha256 = sha256Hex(file.readBytes()),
+                kind = RunInputArtifactKind.TEXT,
+            )
+            val tool = ReadRunArtifactTool(root.path, listOf(metadata))
+            val numbered = tool.execute(ReadRunArtifactTool.Args("launcher", includeLineNumbers = true))
+            assertTrue(numbered.contains("L1: #!/bin/sh\nL2: exec java \"\$@\""))
+            assertTrue(numbered.contains("metadata above is excluded"))
+            val raw = tool.execute(ReadRunArtifactTool.Args("launcher"))
+            assertTrue(raw.endsWith("$source\n"))
+            assertEquals(source, file.readText())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `lists and reads uploaded run artifacts`() = runTest {
         val root = createTempDirectory("run-artifacts-test-").toFile()
         val artifactFile = File(root, "docs/brief.txt")

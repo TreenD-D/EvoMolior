@@ -220,10 +220,16 @@ class ToolSubmissionValidator(
         validateJsonAgainstSchema(parsedOutput, outputSchema, "test[$index].output")?.let {
             return@withContext it
         }
+        TypedToolSchemaValidator.canonicalOutputFailure(
+            parsedOutput,
+            outputSchema
+        )?.let { failure ->
+            return@withContext "tool_validation_noncanonical_output: test[$index].output " +
+                "failed canonical numeric representation: ${failure.stableCode}."
+        }
         if (test.expectedOutput != null && parsedOutput != test.expectedOutput) {
             return@withContext "tool_validation_unexpected_output: test[$index] output did not " +
-                "match expectedOutput; expected=${test.expectedOutput.toString().take(1_000)}; " +
-                "actual=${parsedOutput.toString().take(1_000)}"
+                "match expectedOutput."
         }
         null
     }

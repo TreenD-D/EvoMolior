@@ -1,0 +1,211 @@
+{
+  "schema_version": "arc2-hypothesis-register-v1",
+  "hypotheses": [
+    {
+      "id": "H1",
+      "title": "Parent-union recovery",
+      "novelty_class": "evidence extension",
+      "mechanism": "Select a diverse union of archived parents to recover complementary retrieval.",
+      "evidence_paths": [
+        "reports/arc2-program-prior-v2-full-20260810.md"
+      ],
+      "minimum_slice": "Deterministic selector; at most seven parents; 63 candidates; target-free freeze.",
+      "metric": "Real retrieval and exact tasks per verifier call",
+      "budget": "One CPU day",
+      "falsifier": "V3 retrieval is not recovered and efficiency does not improve",
+      "kill_gate": "No retrieval recovery",
+      "promotion_gate": "Non-inferior retrieval and at least two incremental real tasks",
+      "priority": 1,
+      "expected_information_value": "High"
+    },
+    {
+      "id": "H2",
+      "title": "Operation-conditioned edits",
+      "novelty_class": "novel",
+      "mechanism": "Allocate typed color and enum edits from parent AST and residual signatures.",
+      "evidence_paths": [
+        "reports/arc2-program-prior-v2-full-20260810.md"
+      ],
+      "minimum_slice": "Typed edit policy with held-out scoring",
+      "metric": "Novel exact precision",
+      "budget": "1000 verifier calls",
+      "falsifier": "Uniform edits match precision",
+      "kill_gate": "No precision lift",
+      "promotion_gate": "Two incremental real tasks without call inflation",
+      "priority": 2,
+      "expected_information_value": "High"
+    },
+    {
+      "id": "H3",
+      "title": "Anti-unified parent schemas",
+      "novelty_class": "novel",
+      "mechanism": "Anti-unify exact demonstration programs then instantiate supported fields.",
+      "evidence_paths": [
+        "reports/arc2-program-prior-v2-full-20260810.md",
+        "evomolior_arc2_luna_hypothesis_register.json"
+      ],
+      "minimum_slice": "Schema extractor plus exact verifier",
+      "metric": "Real exact yield and validity",
+      "budget": "2000 calls",
+      "falsifier": "No lift over direct mutation",
+      "kill_gate": "Leakage or invalid-rate increase",
+      "promotion_gate": "Two new exact tasks",
+      "priority": 3,
+      "expected_information_value": "High"
+    },
+    {
+      "id": "H4",
+      "title": "Residual relational signatures",
+      "novelty_class": "novel",
+      "mechanism": "Encode object adjacency, symmetry, connectivity and roles for repair routing.",
+      "evidence_paths": [
+        "reports/arc2-residual-atlas-a2-e01-20260807.md"
+      ],
+      "minimum_slice": "Deterministic residual encoder",
+      "metric": "Repair lift per call",
+      "budget": "One CPU day",
+      "falsifier": "Classes do not predict repair",
+      "kill_gate": "No lift over shuffled control",
+      "promotion_gate": "Causal lift with leakage audit",
+      "priority": 4,
+      "expected_information_value": "High"
+    },
+    {
+      "id": "H5",
+      "title": "Counterexample-directed repair",
+      "novelty_class": "novel",
+      "mechanism": "Use smallest verified disagreement to select a bounded typed repair.",
+      "evidence_paths": [
+        "reports/arc2-program-prior-v2-full-20260810.md"
+      ],
+      "minimum_slice": "Repair loop capped at two edits",
+      "metric": "Exact yield per call",
+      "budget": "2000 calls",
+      "falsifier": "No call reduction",
+      "kill_gate": "Repairs alter correct cells",
+      "promotion_gate": "25 percent call reduction at matched yield",
+      "priority": 5,
+      "expected_information_value": "High"
+    },
+    {
+      "id": "H6",
+      "title": "Lossless typed codec",
+      "novelty_class": "evidence extension",
+      "mechanism": "Preserve dimensions, colors, objects and argument types within prompt limits.",
+      "evidence_paths": [
+        "reports/arc2-program-prior-v2-full-20260810.md",
+        "A2_2_INTERFACE_FREEZE.md"
+      ],
+      "minimum_slice": "Round-trip codec and token tests",
+      "metric": "Semantic round-trip loss",
+      "budget": "CPU only",
+      "falsifier": "Collision or truncation",
+      "kill_gate": "Any target leakage",
+      "promotion_gate": "Zero semantic loss",
+      "priority": 6,
+      "expected_information_value": "Medium"
+    },
+    {
+      "id": "H7",
+      "title": "Information-gain router",
+      "novelty_class": "novel",
+      "mechanism": "Route by expected verifier information gain while preserving niches.",
+      "evidence_paths": [
+        "reports/arc2-program-prior-v2-full-20260810.md"
+      ],
+      "minimum_slice": "Logged router versus scalar ranker",
+      "metric": "Yield per call and niche coverage",
+      "budget": "3000 calls",
+      "falsifier": "Scalar routing matches",
+      "kill_gate": "Niche monopoly",
+      "promotion_gate": "Pareto improvement",
+      "priority": 7,
+      "expected_information_value": "High"
+    },
+    {
+      "id": "H8",
+      "title": "Correlation-aware attempt two",
+      "novelty_class": "novel",
+      "mechanism": "Choose attempt two by marginal causal coverage and ancestry distance.",
+      "evidence_paths": [
+        "reports/arc2-program-prior-v2-full-20260810.md"
+      ],
+      "minimum_slice": "Pair selector with ancestry hashes",
+      "metric": "Pass-at-two union",
+      "budget": "1000 calls",
+      "falsifier": "Confidence top-two wins",
+      "kill_gate": "Union declines",
+      "promotion_gate": "Union rises without invalid outputs",
+      "priority": 8,
+      "expected_information_value": "High"
+    },
+    {
+      "id": "H9",
+      "title": "Bounded typed composition",
+      "novelty_class": "novel",
+      "mechanism": "Compose verified transformations when interfaces and dimensions match.",
+      "evidence_paths": [
+        "reports/arc2-composition-a2-e04-20260807.md"
+      ],
+      "minimum_slice": "Depth-two composer with shape checks",
+      "metric": "Incremental exact tasks",
+      "budget": "1000 calls",
+      "falsifier": "Zero novel yield",
+      "kill_gate": "Invalid explosion",
+      "promotion_gate": "Two exact tasks",
+      "priority": 9,
+      "expected_information_value": "High"
+    },
+    {
+      "id": "H10",
+      "title": "Scene graph latent decomposition",
+      "novelty_class": "novel",
+      "mechanism": "Infer objects and relations before grid edits.",
+      "evidence_paths": [
+        "reports/arc2-residual-atlas-a2-e01-20260807.md"
+      ],
+      "minimum_slice": "Deterministic scene graph",
+      "metric": "Graph consistency and exact yield",
+      "budget": "Two CPU days",
+      "falsifier": "No lift over flat baseline",
+      "kill_gate": "Target-derived features",
+      "promotion_gate": "Replicated family lift",
+      "priority": 10,
+      "expected_information_value": "Medium"
+    },
+    {
+      "id": "H11",
+      "title": "Provenance-gated training mix",
+      "novelty_class": "novel",
+      "mechanism": "Prevent synthetic gains from masking real regressions with provenance-aware stopping.",
+      "evidence_paths": [
+        "reports/arc2-program-prior-v2-full-20260810.md"
+      ],
+      "minimum_slice": "Balanced schedule and real-proxy early stop",
+      "metric": "Real exact yield at matched calls",
+      "budget": "One GPU trajectory",
+      "falsifier": "Synthetic-only gain",
+      "kill_gate": "Provenance audit failure",
+      "promotion_gate": "Replicated real gain",
+      "priority": 11,
+      "expected_information_value": "Medium"
+    },
+    {
+      "id": "H12",
+      "title": "Fail-closed telemetry gate",
+      "novelty_class": "novel",
+      "mechanism": "Reject non-finite JSON before publication and preserve original hashes.",
+      "evidence_paths": [
+        "reports/arc2-program-prior-v2-full-20260810.md"
+      ],
+      "minimum_slice": "Streaming schema validator and hash manifest",
+      "metric": "Injected NaN/Inf detection",
+      "budget": "CPU only",
+      "falsifier": "Validator misses invalid numbers",
+      "kill_gate": "False acceptance",
+      "promotion_gate": "Zero silent rewrites",
+      "priority": 12,
+      "expected_information_value": "High"
+    }
+  ]
+}

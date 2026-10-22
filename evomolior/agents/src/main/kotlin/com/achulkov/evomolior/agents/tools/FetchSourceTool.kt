@@ -15,6 +15,7 @@ import com.achulkov.evomolior.sandbox.network.SourceAccessPolicy
 import com.achulkov.evomolior.core.model.Role
 import com.achulkov.evomolior.substrate.db.dao.StagingDao
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -58,6 +59,8 @@ class FetchSourceTool(
     name = "fetch_source",
     description = """
         Fetch a public http(s) source URL after source-access policy approval.
+        Redirects are followed only when each destination passes the same policy (at most 5 hops);
+        a blocked redirect reports its destination so it can be approved and fetched explicitly.
         The returned content is stripped of HTML/script/style markup, prompt-injection scanned,
         truncated for context safety, and source-access decisions are audited.
         Cost: FREE.
@@ -91,8 +94,62 @@ class FetchSourceTool(
         if (resolvedRole == null) {
             return "BLOCKED: unknown agent role '$role'."
         }
-        val proxyDecision = allowlistProxy.evaluate(url, resolvedRole, allowedHosts)
-        val decision = when (proxyDecision) {
+        val initialDecision = authorize(url, resolvedRole, allowedHosts, purpose)
+        if (initialDecision !is SourceAccessDecision.Allowed) {
+            return "BLOCKED: ${initialDecision.host ?: url}. ${initialDecision.reason}"
+        }
+
+        // Each redirect hop is authorized, audited, and intercepted exactly like a fresh call
+        // before any request reaches it, so an unreviewed destination never receives traffic.
+        var decision: SourceAccessDecision.Allowed = initialDecision
+        val redirectChain = mutableListOf<String>()
+        while (true) {
+            val fetched = try {
+                fetcher.fetch(decision.url)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                return "FETCH_FAILED: ${decision.url}. ${error.message ?: error::class.simpleName.orEmpty()}"
+            }
+            if (fetched.statusCode !in 300..399) {
+                return renderFetched(decision, fetched, redirectChain)
+            }
+            val destination = fetched.redirectLocation
+                ?: return "FETCH_FAILED: ${decision.url}. HTTP ${fetched.statusCode} redirect without a Location header"
+            if (destination == decision.url || destination in redirectChain) {
+                return "FETCH_FAILED: ${decision.url}. Redirect loop detected at $destination"
+            }
+            if (redirectChain.size >= MAX_REDIRECT_HOPS) {
+                return "FETCH_FAILED: ${decision.url}. More than $MAX_REDIRECT_HOPS redirects; " +
+                    "fetch the final destination explicitly: $destination"
+            }
+            redirectChain += decision.url
+            val hopDecision = authorize(
+                destination,
+                resolvedRole,
+                allowedHosts,
+                "Redirect from ${decision.url}: $purpose"
+            )
+            if (hopDecision !is SourceAccessDecision.Allowed) {
+                return "REDIRECT_BLOCKED: ${decision.url} redirects to $destination. ${hopDecision.reason} " +
+                    "If that destination is relevant, call request_source_access(url, purpose) for it " +
+                    "and then fetch_source it directly."
+            }
+            decision = hopDecision
+        }
+    }
+
+    /**
+     * Applies run source policy plus role egress policy to one destination, recording the
+     * decision and constitutional interception before any request may be sent to it.
+     */
+    private suspend fun authorize(
+        url: String,
+        resolvedRole: Role,
+        allowedHosts: Set<String>,
+        purpose: String
+    ): SourceAccessDecision {
+        val decision = when (val proxyDecision = allowlistProxy.evaluate(url, resolvedRole, allowedHosts)) {
             is AllowlistDecision.Allowed -> SourceAccessDecision.Allowed(
                 url = proxyDecision.url,
                 host = proxyDecision.host,
@@ -113,45 +170,49 @@ class FetchSourceTool(
                 allowed = decision is SourceAccessDecision.Allowed
             )
         )
-        if (decision !is SourceAccessDecision.Allowed) {
-            return "BLOCKED: ${decision.host ?: url}. ${decision.reason}"
-        }
-        actionGate.intercept(
-            AgentAction(
-                type = ActionEventType.WEB_REQUEST,
-                agentId = agentId,
-                detail = decision.url,
-                allowed = true
+        if (decision is SourceAccessDecision.Allowed) {
+            actionGate.intercept(
+                AgentAction(
+                    type = ActionEventType.WEB_REQUEST,
+                    agentId = agentId,
+                    detail = decision.url,
+                    allowed = true
+                )
             )
-        )
+        }
+        return decision
+    }
 
-        return runCatching {
-            fetcher.fetch(decision.url)
-        }.fold(
-            onSuccess = { fetched ->
-                val sanitised = contentSanitiser.sanitise(fetched.body, sourceUrl = decision.url)
-                persistFetchedSource(decision, fetched, sanitised.content)
-                buildString {
-                    appendLine("SOURCE_FETCHED")
-                    appendLine("URL: ${decision.url}")
-                    appendLine("Host: ${decision.host}")
-                    appendLine("Status: ${fetched.statusCode}")
-                    appendLine("Content-Type: ${fetched.contentType ?: "unknown"}")
-                    appendLine("Sanitised: injectionDetected=${sanitised.injectionDetected}, truncated=${sanitised.truncated}, originalLength=${sanitised.originalLength}")
-                    appendLine()
-                    appendLine(sanitised.content)
-                }
-            },
-            onFailure = { error ->
-                "FETCH_FAILED: ${decision.url}. ${error.message ?: error::class.simpleName.orEmpty()}"
+    private suspend fun renderFetched(
+        decision: SourceAccessDecision.Allowed,
+        fetched: FetchedSource,
+        redirectChain: List<String>
+    ): String {
+        if (fetched.statusCode !in 200..299) {
+            return "FETCH_FAILED: ${decision.url}. HTTP ${fetched.statusCode}"
+        }
+        val sanitised = contentSanitiser.sanitise(fetched.body, sourceUrl = decision.url)
+        persistFetchedSource(decision, fetched, sanitised.content, redirectChain)
+        return buildString {
+            appendLine("SOURCE_FETCHED")
+            appendLine("URL: ${decision.url}")
+            if (redirectChain.isNotEmpty()) {
+                appendLine("Redirected from: ${redirectChain.joinToString(" -> ")}")
             }
-        )
+            appendLine("Host: ${decision.host}")
+            appendLine("Status: ${fetched.statusCode}")
+            appendLine("Content-Type: ${fetched.contentType ?: "unknown"}")
+            appendLine("Sanitised: injectionDetected=${sanitised.injectionDetected}, truncated=${sanitised.truncated || fetched.bodyTruncated}, originalLength=${sanitised.originalLength}")
+            appendLine()
+            appendLine(sanitised.content)
+        }
     }
 
     private suspend fun persistFetchedSource(
         decision: SourceAccessDecision.Allowed,
         fetched: FetchedSource,
-        sanitisedContent: String
+        sanitisedContent: String,
+        redirectChain: List<String>
     ) {
         val dao = stagingDao ?: return
         val nowMs = System.currentTimeMillis()
@@ -164,6 +225,9 @@ class FetchSourceTool(
                 content = buildString {
                     appendLine("SOURCE FETCH EVIDENCE")
                     appendLine("URL: ${decision.url}")
+                    if (redirectChain.isNotEmpty()) {
+                        appendLine("Redirected from: ${redirectChain.joinToString(" -> ")}")
+                    }
                     appendLine("Host: ${decision.host}")
                     appendLine("Generation: $generation")
                     appendLine("HTTP status: ${fetched.statusCode}")
@@ -207,43 +271,78 @@ class FetchSourceTool(
     }
 }
 
-/** Fetches a URL and returns the raw response body. */
+/** Maximum redirect hops [FetchSourceTool] follows, each after a fresh policy decision. */
+internal const val MAX_REDIRECT_HOPS = 5
+
+/** Maximum response bytes retained from one fetch; the sanitiser truncates further for context. */
+internal const val MAX_SOURCE_BODY_BYTES = 4 * 1024 * 1024
+
+/**
+ * Fetches a URL without following redirects and returns the raw response.
+ *
+ * Implementations must report a 3xx response with its absolute [FetchedSource.redirectLocation]
+ * instead of following it, so the caller can authorize the destination first.
+ */
 fun interface SourceFetcher {
     suspend fun fetch(url: String): FetchedSource
 }
 
-/** Raw HTTP source response. */
+/**
+ * Raw HTTP source response.
+ *
+ * @param statusCode HTTP status code.
+ * @param contentType Response content type, if supplied.
+ * @param body Decoded response body, bounded by [MAX_SOURCE_BODY_BYTES].
+ * @param redirectLocation Absolute redirect destination for a 3xx response, if supplied.
+ * @param bodyTruncated True when the body exceeded [MAX_SOURCE_BODY_BYTES].
+ */
 data class FetchedSource(
     val statusCode: Int,
     val contentType: String?,
-    val body: String
+    val body: String,
+    val redirectLocation: String? = null,
+    val bodyTruncated: Boolean = false
 )
 
 internal class JavaNetSourceFetcher : SourceFetcher {
     private val client = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
-        // Redirects are not followed implicitly: every destination requires a fresh policy check.
+        // Redirects are never followed implicitly: the tool authorizes each destination first.
         .followRedirects(HttpClient.Redirect.NEVER)
         .build()
 
     override suspend fun fetch(url: String): FetchedSource = withContext(Dispatchers.IO) {
-        val request = HttpRequest.newBuilder(URI.create(url))
+        val requestUri = URI.create(url)
+        val request = HttpRequest.newBuilder(requestUri)
             .timeout(Duration.ofSeconds(20))
             .header("User-Agent", "EvoMoliorSourceFetcher/1.0")
             .header("Accept", "text/html,text/plain,application/json;q=0.8,*/*;q=0.5")
             .GET()
             .build()
-        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+        val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
+        val contentType = response.headers().firstValue("content-type").orElse(null)
         if (response.statusCode() in 300..399) {
-            error("HTTP redirect blocked; approve and fetch the destination URL explicitly")
+            response.body().close()
+            val location = response.headers().firstValue("location").orElse(null)
+                ?.let { raw -> runCatching { requestUri.resolve(raw.trim()).toString() }.getOrNull() }
+            return@withContext FetchedSource(
+                statusCode = response.statusCode(),
+                contentType = contentType,
+                body = "",
+                redirectLocation = location
+            )
         }
-        if (response.statusCode() !in 200..299) {
-            error("HTTP ${response.statusCode()}")
-        }
+        val bytes = response.body().use { it.readNBytes(MAX_SOURCE_BODY_BYTES + 1) }
+        val truncated = bytes.size > MAX_SOURCE_BODY_BYTES
+        val charset = contentType
+            ?.let { Regex("charset=([^;\\s]+)", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(1) }
+            ?.let { runCatching { java.nio.charset.Charset.forName(it.trim('"')) }.getOrNull() }
+            ?: Charsets.UTF_8
         FetchedSource(
             statusCode = response.statusCode(),
-            contentType = response.headers().firstValue("content-type").orElse(null),
-            body = response.body()
+            contentType = contentType,
+            body = String(bytes, 0, minOf(bytes.size, MAX_SOURCE_BODY_BYTES), charset),
+            bodyTruncated = truncated
         )
     }
 }

@@ -23,6 +23,8 @@ import com.achulkov.evomolior.core.council.CouncilSynthesisWireAuthority
 import com.achulkov.evomolior.core.council.LocalNodeKey
 import com.achulkov.evomolior.core.config.AcceptanceProfile
 import com.achulkov.evomolior.core.model.Role
+import com.achulkov.evomolior.core.repair.AggregationSemantics
+import com.achulkov.evomolior.core.repair.TimeBasis
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runTest
@@ -150,21 +152,25 @@ class CouncilRoleSchemasTest {
                 .jsonPrimitive
                 .content
         )
-        val physicalDimensionKey = definitions.keys.single { key ->
+        val physicalDimensionKeys = definitions.keys.filter { key ->
             key.removeSuffix("?") ==
                 "com.achulkov.evomolior.core.atlas.PhysicalDimension"
         }
-        val physicalDimensionDefinition = definitions.getValue(physicalDimensionKey).jsonObject
-        assertEquals(
-            "array",
-            physicalDimensionDefinition.getValue("properties")
-                .jsonObject
-                .getValue("exponents")
-                .jsonObject
-                .getValue("type")
-                .jsonPrimitive
-                .content
-        )
+        assertTrue(physicalDimensionKeys.isNotEmpty())
+        physicalDimensionKeys.forEach { physicalDimensionKey ->
+            val physicalDimensionDefinition =
+                definitions.getValue(physicalDimensionKey).jsonObject
+            assertEquals(
+                "array",
+                physicalDimensionDefinition.getValue("properties")
+                    .jsonObject
+                    .getValue("exponents")
+                    .jsonObject
+                    .getValue("type")
+                    .jsonPrimitive
+                    .content
+            )
+        }
 
         val rendered = schema.toString()
         assertFalse(rendered.contains("\"oneOf\""))
@@ -256,6 +262,7 @@ class CouncilRoleSchemasTest {
             )
             assertEquals(type == "OBJECT_ITEMS", "objectFields" in properties)
         }
+        assertQuantitySemanticsBound(schema)
 
         val structuredOpportunityDefinition = definitions.values
             .map(JsonElement::jsonObject)
@@ -337,6 +344,16 @@ class CouncilRoleSchemasTest {
             assertTrue("resultSummaryOutputField" in properties)
             assertTrue("uncertaintyOutputField" in properties)
         }
+    }
+
+    @Test
+    fun `appendix Task schema binds aggregation to exact quantity time basis`() {
+        assertQuantitySemanticsBound(
+            CouncilRoleSchemas.forRole(
+                Role.CouncilTaskAnatomist,
+                acceptanceProfile = AcceptanceProfile.APPENDIX_B_FULL
+            ).schema
+        )
     }
 
     @Test
@@ -1181,6 +1198,82 @@ class CouncilRoleSchemasTest {
     private fun JsonObject.resolveReference(definitions: JsonObject): JsonObject {
         val reference = this["\$ref"]?.jsonPrimitive?.content ?: return this
         return definitions.getValue(reference.substringAfterLast('/')).jsonObject
+    }
+
+    private fun assertQuantitySemanticsBound(schema: JsonObject) {
+        val definitions = schema.getValue("\$defs").jsonObject
+        val quantityDefinitions = definitions.values
+            .map(JsonElement::jsonObject)
+            .filter { definition ->
+                definition["anyOf"]
+                    ?.jsonArray
+                    ?.all { branch ->
+                        branch.jsonObject["properties"]
+                            ?.jsonObject
+                            ?.keys == QUANTITY_FIELDS
+                    } == true
+            }
+        assertTrue(quantityDefinitions.isNotEmpty())
+        quantityDefinitions.forEach { definition ->
+            val branches = definition.getValue("anyOf")
+                .jsonArray
+                .associateBy { branch ->
+                    branch.jsonObject
+                        .getValue("properties")
+                        .jsonObject
+                        .getValue("aggregation")
+                        .jsonObject
+                        .getValue("enum")
+                        .jsonArray
+                        .single()
+                        .jsonPrimitive
+                        .content
+                }
+            assertEquals(
+                AggregationSemantics.entries.mapTo(linkedSetOf(), AggregationSemantics::name),
+                branches.keys
+            )
+            branches.forEach { (aggregation, branch) ->
+                val branchObject = branch.jsonObject
+                val properties = branchObject.getValue("properties").jsonObject
+                assertEquals(
+                    properties.keys,
+                    branchObject.getValue("required")
+                        .jsonArray
+                        .mapTo(linkedSetOf()) { it.jsonPrimitive.content }
+                )
+                val timeBasis = properties.getValue("timeBasis").jsonObject
+                if (
+                    AggregationSemantics.valueOf(aggregation) in
+                    INTERVAL_AGGREGATIONS
+                ) {
+                    assertEquals("string", timeBasis.getValue("type").jsonPrimitive.content)
+                    assertEquals(
+                        TimeBasis.entries.mapTo(linkedSetOf(), TimeBasis::name),
+                        timeBasis.getValue("enum")
+                            .jsonArray
+                            .mapTo(linkedSetOf()) { it.jsonPrimitive.content }
+                    )
+                } else {
+                    assertEquals("null", timeBasis.getValue("type").jsonPrimitive.content)
+                }
+            }
+        }
+    }
+
+    private companion object {
+        val QUANTITY_FIELDS = setOf(
+            "dimension",
+            "unitId",
+            "scaleToSi",
+            "aggregation",
+            "timeBasis"
+        )
+        val INTERVAL_AGGREGATIONS = setOf(
+            AggregationSemantics.PER_INTERVAL_RATE,
+            AggregationSemantics.SUM_OVER_INTERVALS,
+            AggregationSemantics.AVERAGE_OVER_INTERVALS
+        )
     }
 
     private fun JsonObject.discriminatorBranches(

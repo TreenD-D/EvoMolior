@@ -10,6 +10,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -18,6 +20,32 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class CodexCodeModeToolBridgeTest {
+    @Test
+    fun `argv transport preserves literal shell source and exact tool response`() = runBlocking {
+        assertSourceRoundTrip(SourceTransport.ARGV)
+    }
+
+    @Test
+    fun `stdin transport preserves literal shell source and exact tool response`() = runBlocking {
+        assertSourceRoundTrip(SourceTransport.STDIN)
+    }
+
+    @Test
+    fun `documented quoted heredoc preserves literal shell source and exact tool response`() = runBlocking {
+        assertSourceRoundTrip(SourceTransport.QUOTED_HEREDOC)
+    }
+
+    @Test
+    fun `instructions explain source safe stdin invocation`() {
+        CodexCodeModeSession.create(runtime(mutableListOf())).use { session ->
+            val instructions = session.instructions()
+            assertTrue(instructions.contains("<tool-name> - <<'EVOMOLIOR_JSON'"))
+            assertTrue(instructions.contains("Always JSON-serialize"))
+            assertTrue(instructions.contains("never use an unquoted heredoc"))
+            assertTrue(instructions.contains("serialize that outer command string too"))
+        }
+    }
+
     @Test
     fun `runtime decodes typed arguments executes tool and intercepts call`() = runBlocking {
         val observedActions = mutableListOf<AgentAction>()
@@ -39,7 +67,7 @@ class CodexCodeModeToolBridgeTest {
     }
 
     @Test
-    fun `runtime rejects unknown tools and malformed typed arguments`() = runBlocking {
+    fun `runtime rejects unknown tools and malformed typed arguments`() = runBlocking<Unit> {
         val runtime = runtime(mutableListOf())
 
         assertFailsWith<Throwable> {
@@ -48,6 +76,23 @@ class CodexCodeModeToolBridgeTest {
         assertFailsWith<Throwable> {
             runtime.execute("echo_probe", """{"unexpected":"value"}""")
         }
+    }
+
+    @Test
+    fun `bridged call rejected by constitutional gate never executes tool`() = runBlocking {
+        var executed = false
+        val registry = ToolRegistry {
+            tool(EchoProbeTool { executed = true })
+        }
+        val runtime = CodexCodeModeToolRuntime(
+            toolRegistry = registry,
+            actionGate = ConstitutionalActionGate { error("blocked by probe") },
+            agentId = "agent-code-mode"
+        )
+        assertFailsWith<IllegalStateException> {
+            runtime.execute("echo_probe", """{"value":"must not execute"}""")
+        }
+        assertFalse(executed)
     }
 
     @Test
@@ -119,7 +164,65 @@ class CodexCodeModeToolBridgeTest {
         )
     }
 
-    private class EchoProbeTool : SimpleTool<EchoProbeTool.Args>(
+    private enum class SourceTransport { ARGV, STDIN, QUOTED_HEREDOC }
+
+    private suspend fun assertSourceRoundTrip(transport: SourceTransport) {
+        val source = """
+            #!/bin/sh
+            trap 'rm -rf "${'$'}SNAPSHOT_DIR"' EXIT HUP INT TERM
+            exec "${'$'}JAVACMD" "${'$'}@"
+            literal='single quotes'; double="double quotes"; slash='\\'
+            substitutions=${'$'}(echo SHOULD_NOT_EXPAND) `echo SHOULD_NOT_EXPAND`
+            unicode='é λ'
+        """.trimIndent() + "\n\n"
+        val rawArgs = buildJsonObject { put("value", source) }.toString()
+        val observedActions = mutableListOf<AgentAction>()
+        var received: String? = null
+        val runtime = CodexCodeModeToolRuntime(
+            toolRegistry = ToolRegistry { tool(EchoProbeTool { received = it }) },
+            actionGate = ConstitutionalActionGate { observedActions += it },
+            agentId = "agent-code-mode"
+        )
+        CodexCodeModeSession.create(runtime).use { session ->
+            val command = when (transport) {
+                SourceTransport.ARGV -> listOf(session.bridgeCommand.toString(), "echo_probe", rawArgs)
+                SourceTransport.STDIN -> listOf(session.bridgeCommand.toString(), "echo_probe", "-")
+                SourceTransport.QUOTED_HEREDOC -> {
+                    val quotedBridge = "'" + session.bridgeCommand.toString().replace("'", "'\\''") + "'"
+                    listOf("/bin/zsh", "-c", "$quotedBridge echo_probe - <<'EVOMOLIOR_JSON'\n$rawArgs\nEVOMOLIOR_JSON\n")
+                }
+            }
+            val process = ProcessBuilder(command).redirectErrorStream(true).apply {
+                environment()["SNAPSHOT_DIR"] = "SHOULD_NOT_EXPAND"
+                environment()["JAVACMD"] = "SHOULD_NOT_EXPAND"
+            }.start()
+            try {
+                process.outputStream.bufferedWriter(Charsets.UTF_8).use {
+                    if (transport == SourceTransport.STDIN) it.write(rawArgs)
+                }
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+                while (process.isAlive && System.nanoTime() < deadline) {
+                    session.processPendingRequests()
+                    delay(10)
+                }
+                assertTrue(process.waitFor(2, TimeUnit.SECONDS), "Bridge helper did not complete")
+                val response = process.inputStream.bufferedReader(Charsets.UTF_8).readText()
+                assertEquals(0, process.exitValue(), response)
+                assertEquals(source, received, "Decoded tool argument must preserve source exactly")
+                assertEquals(1, observedActions.size)
+                assertEquals(runtime.execute("echo_probe", rawArgs), response, "Filesystem response must be byte-faithful")
+            } finally {
+                if (process.isAlive) {
+                    process.destroyForcibly()
+                    process.waitFor(2, TimeUnit.SECONDS)
+                }
+            }
+        }
+    }
+
+    private class EchoProbeTool(
+        private val onExecute: (String) -> Unit = {}
+    ) : SimpleTool<EchoProbeTool.Args>(
         argsType = typeToken<Args>(),
         name = "echo_probe",
         description = "Returns a typed bridge probe result."
@@ -127,7 +230,10 @@ class CodexCodeModeToolBridgeTest {
         @Serializable
         data class Args(val value: String)
 
-        override suspend fun execute(args: Args): String = "TOOL_RESULT:${args.value}"
+        override suspend fun execute(args: Args): String {
+            onExecute(args.value)
+            return "TOOL_RESULT:${args.value}"
+        }
     }
 
     private class HangingProbeTool : SimpleTool<HangingProbeTool.Args>(

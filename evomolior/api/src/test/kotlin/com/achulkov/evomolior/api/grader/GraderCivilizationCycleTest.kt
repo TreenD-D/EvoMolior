@@ -11,7 +11,7 @@ import com.achulkov.evomolior.core.model.SubmissionType
 import com.achulkov.evomolior.orchestration.metaplanner.MetaPlannerRunner
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createTempDirectory
 import kotlin.reflect.full.callSuspend
 import kotlin.test.Test
@@ -24,7 +24,7 @@ import kotlin.test.assertTrue
 class GraderCivilizationCycleTest {
 
     @Test
-    fun `criteria phase review judging submission and verdict happen in order`() = runTest {
+    fun `criteria phase review judging submission and verdict happen in order`() = runBlocking {
         val dataRoot = createTempDirectory("grader-civilization-cycle-test").toFile()
         val factory = SubstrateDatabaseFactory(dataRoot)
         val runId = "run-grader-cycle"

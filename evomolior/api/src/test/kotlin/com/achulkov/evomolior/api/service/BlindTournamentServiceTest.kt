@@ -9,9 +9,11 @@ import com.achulkov.evomolior.core.model.GroupProfileType
 import com.achulkov.evomolior.core.model.ScoringDimension
 import com.achulkov.evomolior.core.model.ScoringResolution
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
@@ -19,6 +21,26 @@ import kotlin.test.assertFailsWith
  * Regression coverage for the blind scoring boundary lifecycle.
  */
 class BlindTournamentServiceTest {
+    @Test
+    fun `service startup cancellation reaches the scoring child and cleans it up`() = runBlocking {
+        val worker = ScoringWorkerProcess(
+            startupTimeoutMs = 60_000,
+            workerMainClass = HangingScoringWorkerMain::class.java.name
+        )
+        val service = BlindTournamentService(
+            onFailureTelemetry = {},
+            workerFactory = { worker }
+        )
+
+        assertFailsWith<TimeoutCancellationException> {
+            withTimeout(1_000) {
+                service.start(listOf("group-0"))
+            }
+        }
+
+        assertFalse(worker.isAlive())
+    }
+
     @Test
     fun `exact grader quorum cannot cross scoring transport without bundles`() = runBlocking {
         val service = BlindTournamentService(onFailureTelemetry = {})
@@ -240,7 +262,7 @@ class BlindTournamentServiceTest {
     }
 
     @Test
-    fun `blind tournament service cannot be started twice without stopping`() {
+    fun `blind tournament service cannot be started twice without stopping`() = runBlocking {
         val service = BlindTournamentService(onFailureTelemetry = {})
         service.start(listOf("group-0", "group-1"))
 

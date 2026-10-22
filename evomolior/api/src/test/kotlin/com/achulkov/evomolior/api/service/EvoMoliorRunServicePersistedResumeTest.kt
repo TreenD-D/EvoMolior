@@ -1,5 +1,8 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+
 package com.achulkov.evomolior.api.service
 
+import com.achulkov.evomolior.api.deliverable.StartupDiagnosticOutcomeCompiler
 import com.achulkov.evomolior.api.events.EvoMoliorEvent
 import com.achulkov.evomolior.api.model.FinalOutputSpec
 import com.achulkov.evomolior.api.model.RunConfig
@@ -8,6 +11,8 @@ import com.achulkov.evomolior.competition.grader.GraderGroupManager
 import com.achulkov.evomolior.core.contract.StartingField
 import com.achulkov.evomolior.core.contract.PublicationState
 import com.achulkov.evomolior.core.contract.PublicationStateEvent
+import com.achulkov.evomolior.core.contract.StartupDiagnosticState
+import com.achulkov.evomolior.core.contract.StartupDiagnosticStateEvent
 import com.achulkov.evomolior.core.contract.RunInputArtifact
 import com.achulkov.evomolior.core.contract.RunInputArtifactKind
 import com.achulkov.evomolior.core.model.GroupProfileType
@@ -18,6 +23,7 @@ import com.achulkov.evomolior.sandbox.shuru.ShuruVmManager
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
 import com.achulkov.evomolior.substrate.db.entity.MetaArchiveEntryEntity
 import com.achulkov.evomolior.substrate.publication.PublicationStateRepository
+import com.achulkov.evomolior.substrate.publication.PublicationOutcomeRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -41,6 +47,110 @@ import kotlin.reflect.jvm.isAccessible
 
 class EvoMoliorRunServicePersistedResumeTest {
     private val json = Json { ignoreUnknownKeys = true }
+
+    @Test
+    fun `startup archive first resume restores terminal diagnostic history`() = runBlocking {
+        val tmpDir = createTempDirectory("svc-startup-archive-first-resume-").toFile()
+        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+        val runId = "startup-archive-first-resume"
+        val config = singleGroupConfig(
+            runId = runId,
+            objective = "Remain rejected before runtime activation.",
+        )
+        PersistedRunStateStore.writeForDataRoot(
+            tmpDir,
+            PersistedRunState.fromRunConfig(
+                config = config,
+                groupIds = listOf("group-0"),
+                graderGroupIds = emptyList(),
+                allowedHosts = emptySet(),
+                status = PersistedRunStatus.RUNNING,
+            )
+        )
+        val generatedAt = kotlin.time.Instant.parse("2026-07-25T09:00:00Z")
+        val rejection = StartupRejectionArtifact(
+            runId = runId,
+            phase = StartupRejectionPhase.ADMISSION,
+            reasons = listOf(StartupRejectionReason.ADMISSION_REJECTED),
+            errors = listOf(
+                StartupRejectionError(
+                    kind = StartupRejectionErrorKind.ADMISSION,
+                    message = "The public startup contract was rejected.",
+                )
+            ),
+            declaredWorkerGroupCount = 1,
+            declaredGraderGroupCount = 0,
+            distributionManifestHash = "a".repeat(64),
+            activationFlags = StartupActivationFlags(
+                runStartedEmitted = false,
+                workerInfrastructureActivated = false,
+                graderInfrastructureActivated = false,
+                successArchiveCreated = false,
+                winnerAuthorityCreated = false,
+            ),
+            createdAt = "2026-07-25T09:00:00Z",
+        )
+        val compilation = StartupDiagnosticOutcomeCompiler.compile(
+            rejection = rejection,
+            generatedAt = generatedAt,
+        )
+        var previous: StartupDiagnosticStateEvent? = null
+        val completeHistory = StartupDiagnosticState.entries.mapIndexed { index, state ->
+            StartupDiagnosticStateEvent(
+                eventId = "startup-archive-first-$index",
+                runId = runId,
+                state = state,
+                sequence = index,
+                previousEventHash = previous?.eventHash,
+                authorityReferenceIds = setOf("startup-authority-$index"),
+                occurredAt = generatedAt,
+            ).withComputedHash().also { previous = it }
+        }
+        val outcomeRepository = PublicationOutcomeRepository(
+            substrateFactory.getAtlas(runId)
+        )
+        completeHistory.dropLast(1).forEach { outcomeRepository.appendStartup(it) }
+        val archive = RunOutcomeArchiveService().archiveStartupDiagnostic(
+            StartupDiagnosticArchiveRequest(
+                runId = runId,
+                admissionDistributionHash = "a".repeat(64),
+                startingFieldHash = null,
+                lifecycleReconciliationHash = "b".repeat(64),
+                blueprint = compilation.blueprint,
+                decisionPackage = compilation.decisionPackage,
+                diagnosticPackage = compilation.diagnosticPackage,
+                publicationHistory = completeHistory,
+                mechanismActivationReport = startupMechanismActivationReport(
+                    runId = runId,
+                    generatedAt = generatedAt,
+                    rejectionAuthorityId = "startup-rejection/${"c".repeat(64)}",
+                    terminalPublicationAuthorityId =
+                        "startup-archive-event/${completeHistory.last().eventHash}",
+                ),
+                archivedAtMs = generatedAt.toEpochMilliseconds(),
+            )
+        )
+        RunArchiveService(substrateFactory).writeOutcomeArchive(runId, archive)
+
+        val service = testService(substrateFactory)
+        val aborted = async {
+            withTimeout(5_000L) {
+                service.events.first {
+                    it is EvoMoliorEvent.RunAborted && it.runId == runId
+                }
+            }
+        }
+        yield()
+
+        assertEquals(runId, service.resumePersistedRun(config))
+        assertIs<EvoMoliorEvent.RunAborted>(aborted.await())
+        assertEquals(completeHistory, outcomeRepository.startupHistory(runId))
+        assertEquals(
+            StartupDiagnosticState.ARCHIVED_REJECTED_PRE_RUNTIME,
+            outcomeRepository.startupHistory(runId).last().state,
+        )
+        assertEquals(PersistedRunStatus.FAILED, PersistedRunStateStore.read(tmpDir, runId)?.status)
+    }
 
     @Test
     fun `resume persisted run recovers from sealed starting field and finishes`() = runBlocking {
@@ -77,7 +187,7 @@ class EvoMoliorRunServicePersistedResumeTest {
             ),
             budgetCeiling = 100.0,
             generationCeiling = 1
-        )
+        ).copy(graderGroupCount = 0)
         val archiveDb = substrateFactory.get(runId, "__meta_archive__")
         archiveDb.metaArchiveDao().insert(
             MetaArchiveEntryEntity(
@@ -112,20 +222,26 @@ class EvoMoliorRunServicePersistedResumeTest {
         val resumedRunId = service.resumePersistedRun(config)
         assertEquals(runId, resumedRunId)
 
-        withTimeout(10_000) {
+        val terminalEvent = withTimeout(10_000) {
             service.events.first { event ->
-                event is EvoMoliorEvent.RunCompleted && event.runId == runId
+                when (event) {
+                    is EvoMoliorEvent.RunCompleted -> event.runId == runId
+                    is EvoMoliorEvent.RunRecovered -> event.runId == runId
+                    is EvoMoliorEvent.RunAborted -> event.runId == runId
+                    else -> false
+                }
             }
         }
+        assertIs<EvoMoliorEvent.RunRecovered>(terminalEvent)
 
         val bundle = service.getResultsBundle(runId)
         assertNotNull(bundle)
         val persistedState = PersistedRunStateStore.read(tmpDir, runId)
         assertNotNull(persistedState)
-        assertEquals(PersistedRunStatus.COMPLETED, persistedState.status)
+        assertEquals(PersistedRunStatus.RECOVERED, persistedState.status)
         assertTrue(
-            service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).isNotEmpty(),
-            "Recovered run should persist a completion marker"
+            service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).isEmpty(),
+            "Provisional recovery must not mint an accepted completion marker"
         )
     }
 
@@ -508,10 +624,15 @@ class EvoMoliorRunServicePersistedResumeTest {
             assertFalse(targetRunId in finalOutputSpecs(service))
 
             val nextRunId = "post-artifact-failure-run"
-            val nextCompleted = async {
+            val nextRecovered = async {
                 withTimeout(10_000) {
-                    service.events.first {
-                        it is EvoMoliorEvent.RunCompleted && it.runId == nextRunId
+                    service.events.first { event ->
+                        when (event) {
+                            is EvoMoliorEvent.RunCompleted -> event.runId == nextRunId
+                            is EvoMoliorEvent.RunRecovered -> event.runId == nextRunId
+                            is EvoMoliorEvent.RunAborted -> event.runId == nextRunId
+                            else -> false
+                        }
                     }
                 }
             }
@@ -525,7 +646,11 @@ class EvoMoliorRunServicePersistedResumeTest {
                     )
                 )
             )
-            nextCompleted.await()
+            val nextTerminal = nextRecovered.await()
+            assertTrue(
+                nextTerminal is EvoMoliorEvent.RunRecovered,
+                "Expected provisional recovery, got $nextTerminal",
+            )
             Unit
         }
 

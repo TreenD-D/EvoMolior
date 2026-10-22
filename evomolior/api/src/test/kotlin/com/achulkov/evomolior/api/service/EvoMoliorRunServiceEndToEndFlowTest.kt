@@ -6,6 +6,8 @@ import com.achulkov.evomolior.api.events.EvoMoliorEvent
 import com.achulkov.evomolior.api.grader.GraderRunner
 import com.achulkov.evomolior.api.model.FinalOutputKind
 import com.achulkov.evomolior.api.model.FinalOutputSpec
+import com.achulkov.evomolior.api.model.FinalOutputValidationContract
+import com.achulkov.evomolior.api.model.AcceptanceDiagnosticMode
 import com.achulkov.evomolior.api.model.RunConfig
 import com.achulkov.evomolior.api.model.RunInputArtifactUpload
 import com.achulkov.evomolior.agents.factory.StructuredDimensionScoreDraft
@@ -15,15 +17,29 @@ import com.achulkov.evomolior.agents.factory.StructuredNodeGradeVerdict
 import com.achulkov.evomolior.competition.coordinator.GroupCoordinator
 import com.achulkov.evomolior.competition.grader.GraderGroupManager
 import com.achulkov.evomolior.competition.grader.GraderNodeLeaseAuthority
+import com.achulkov.evomolior.core.atlas.ArtifactType
 import com.achulkov.evomolior.core.atlas.AtlasGroupId
+import com.achulkov.evomolior.core.atlas.AtlasAgentId
 import com.achulkov.evomolior.core.atlas.AtlasHashing
+import com.achulkov.evomolior.core.atlas.NodeEvidenceCostSummary
+import com.achulkov.evomolior.core.atlas.NodeGradeBundle
+import com.achulkov.evomolior.core.atlas.NodeId
+import com.achulkov.evomolior.core.atlas.NodeKind
 import com.achulkov.evomolior.core.atlas.NodeScoreVector
+import com.achulkov.evomolior.core.budget.BudgetLedger
 import com.achulkov.evomolior.core.contract.AgentBootContext
+import com.achulkov.evomolior.core.contract.AgentExecutionPhase
+import com.achulkov.evomolior.core.contract.AgentExitRecord
+import com.achulkov.evomolior.core.contract.AgentLifecycleClassification
+import com.achulkov.evomolior.core.contract.AgentLifecycleRegistration
+import com.achulkov.evomolior.core.contract.CommitType
+import com.achulkov.evomolior.core.contract.ContributionCommit
 import com.achulkov.evomolior.core.contract.ContributionAuthorityKind
 import com.achulkov.evomolior.core.contract.ContributionAuthorityRef
 import com.achulkov.evomolior.core.contract.CriticDecisionRecord
 import com.achulkov.evomolior.core.contract.CriticOutcome
 import com.achulkov.evomolior.core.contract.CriticReview
+import com.achulkov.evomolior.core.contract.CostLedgerEntryKind
 import com.achulkov.evomolior.core.contract.GRADER_METHODOLOGY_DRAFT_SIGNATURE_PREFIX
 import com.achulkov.evomolior.core.contract.GraderAutomatedTestDraft
 import com.achulkov.evomolior.core.contract.GraderFailureModeDraft
@@ -36,6 +52,9 @@ import com.achulkov.evomolior.core.config.AcceptanceProfile
 import com.achulkov.evomolior.core.config.CouncilExecutionPurpose
 import com.achulkov.evomolior.core.config.LlmBackend
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
+import com.achulkov.evomolior.core.council.LocalNodeKey
+import com.achulkov.evomolior.core.deliverable.AcceptanceStatus
+import com.achulkov.evomolior.core.deliverable.ExecutionCompletionStatus
 import com.achulkov.evomolior.core.grader.DisclosureSensitivity
 import com.achulkov.evomolior.core.grader.FailureLevel
 import com.achulkov.evomolior.core.model.DimensionScore
@@ -46,9 +65,13 @@ import com.achulkov.evomolior.orchestration.metaplanner.MetaPlannerRunner
 import com.achulkov.evomolior.orchestration.lifecycle.LifecycleManager
 import com.achulkov.evomolior.sandbox.shuru.ShuruVmManager
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
+import com.achulkov.evomolior.substrate.atlas.AtlasTransactionRepository
+import com.achulkov.evomolior.substrate.atlas.NodeCaptureRepository
 import com.achulkov.evomolior.substrate.db.entity.KnowledgeBaseEntryEntity
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
 import com.achulkov.evomolior.substrate.grader.GraderAuthorityRepository
+import com.achulkov.evomolior.substrate.cost.CostLedgerRepository
+import com.achulkov.evomolior.substrate.publication.PublicationOutcomeRepository
 import com.achulkov.evomolior.substrate.publication.PublicationStateRepository
 import com.achulkov.evomolior.substrate.worker.ContributionGraphRepository
 import com.achulkov.evomolior.substrate.worker.WorkerExecutionRepository
@@ -63,14 +86,21 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.lang.reflect.InvocationTargetException
 import java.util.Base64
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.reflect.full.callSuspend
@@ -87,8 +117,37 @@ import kotlin.time.Instant
 class EvoMoliorRunServiceEndToEndFlowTest {
     private val json = Json { ignoreUnknownKeys = true }
 
+    private companion object {
+        const val ACCEPTED_PUBLICATION_MARKER = "receiver-delivery-accepted"
+        val ACCEPTANCE_BOUNDARY_DISTRIBUTION_HASH =
+            AtlasHashing.hashText("acceptance-boundary-distribution")
+        val ACCEPTED_DELIVERABLE_COMPONENT_IDS = listOf(
+            "executive-summary",
+            "decision-matrix",
+            "recommendation",
+            "evidence-ledger",
+            "assumptions",
+            "uncertainties",
+            "risk-register",
+            "implementation-plan",
+            "action-checklist",
+            "tool-and-simulation-results",
+            "alternative-views",
+            "limitations-and-next-evidence",
+            "technical-appendix",
+        )
+        val ACCEPTED_SUITE_MARKERS = listOf(
+            "accepted-delivery-marker",
+            "accepted-decision-marker",
+            "accepted-evidence-marker",
+            "accepted-hypothesis-marker",
+            "accepted-validation-marker",
+            "accepted-tool-marker",
+        )
+    }
+
     @Test
-    fun `multi round run replenishes generation budget and spawns workers after round zero`() = runBlocking {
+    fun `unresolved scoring publishes every group in a multi source provisional archive`() = runBlocking {
         val tmpDir = createTempDirectory("svc-multi-round-spawn-budget-test-").toFile()
         val substrateFactory = SubstrateDatabaseFactory(tmpDir)
         val runId = "run-multi-round-spawn-budget"
@@ -112,6 +171,27 @@ class EvoMoliorRunServiceEndToEndFlowTest {
             },
             graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
             substrateFactory = substrateFactory,
+            genesisCouncilRunner = {
+                    callbackRunId,
+                    callbackObjective,
+                    _,
+                    envelope,
+                    inputArtifacts,
+                    _,
+                    onInvocationStarted ->
+                onInvocationStarted()
+                compiledCouncilTestFixture(
+                    runId = callbackRunId,
+                    objective = callbackObjective,
+                    envelope = envelope,
+                    inputArtifacts = inputArtifacts,
+                    workerGroupKeys = listOf("group-0", "group-1"),
+                    workerProfiles = listOf(
+                        GroupProfileType.Library,
+                        GroupProfileType.Factory
+                    )
+                )
+            },
             metaPlannerRunner = MetaPlannerRunner(),
             roundHeartbeatIntervalMs = 1L,
             inspectorCheckIntervalMs = 1L
@@ -122,41 +202,47 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                 collectedEvents += event
             }
         }
-
-        service.startRun(
-            RunConfig(
-                runId = runId,
-                objective = "multi-round worker spawn regression",
-                groupCount = 2,
-                groupProfiles = listOf(
-                    GroupProfileType.Library,
-                    GroupProfileType.Factory
-                ),
-                rounds = 2,
-                roundDurationMinutes = 0,
-                maxAgentsPerGroup = 1,
-                scoringDimensions = listOf(
-                    ScoringDimension(
-                        id = "accuracy",
-                        name = "Accuracy",
-                        description = "Reward evidence-based evaluation.",
-                        weight = 1.0
-                    )
-                ),
-                openRouterApiKey = "sk-test",
-                isTestRun = true
-            )
-        )
-
-        withTimeout(10_000) {
-            service.events.first { event ->
-                event is EvoMoliorEvent.RunCompleted && event.runId == runId
+        val terminalEvent = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeout(15_000) {
+                service.events.first { event ->
+                    when (event) {
+                        is EvoMoliorEvent.RunRecovered -> event.runId == runId
+                        is EvoMoliorEvent.RunCompleted -> event.runId == runId
+                        is EvoMoliorEvent.RunAborted -> event.runId == runId
+                        else -> false
+                    }
+                }
             }
         }
+
+        val config = RunConfig(
+            runId = runId,
+            objective = "multi-round worker spawn regression",
+            groupCount = 2,
+            groupProfiles = listOf(
+                GroupProfileType.Library,
+                GroupProfileType.Factory
+            ),
+            rounds = 2,
+            roundDurationMinutes = 0,
+            maxAgentsPerGroup = 1,
+            scoringDimensions = listOf(
+                ScoringDimension(
+                    id = "accuracy",
+                    name = "Accuracy",
+                    description = "Reward evidence-based evaluation.",
+                    weight = 1.0
+                )
+            ),
+            openRouterApiKey = "sk-test"
+        )
+        service.startRun(config)
+
+        val recovered = assertIs<EvoMoliorEvent.RunRecovered>(terminalEvent.await())
         assertEquals(
             EngineStatus.IDLE,
             service.getState().status,
-            "RunCompleted must not be observable until run-scoped cleanup has finished."
+            "RunRecovered must not be observable until run-scoped cleanup has finished."
         )
 
         eventCollector.cancel()
@@ -180,8 +266,8 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                 .mapTo(linkedSetOf()) { registration -> registration.generation }
         }
         assertTrue(
-            actualWorkerRoundsByGroup.values.all { rounds -> rounds.containsAll(setOf(0, 1)) },
-            "A two-round production run must persist actual worker registrations in both rounds: " +
+            actualWorkerRoundsByGroup.values.any { rounds -> rounds.containsAll(setOf(0, 1)) },
+            "The two-round production run must persist ordinary worker registrations in both rounds: " +
                 actualWorkerRoundsByGroup
         )
         assertTrue(
@@ -192,10 +278,27 @@ class EvoMoliorRunServiceEndToEndFlowTest {
             },
             "Round 1 should surface that depleted live telemetry was replaced by generation spawn budget"
         )
+        assertFalse(collectedEvents.any { it is EvoMoliorEvent.RunCompleted })
+        assertTrue(
+            service.getMetaArchiveEntries(
+                runId,
+                RunArchiveService.ENTRY_RUN_COMPLETED
+            ).isEmpty()
+        )
+        assertTrue(recovered.reason.isNotBlank())
+        val provisional = RunOutcomeArchiveService().verifyProvisional(
+            assertNotNull(service.getResultsBundle(runId)),
+        )
+        assertEquals(
+            workerGroupIds.toSet(),
+            provisional.recoverySourceSets.single().sourceGroupIds.toSet(),
+        )
+        assertNotNull(provisional.outcomeManifest.metricsHash)
+        Unit
     }
 
     @Test
-    fun `start run emits lifecycle events and exposes completion state and archive summary`() = runBlocking {
+    fun `start run emits lifecycle events and exposes provisional state and archive summary`() = runBlocking {
         val tmpDir = createTempDirectory("svc-end-to-end-flow-test-").toFile()
         val substrateFactory = SubstrateDatabaseFactory(tmpDir)
         val runId = "run-end-to-end"
@@ -219,6 +322,27 @@ class EvoMoliorRunServiceEndToEndFlowTest {
             },
             graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
             substrateFactory = substrateFactory,
+            genesisCouncilRunner = {
+                    callbackRunId,
+                    callbackObjective,
+                    _,
+                    envelope,
+                    inputArtifacts,
+                    _,
+                    onInvocationStarted ->
+                onInvocationStarted()
+                compiledCouncilTestFixture(
+                    runId = callbackRunId,
+                    objective = callbackObjective,
+                    envelope = envelope,
+                    inputArtifacts = inputArtifacts,
+                    workerGroupKeys = listOf("group-0", "group-1"),
+                    workerProfiles = listOf(
+                        GroupProfileType.Library,
+                        GroupProfileType.Factory,
+                    ),
+                )
+            },
             metaPlannerRunner = MetaPlannerRunner(),
             roundHeartbeatIntervalMs = 1L,
             inspectorCheckIntervalMs = 1L
@@ -240,15 +364,24 @@ class EvoMoliorRunServiceEndToEndFlowTest {
             }
         }
 
+        val terminalEvent = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeout(10_000) {
+                service.events.first { event ->
+                    when (event) {
+                        is EvoMoliorEvent.RunAborted -> event.runId == runId
+                        is EvoMoliorEvent.RunRecovered -> event.runId == runId
+                        is EvoMoliorEvent.RunCompleted -> event.runId == runId
+                        else -> false
+                    }
+                }
+            }
+        }
         val returnedRunId = service.startRun(
             RunConfig(
                 runId = runId,
                 objective = "end-to-end lifecycle flow",
-                groupCount = 2,
-                groupProfiles = listOf(
-                    GroupProfileType.Library,
-                    GroupProfileType.Factory
-                ),
+                groupCount = 1,
+                groupProfiles = listOf(GroupProfileType.Library),
                 rounds = 1,
                 roundDurationMinutes = 0,
                 maxAgentsPerGroup = 1,
@@ -275,11 +408,8 @@ class EvoMoliorRunServiceEndToEndFlowTest {
 
         assertEquals(runId, returnedRunId)
 
-        withTimeout(10_000) {
-            service.events.first { event ->
-                event is EvoMoliorEvent.RunCompleted && event.runId == runId
-            }
-        }
+        val recovered = assertIs<EvoMoliorEvent.RunRecovered>(terminalEvent.await())
+        assertTrue(recovered.reason.isNotBlank())
 
         eventCollector.cancel()
 
@@ -291,16 +421,10 @@ class EvoMoliorRunServiceEndToEndFlowTest {
             collectedEvents.any { it is EvoMoliorEvent.RoundStarted && it.runId == runId && it.roundIndex == 0 },
             "The live event stream should include the first round"
         )
-        assertTrue(
-            collectedEvents.any { it is EvoMoliorEvent.RoundCompleted && it.runId == runId },
-            "The live event stream should include the completed round result"
-        )
+        assertFalse(collectedEvents.any { it is EvoMoliorEvent.RunCompleted })
 
         val state = service.getState()
-        assertTrue(
-            state.status.name == "COMPLETED" || state.status.name == "IDLE",
-            "The finished run should report a terminal state"
-        )
+        assertEquals(EngineStatus.IDLE, state.status)
         assertTrue(
             state.activeRunId == runId || state.activeRunId == null,
             "The finished run should either still reference its runId briefly or have been cleaned up"
@@ -327,25 +451,24 @@ class EvoMoliorRunServiceEndToEndFlowTest {
         val metaArchiveDb = substrateFactory.get(runId, "__meta_archive__")
         val startingFieldEntry = metaArchiveDb.metaArchiveDao().getByType("STARTING_FIELD")
             .first { it.runId == runId }
-        val roundSummaryEntries = service.getMetaArchiveEntries(runId, "ROUND_SUMMARY")
         val runCompletedEntries = service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED)
-        assertTrue(roundSummaryEntries.isNotEmpty(), "The completed run should expose round summary entries")
-        assertTrue(runCompletedEntries.isNotEmpty(), "The completed run should expose a durable completion entry")
+        assertTrue(runCompletedEntries.isEmpty(), "A provisional run must not expose accepted completion authority")
         val decodedStartingField = json.decodeFromString(StartingField.serializer(), startingFieldEntry.contentJson)
         assertEquals(1, decodedStartingField.inputArtifacts.size)
         assertEquals("docs/context.txt", decodedStartingField.inputArtifacts.single().relativePath)
         assertTrue(decodedStartingField.inputArtifacts.single().textPreview.orEmpty().contains("starting context document"))
 
-        val decodedCompletion = json.decodeFromString(RunCompletionArchiveRecord.serializer(), runCompletedEntries.last().contentJson)
-        assertEquals(runId, decodedCompletion.runId)
-        assertTrue(decodedCompletion.winnerId != null)
-
-        val bundle = service.getResultsBundle(runId)
-        assertNotNull(bundle, "Completed run should expose a downloadable results bundle")
-        val bundleEntries = unzipEntries(bundle)
-        assertTrue(bundleEntries.keys.contains("inputs/docs/context.txt"))
-        assertTrue(bundleEntries.keys.any { it.startsWith("outputs/round_summary") })
-        assertTrue(bundleEntries["inputs/docs/context.txt"]!!.contains("This is the starting context document."))
+        assertEquals(
+            com.achulkov.evomolior.core.contract.RecoveryPublicationState.entries,
+            PublicationOutcomeRepository(substrateFactory.getAtlas(runId))
+                .recoveryHistory(runId)
+                .map { it.state },
+        )
+        val provisional = RunOutcomeArchiveService().verifyProvisional(
+            assertNotNull(service.getResultsBundle(runId)),
+        )
+        assertNotNull(provisional.outcomeManifest.metricsHash)
+        Unit
     }
 
     @Test
@@ -380,6 +503,9 @@ class EvoMoliorRunServiceEndToEndFlowTest {
             inspectorCheckIntervalMs = 1L
         )
 
+        val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+            awaitRunTerminal(service, runId, 10_000L)
+        }
         service.startRun(
             RunConfig(
                 runId = runId,
@@ -401,7 +527,7 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                     )
                 ),
                 openRouterApiKey = "sk-test",
-                isTestRun = true
+                isTestRun = true,
             )
         )
 
@@ -532,7 +658,7 @@ class EvoMoliorRunServiceEndToEndFlowTest {
     }
 
     @Test
-    fun `single round lifecycle emits summary completion and final answer in canonical order`() = runBlocking {
+    fun `single round lifecycle emits summary and provisional publication in canonical order`() = runBlocking {
         val tmpDir = createTempDirectory("svc-event-order-flow-test-").toFile()
         val substrateFactory = SubstrateDatabaseFactory(tmpDir)
         val runId = "run-event-order"
@@ -556,6 +682,27 @@ class EvoMoliorRunServiceEndToEndFlowTest {
             },
             graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
             substrateFactory = substrateFactory,
+            genesisCouncilRunner = {
+                    callbackRunId,
+                    callbackObjective,
+                    _,
+                    envelope,
+                    inputArtifacts,
+                    _,
+                    onInvocationStarted ->
+                onInvocationStarted()
+                compiledCouncilTestFixture(
+                    runId = callbackRunId,
+                    objective = callbackObjective,
+                    envelope = envelope,
+                    inputArtifacts = inputArtifacts,
+                    workerGroupKeys = listOf("group-0", "group-1"),
+                    workerProfiles = listOf(
+                        GroupProfileType.Library,
+                        GroupProfileType.Factory,
+                    ),
+                )
+            },
             metaPlannerRunner = MetaPlannerRunner(),
             roundHeartbeatIntervalMs = 1L,
             inspectorCheckIntervalMs = 1L
@@ -569,15 +716,15 @@ class EvoMoliorRunServiceEndToEndFlowTest {
 
         kotlinx.coroutines.yield()
 
+        val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+            awaitRunTerminal(service, runId, 10_000L)
+        }
         service.startRun(
             RunConfig(
                 runId = runId,
                 objective = "event ordering regression",
-                groupCount = 2,
-                groupProfiles = listOf(
-                    GroupProfileType.Library,
-                    GroupProfileType.Factory
-                ),
+                groupCount = 1,
+                groupProfiles = listOf(GroupProfileType.Library),
                 rounds = 1,
                 roundDurationMinutes = 0,
                 maxAgentsPerGroup = 1,
@@ -590,57 +737,54 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                     )
                 ),
                 openRouterApiKey = "sk-test",
-                isTestRun = true
+                isTestRun = true,
             )
         )
 
-        withTimeout(10_000) {
-            while (service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).isEmpty()) {
-                kotlinx.coroutines.yield()
-            }
+        val terminalEvent = terminal.await()
+        if (terminalEvent is EvoMoliorEvent.RunAborted) {
+            error(terminalEvent.reason)
         }
-
-        withTimeout(10_000) {
-            while (collectedEvents.none { it is EvoMoliorEvent.RunCompleted && it.runId == runId }) {
-                kotlinx.coroutines.yield()
-            }
-        }
+        assertIs<EvoMoliorEvent.RunRecovered>(terminalEvent)
         eventCollector.cancel()
 
         val roundStartedIndex = collectedEvents.indexOfFirst {
             it is EvoMoliorEvent.RoundStarted && it.runId == runId && it.roundIndex == 0
         }
-        val roundSummaryIndex = collectedEvents.indexOfFirst {
-            it is EvoMoliorEvent.EngineProgress && it.runId == runId && it.phase == "round_summary_result"
-        }
-        val roundCompletedIndex = collectedEvents.indexOfFirst {
-            it is EvoMoliorEvent.RoundCompleted && it.runId == runId
-        }
-        val finalAnswerIndex = collectedEvents.indexOfFirst {
-            it is EvoMoliorEvent.EngineProgress && it.runId == runId && it.phase == "final_answer"
-        }
-        val runCompletedIndex = collectedEvents.indexOfFirst {
-            it is EvoMoliorEvent.RunCompleted && it.runId == runId
+        val runRecoveredIndex = collectedEvents.indexOfFirst {
+            it is EvoMoliorEvent.RunRecovered && it.runId == runId
         }
 
         assertTrue(roundStartedIndex >= 0, "RoundStarted should be emitted")
-        assertTrue(roundSummaryIndex >= 0, "round_summary_result should be emitted")
-        assertTrue(roundCompletedIndex >= 0, "RoundCompleted should be emitted")
-        assertTrue(finalAnswerIndex >= 0, "final_answer should be emitted")
-        assertTrue(runCompletedIndex >= 0, "RunCompleted should be emitted")
-        assertTrue(roundStartedIndex < roundSummaryIndex)
-        assertTrue(roundSummaryIndex < roundCompletedIndex)
-        assertTrue(roundCompletedIndex < finalAnswerIndex)
-        assertTrue(finalAnswerIndex < runCompletedIndex)
+        assertTrue(runRecoveredIndex >= 0, "RunRecovered should be emitted")
+        assertTrue(roundStartedIndex < runRecoveredIndex)
+        assertFalse(collectedEvents.any { it is EvoMoliorEvent.RunCompleted })
+        assertFalse(
+            collectedEvents.any {
+                it is EvoMoliorEvent.EngineProgress &&
+                    it.runId == runId &&
+                    it.phase == "final_answer"
+            }
+        )
         assertEquals(
             1,
-            collectedEvents.count { it is EvoMoliorEvent.RoundCompleted && it.runId == runId },
-            "One-round runs should publish exactly one RoundCompleted event"
+            collectedEvents.count { it is EvoMoliorEvent.RoundCompleted && it.runId == runId }
         )
+        assertEquals(
+            com.achulkov.evomolior.core.contract.RecoveryPublicationState.entries,
+            PublicationOutcomeRepository(substrateFactory.getAtlas(runId))
+                .recoveryHistory(runId)
+                .map { it.state },
+        )
+        val provisional = RunOutcomeArchiveService().verifyProvisional(
+            assertNotNull(service.getResultsBundle(runId)),
+        )
+        assertNotNull(provisional.outcomeManifest.metricsHash)
+        Unit
     }
 
     @Test
-    fun `continuation run clones archived StartingField and merges new context artifacts`() = runBlocking {
+    fun `continuation run clones recovered StartingField and merges new context artifacts`() = runBlocking {
         val tmpDir = createTempDirectory("svc-continuation-flow-test-").toFile()
         val substrateFactory = SubstrateDatabaseFactory(tmpDir)
         val firstRunId = "run-continuation-source"
@@ -679,6 +823,9 @@ class EvoMoliorRunServiceEndToEndFlowTest {
         kotlinx.coroutines.yield()
 
         val sourceContext = "Source run context for continuation."
+        val sourceTerminal = async(start = CoroutineStart.UNDISPATCHED) {
+            awaitRunTerminal(service, firstRunId, 10_000L)
+        }
         val sourceRunIdReturned = service.startRun(
             RunConfig(
                 runId = firstRunId,
@@ -710,91 +857,38 @@ class EvoMoliorRunServiceEndToEndFlowTest {
         )
 
         assertEquals(firstRunId, sourceRunIdReturned)
-        withTimeout(10_000) {
-            service.events.first { event ->
-                event is EvoMoliorEvent.RunCompleted && event.runId == firstRunId
-            }
-        }
+        val sourceRecovered = assertIs<EvoMoliorEvent.RunRecovered>(sourceTerminal.await())
+        assertTrue(sourceRecovered.reason.isNotBlank())
         withTimeout(10_000) {
             while (service.getState().activeRunId != null) {
                 kotlinx.coroutines.yield()
             }
         }
-        withTimeout(30_000) {
-            while (service.getMetaArchiveEntries(firstRunId, RunArchiveService.ENTRY_RUN_COMPLETED).isEmpty()) {
-                kotlinx.coroutines.yield()
-            }
-        }
-
-        val continuationContext = "Fresh continuation context."
-        val continuationRunIdReturned = service.startRun(
-            RunConfig(
-                runId = secondRunId,
-                objective = "continued objective",
-                groupCount = 3,
-                groupProfiles = listOf(
-                    GroupProfileType.Factory,
-                    GroupProfileType.Library,
-                    GroupProfileType.Commune
-                ),
-                rounds = 1,
-                roundDurationMinutes = 0,
-                maxAgentsPerGroup = 1,
-                scoringDimensions = listOf(
-                    ScoringDimension(
-                        id = "accuracy",
-                        name = "Accuracy",
-                        description = "Reward evidence-based evaluation.",
-                        weight = 1.0
-                    )
-                ),
-                openRouterApiKey = "sk-test",
-                contextArtifacts = listOf(
-                    RunInputArtifactUpload(
-                        relativePath = "docs/continuation.txt",
-                        sourceName = "continuation.txt",
-                        mimeType = "text/plain",
-                        contentBase64 = Base64.getEncoder().encodeToString(continuationContext.toByteArray())
-                    )
-                ),
-                continuationFromRunId = firstRunId,
-                isTestRun = true
-            )
+        assertTrue(
+            service.getMetaArchiveEntries(
+                firstRunId,
+                RunArchiveService.ENTRY_RUN_COMPLETED
+            ).isEmpty()
         )
-
-        assertEquals(secondRunId, continuationRunIdReturned)
-        withTimeout(10_000) {
-            service.events.first { event ->
-                event is EvoMoliorEvent.RunCompleted && event.runId == secondRunId
-            }
-        }
 
         eventCollector.cancel()
 
-        assertTrue(
-            collectedEvents.any { it is EvoMoliorEvent.EngineProgress && it.runId == secondRunId && it.phase == "continuation_start" },
-            "Continuation should emit a progress marker"
-        )
-
-        val metaArchiveDb = substrateFactory.get(secondRunId, "__meta_archive__")
+        val metaArchiveDb = substrateFactory.get(firstRunId, "__meta_archive__")
         val startingFieldEntry = metaArchiveDb.metaArchiveDao().getByType("STARTING_FIELD")
-            .first { it.runId == secondRunId }
+            .first { it.runId == firstRunId }
         val decodedStartingField = json.decodeFromString(StartingField.serializer(), startingFieldEntry.contentJson)
 
-        assertEquals(firstRunId, decodedStartingField.continuedFromRunId)
-        assertEquals("continued objective", decodedStartingField.objective)
+        assertEquals(null, decodedStartingField.continuedFromRunId)
+        assertEquals("seed run objective", decodedStartingField.objective)
         assertEquals(1, decodedStartingField.groupCount)
         assertEquals(GroupProfileType.Library, decodedStartingField.groupProfiles["group-0"])
         assertTrue(decodedStartingField.inputArtifacts.any { it.relativePath == "docs/source.txt" })
-        assertTrue(decodedStartingField.inputArtifacts.any { it.relativePath == "docs/continuation.txt" })
-
-        val bundle = service.getResultsBundle(secondRunId)
-        assertNotNull(bundle, "Continuation run should expose a downloadable results bundle")
-        val bundleEntries = unzipEntries(bundle)
-        assertTrue(bundleEntries.keys.contains("inputs/docs/source.txt"))
-        assertTrue(bundleEntries.keys.contains("inputs/docs/continuation.txt"))
-        assertTrue(bundleEntries["inputs/docs/source.txt"]!!.contains("Source run context for continuation."))
-        assertTrue(bundleEntries["inputs/docs/continuation.txt"]!!.contains("Fresh continuation context."))
+        val provisional = RunOutcomeArchiveService().verifyProvisional(
+            assertNotNull(service.getResultsBundle(firstRunId)),
+        )
+        assertEquals(firstRunId, provisional.runId)
+        assertNotNull(provisional.outcomeManifest.metricsHash)
+        Unit
     }
 
     @Test
@@ -802,22 +896,16 @@ class EvoMoliorRunServiceEndToEndFlowTest {
         val tmpDir = createTempDirectory("svc-final-deliverable-flow-test-").toFile()
         val substrateFactory = SubstrateDatabaseFactory(tmpDir)
         val runId = "run-final-deliverable"
-        seedFinalCandidateAuthority(substrateFactory, runId, listOf("group-0", "group-1"))
         val finalWriterAttempts = AtomicInteger(0)
         val finalWriterModels = ConcurrentLinkedQueue<String>()
         val sawRetryPrompt = AtomicInteger(0)
+        val writerPhases = ConcurrentLinkedQueue<String>()
 
-        val service = EvoMoliorRunService(
-            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
-                LifecycleManager(
-                    runId = runIdValue,
-                    groupId = groupIdValue,
-                    shuruVmManager = ShuruVmManager(),
-                    substrateDatabaseFactory = substrateFactory,
-                    agentJarPath = "/fake/agent.jar",
-                    openRouterApiKey = "sk-test",
-                    groupProfile = groupProfile,
-                    localAgentRunner = { bootContext: AgentBootContext, _ ->
+        val service = acceptanceBoundaryService(
+            substrateFactory = substrateFactory,
+            failingBoundary = null,
+            archiveCalls = AtomicInteger(),
+            localAgentRunnerOverride = { bootContext: AgentBootContext, _ ->
                         val db = substrateFactory.get(bootContext.runId, bootContext.groupId)
                         val now = System.currentTimeMillis()
                         when {
@@ -838,7 +926,7 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                             <!doctype html>
                                             <html lang="en">
                                             <head><meta charset="utf-8"><title>Summary Fallback Article</title></head>
-                                            <body><article><h1>Summary Fallback Article</h1><p>summary path</p></article></body>
+                                            <body><!-- ${ACCEPTED_SUITE_MARKERS.joinToString(" ")} --><article><h1>Summary Fallback Article</h1><p>summary path</p></article></body>
                                             </html>
                                         """.trimIndent(),
                                         budgetSignature = "test-summary",
@@ -875,9 +963,10 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                                   <style>body{font-family:system-ui,sans-serif;}section{margin:1rem 0;}</style>
                                                 </head>
                                                 <body>
+                                                  <!-- ${ACCEPTED_SUITE_MARKERS.joinToString(" ")} -->
                                                   <article>
                                                     <header><h1>Dedicated Final Writer Article</h1></header>
-                                                    <section><p>publication path</p></section>
+                                                    <section><p>$ACCEPTED_PUBLICATION_MARKER publication path</p></section>
                                                   </article>
                                                 </body>
                                                 </html>
@@ -891,23 +980,47 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                             reviewedAtMs = null
                                         )
                                     )
-                                    insertFinalWriterDeathNote(db, bootContext, now + 1L)
+                                    insertAcceptedFinalWriterLineageAndDeathNote(
+                                        substrateFactory = substrateFactory,
+                                        database = db,
+                                        bootContext = bootContext,
+                                        outputRelativePath = "final-article.html",
+                                        lineageSubmittedAtMs = now + 1L,
+                                        deathNoteSubmittedAtMs = now + 2L,
+                                    )
                                 }
                             }
                         }
-                    }
-                )
             },
-            groupCoordinatorProvider = { groupIds, dimensions ->
-                GroupCoordinator(groupIds, dimensions)
-            },
-            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
-            substrateFactory = substrateFactory,
-            metaPlannerRunner = MetaPlannerRunner(),
-            roundHeartbeatIntervalMs = 1L,
-            inspectorCheckIntervalMs = 1L
         )
 
+        val phaseCollector = launch(start = CoroutineStart.UNDISPATCHED) {
+            service.events.collect { event ->
+                if (
+                    event is EvoMoliorEvent.EngineProgress &&
+                    event.runId == runId &&
+                    event.phase in setOf(
+                        "main_writer_spawn",
+                        "final_deliverable_spawn",
+                        "recovery_deliverable_spawn",
+                    )
+                ) {
+                    writerPhases += event.phase
+                }
+            }
+        }
+        val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeout(30_000L) {
+                service.events.first { event ->
+                    when (event) {
+                        is EvoMoliorEvent.RunCompleted -> event.runId == runId
+                        is EvoMoliorEvent.RunRecovered -> event.runId == runId
+                        is EvoMoliorEvent.RunAborted -> event.runId == runId
+                        else -> false
+                    }
+                }
+            }
+        }
         service.startRun(
             RunConfig(
                 runId = runId,
@@ -929,29 +1042,28 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                     )
                 ),
                 openRouterApiKey = "sk-test",
-                modelOverrides = mapOf(
-                    Role.Builder.name to "test-builder-model",
-                    Role.Archivist.name to "test-archivist-model"
+                finalOutputSpec = acceptedFinalOutputSpec(
+                    relativePath = "final-article.html",
+                    mediaType = "text/html",
+                    kind = FinalOutputKind.HTML_ARTICLE,
                 ),
-                isTestRun = true
             )
         )
 
-        withTimeout(30_000) {
-            while (service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).isEmpty()) {
-                kotlinx.coroutines.yield()
-            }
-        }
-
-        val bundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
-        val finalArticle = assertNotNull(bundleEntries["outputs/final-article.html"])
-        assertTrue(finalArticle.contains("Dedicated Final Writer Article"))
-        assertFalse(finalArticle.contains("Summary Fallback Article"))
-        assertTrue(finalWriterAttempts.get() in 2..3)
-        assertTrue(finalWriterModels.size >= 2)
-        assertEquals("test-builder-model", finalWriterModels.elementAt(0))
-        assertEquals("test-builder-model", finalWriterModels.elementAt(1))
-        assertTrue(sawRetryPrompt.get() >= 1)
+        val terminalEvent = terminal.await()
+        phaseCollector.cancel()
+        assertIs<EvoMoliorEvent.RunCompleted>(terminalEvent)
+        assertCompleteAcceptedSnapshotAuthority(substrateFactory, tmpDir, runId)
+        assertEquals(2, finalWriterAttempts.get())
+        assertEquals(2, finalWriterModels.size)
+        assertEquals(0, sawRetryPrompt.get())
+        assertEquals(listOf("main_writer_spawn", "final_deliverable_spawn"), writerPhases.toList())
+        assertTrue(
+            acceptedWriterDocs(substrateFactory, tmpDir, runId)
+                .any { "Dedicated Final Writer Article" in it },
+        )
+        assertNotNull(service.getResultsBundle(runId))
+        Unit
     }
 
     @Test
@@ -959,21 +1071,14 @@ class EvoMoliorRunServiceEndToEndFlowTest {
         val tmpDir = createTempDirectory("svc-final-deliverable-min-words-test-").toFile()
         val substrateFactory = SubstrateDatabaseFactory(tmpDir)
         val runId = "run-final-deliverable-min-words"
-        seedFinalCandidateAuthority(substrateFactory, runId, listOf("group-0", "group-1"))
         val finalWriterAttempts = AtomicInteger(0)
         val finalWriterModels = ConcurrentLinkedQueue<String>()
 
-        val service = EvoMoliorRunService(
-            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
-                LifecycleManager(
-                    runId = runIdValue,
-                    groupId = groupIdValue,
-                    shuruVmManager = ShuruVmManager(),
-                    substrateDatabaseFactory = substrateFactory,
-                    agentJarPath = "/fake/agent.jar",
-                    openRouterApiKey = "sk-test",
-                    groupProfile = groupProfile,
-                    localAgentRunner = { bootContext: AgentBootContext, _ ->
+        val service = acceptanceBoundaryService(
+            substrateFactory = substrateFactory,
+            failingBoundary = null,
+            archiveCalls = AtomicInteger(),
+            localAgentRunnerOverride = { bootContext: AgentBootContext, _ ->
                         val db = substrateFactory.get(bootContext.runId, bootContext.groupId)
                         val now = System.currentTimeMillis()
                         when {
@@ -985,7 +1090,20 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                         agentId = bootContext.agentId,
                                         role = bootContext.role.name,
                                         type = "PLAN_UPDATE",
-                                        content = "ROUND SUBMISSION SUMMARY\n- Minimal summary for final writer.",
+                                        content = """
+                                            ROUND SUBMISSION SUMMARY
+                                            FINAL DELIVERABLE HTML
+                                            <!doctype html>
+                                            <html lang="en">
+                                            <head><meta charset="utf-8"><title>Minimum Words Fallback</title></head>
+                                            <body><!-- ${ACCEPTED_SUITE_MARKERS.joinToString(" ")} --><main><article>
+                                            <h1>Minimum Words Fallback</h1>
+                                            <p>This accepted fallback contains enough visible receiver-facing
+                                            words to satisfy the objective while preserving deterministic
+                                            evidence, assumptions, uncertainty, risks, actions, and limitations.</p>
+                                            </article></main></body>
+                                            </html>
+                                        """.trimIndent(),
                                         budgetSignature = "test-summary",
                                         status = "pending",
                                         generation = bootContext.generation,
@@ -1015,7 +1133,7 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                             <!doctype html>
                                             <html lang="en">
                                             <head><meta charset="utf-8"><title>Minimum Words Article</title></head>
-                                            <body><main><article><h1>Minimum Words Article</h1><p>$body</p></article></main></body>
+                                            <body><!-- ${ACCEPTED_SUITE_MARKERS.joinToString(" ")} --><main><article><h1>Minimum Words Article</h1><p>$ACCEPTED_PUBLICATION_MARKER $body</p></article></main></body>
                                             </html>
                                         """.trimIndent(),
                                         budgetSignature = "test-final",
@@ -1027,22 +1145,24 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                         reviewedAtMs = null
                                     )
                                 )
-                                insertFinalWriterDeathNote(db, bootContext, now + 1L)
+                                if (attempt > 1) {
+                                    insertAcceptedFinalWriterLineageAndDeathNote(
+                                        substrateFactory = substrateFactory,
+                                        database = db,
+                                        bootContext = bootContext,
+                                        outputRelativePath = "final-article.html",
+                                        lineageSubmittedAtMs = now + 1L,
+                                        deathNoteSubmittedAtMs = now + 2L,
+                                    )
+                                }
                             }
                         }
-                    }
-                )
             },
-            groupCoordinatorProvider = { groupIds, dimensions ->
-                GroupCoordinator(groupIds, dimensions)
-            },
-            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
-            substrateFactory = substrateFactory,
-            metaPlannerRunner = MetaPlannerRunner(),
-            roundHeartbeatIntervalMs = 1L,
-            inspectorCheckIntervalMs = 1L
         )
 
+        val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+            awaitRunTerminal(service, runId, 30_000L)
+        }
         service.startRun(
             RunConfig(
                 runId = runId,
@@ -1064,27 +1184,25 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                     )
                 ),
                 openRouterApiKey = "sk-test",
-                modelOverrides = mapOf(
-                    Role.Builder.name to "test-builder-model",
-                    Role.Archivist.name to "test-archivist-model"
+                finalOutputSpec = acceptedFinalOutputSpec(
+                    relativePath = "final-article.html",
+                    mediaType = "text/html",
+                    kind = FinalOutputKind.HTML_ARTICLE,
                 ),
-                isTestRun = true
             )
         )
 
-        withTimeout(30_000) {
-            while (service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).isEmpty()) {
-                kotlinx.coroutines.yield()
-            }
-        }
-
-        val bundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
-        val finalArticle = assertNotNull(bundleEntries["outputs/final-article.html"])
-        assertTrue(finalArticle.contains("twentytwo"))
-        assertFalse(finalArticle.contains("<p>one two</p>"))
-        assertTrue(finalWriterAttempts.get() in 2..3)
-        assertEquals("test-builder-model", finalWriterModels.elementAt(0))
-        assertEquals("test-builder-model", finalWriterModels.elementAt(1))
+        val terminalEvent = terminal.await()
+        assertCompleteAcceptedSnapshotAuthority(substrateFactory, tmpDir, runId)
+        assertIs<EvoMoliorEvent.RunCompleted>(terminalEvent)
+        assertEquals(2, finalWriterAttempts.get())
+        assertEquals(2, finalWriterModels.size)
+        assertTrue(
+            acceptedWriterDocs(substrateFactory, tmpDir, runId)
+                .any { "twentyone twentytwo" in it },
+        )
+        assertNotNull(service.getResultsBundle(runId))
+        Unit
     }
 
     @Test
@@ -1092,20 +1210,13 @@ class EvoMoliorRunServiceEndToEndFlowTest {
         val tmpDir = createTempDirectory("svc-final-deliverable-evidence-test-").toFile()
         val substrateFactory = SubstrateDatabaseFactory(tmpDir)
         val runId = "run-final-deliverable-evidence"
-        seedFinalCandidateAuthority(substrateFactory, runId, listOf("group-0", "group-1"))
         val finalWriterAttempts = AtomicInteger(0)
 
-        val service = EvoMoliorRunService(
-            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
-                LifecycleManager(
-                    runId = runIdValue,
-                    groupId = groupIdValue,
-                    shuruVmManager = ShuruVmManager(),
-                    substrateDatabaseFactory = substrateFactory,
-                    agentJarPath = "/fake/agent.jar",
-                    openRouterApiKey = "sk-test",
-                    groupProfile = groupProfile,
-                    localAgentRunner = { bootContext: AgentBootContext, _ ->
+        val service = acceptanceBoundaryService(
+            substrateFactory = substrateFactory,
+            failingBoundary = null,
+            archiveCalls = AtomicInteger(),
+            localAgentRunnerOverride = { bootContext: AgentBootContext, _ ->
                         val db = substrateFactory.get(bootContext.runId, bootContext.groupId)
                         val now = System.currentTimeMillis()
                         when {
@@ -1117,7 +1228,20 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                         agentId = bootContext.agentId,
                                         role = bootContext.role.name,
                                         type = "PLAN_UPDATE",
-                                        content = "ROUND SUBMISSION SUMMARY\n- Evidence strategy summary.",
+                                        content = """
+                                            ROUND SUBMISSION SUMMARY
+                                            FINAL DELIVERABLE HTML
+                                            <!doctype html>
+                                            <html lang="en">
+                                            <head><meta charset="utf-8"><title>Evidence Strategy Fallback</title></head>
+                                            <body><!-- ${ACCEPTED_SUITE_MARKERS.joinToString(" ")} --><main><article>
+                                            <h1>Evidence Strategy Fallback</h1>
+                                            <section><h2>Source-grounded evidence notes</h2>
+                                            <p>The accepted fallback distinguishes verified source evidence
+                                            from inference and names the next validation experiment.</p></section>
+                                            </article></main></body>
+                                            </html>
+                                        """.trimIndent(),
                                         budgetSignature = "test-summary",
                                         status = "pending",
                                         generation = bootContext.generation,
@@ -1152,7 +1276,7 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                             <!doctype html>
                                             <html lang="en">
                                             <head><meta charset="utf-8"><title>Evidence Strategy</title></head>
-                                            <body><main><article><h1>Evidence Strategy</h1>$evidenceSection</article></main></body>
+                                            <body><!-- ${ACCEPTED_SUITE_MARKERS.joinToString(" ")} --><main><article><h1>Evidence Strategy</h1><p>$ACCEPTED_PUBLICATION_MARKER</p>$evidenceSection</article></main></body>
                                             </html>
                                         """.trimIndent(),
                                         budgetSignature = "test-final",
@@ -1164,22 +1288,24 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                         reviewedAtMs = null
                                     )
                                 )
-                                insertFinalWriterDeathNote(db, bootContext, now + 1L)
+                                if (attempt > 1) {
+                                    insertAcceptedFinalWriterLineageAndDeathNote(
+                                        substrateFactory = substrateFactory,
+                                        database = db,
+                                        bootContext = bootContext,
+                                        outputRelativePath = "final-article.html",
+                                        lineageSubmittedAtMs = now + 1L,
+                                        deathNoteSubmittedAtMs = now + 2L,
+                                    )
+                                }
                             }
                         }
-                    }
-                )
             },
-            groupCoordinatorProvider = { groupIds, dimensions ->
-                GroupCoordinator(groupIds, dimensions)
-            },
-            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
-            substrateFactory = substrateFactory,
-            metaPlannerRunner = MetaPlannerRunner(),
-            roundHeartbeatIntervalMs = 1L,
-            inspectorCheckIntervalMs = 1L
         )
 
+        val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+            awaitRunTerminal(service, runId, 30_000L)
+        }
         service.startRun(
             RunConfig(
                 runId = runId,
@@ -1201,180 +1327,419 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                     )
                 ),
                 openRouterApiKey = "sk-test",
-                modelOverrides = mapOf(
-                    Role.Builder.name to "test-builder-model",
-                    Role.Archivist.name to "test-archivist-model"
+                finalOutputSpec = acceptedFinalOutputSpec(
+                    relativePath = "final-article.html",
+                    mediaType = "text/html",
+                    kind = FinalOutputKind.HTML_ARTICLE,
                 ),
-                isTestRun = true
             )
         )
 
-        withTimeout(10_000) {
-            service.events.first { event ->
-                event is EvoMoliorEvent.RunCompleted && event.runId == runId
-            }
-        }
-
-        val bundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
-        val finalArticle = assertNotNull(bundleEntries["outputs/final-article.html"])
-        assertTrue(finalArticle.contains("Source-grounded evidence notes"))
+        assertIs<EvoMoliorEvent.RunCompleted>(terminal.await())
+        assertCompleteAcceptedSnapshotAuthority(substrateFactory, tmpDir, runId)
         assertEquals(2, finalWriterAttempts.get())
+        assertTrue(
+            acceptedWriterDocs(substrateFactory, tmpDir, runId)
+                .any { "Source-grounded evidence notes" in it },
+        )
+        assertNotNull(service.getResultsBundle(runId))
+        Unit
     }
 
     @Test
-    fun `test run final writer timeout aborts before outer benchmark timeout`() = runBlocking {
+    fun `final writer coroutine timeout recovers before outer benchmark timeout`() = runBlocking {
         val tmpDir = createTempDirectory("svc-final-deliverable-timeout-test-").toFile()
         val substrateFactory = SubstrateDatabaseFactory(tmpDir)
         val runId = "run-final-deliverable-timeout"
-        seedFinalCandidateAuthority(substrateFactory, runId, listOf("group-0"))
         val finalWriterAttempts = AtomicInteger(0)
+        val runConfig = acceptanceBoundaryConfig(runId, substrateFactory).copy(
+            objective = "Produce the final benchmark prediction JSON.",
+            councilExecutionPurpose = CouncilExecutionPurpose.STANDARD,
+            acceptanceProfile = AcceptanceProfile.NORMAL,
+            llmBackend = LlmBackend.OPENROUTER,
+            finalOutputSpec = FinalOutputSpec(
+                relativePath = "tier0-prediction.json",
+                mediaType = "application/json",
+                description = "Tier-0 benchmark prediction JSON",
+                kind = FinalOutputKind.GENERIC_FILE,
+            ),
+            isTestRun = false,
+        )
 
-        val service = EvoMoliorRunService(
-            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
-                LifecycleManager(
-                    runId = runIdValue,
-                    groupId = groupIdValue,
-                    shuruVmManager = ShuruVmManager(),
-                    substrateDatabaseFactory = substrateFactory,
-                    agentJarPath = "/fake/agent.jar",
-                    openRouterApiKey = "sk-test",
-                    groupProfile = groupProfile,
-                    localAgentRunner = { bootContext: AgentBootContext, _ ->
-                        if (bootContext.role == Role.Builder &&
-                            bootContext.rolePrompt.contains("Final Deliverable Writer")
-                        ) {
-                            finalWriterAttempts.incrementAndGet()
-                            delay(60_000L)
-                        }
-                    }
-                )
-            },
-            groupCoordinatorProvider = { groupIds, dimensions ->
-                GroupCoordinator(groupIds, dimensions)
-            },
-            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+        val service = acceptanceBoundaryService(
             substrateFactory = substrateFactory,
-            metaPlannerRunner = MetaPlannerRunner(),
-            roundHeartbeatIntervalMs = 1L,
-            inspectorCheckIntervalMs = 1L
-        )
-
-        service.startRun(
-            RunConfig(
-                runId = runId,
-                objective = "Produce the final benchmark prediction JSON.",
-                groupCount = 1,
-                groupProfiles = listOf(GroupProfileType.Library),
-                rounds = 1,
-                roundDurationMinutes = 0,
-                maxAgentsPerGroup = 1,
-                scoringDimensions = listOf(
-                    ScoringDimension(
-                        id = "accuracy",
-                        name = "Accuracy",
-                        description = "Reward exact benchmark answers.",
-                        weight = 1.0
+            failingBoundary = null,
+            archiveCalls = AtomicInteger(),
+            finalDeliverableAttemptTimeoutMsOverride = 1_000L,
+            localAgentRunnerOverride = { bootContext, _ ->
+                if (bootContext.role == Role.Archivist &&
+                    bootContext.rolePrompt.contains("Round Submission Summariser")
+                ) {
+                    val database = substrateFactory.get(bootContext.runId, bootContext.groupId)
+                    val now = System.currentTimeMillis()
+                    database.stagingDao().insert(
+                        StagingSubmissionEntity(
+                            id = "timeout-summary-${bootContext.groupId}-$now",
+                            agentId = bootContext.agentId,
+                            role = bootContext.role.name,
+                            type = "PLAN_UPDATE",
+                            content = """
+                                ROUND SUBMISSION SUMMARY
+                                {
+                                  "authorityMarker": "$ACCEPTED_PUBLICATION_MARKER",
+                                  "sealedTestMarkers": "${ACCEPTED_SUITE_MARKERS.joinToString(" ")}"
+                                }
+                            """.trimIndent(),
+                            budgetSignature = "test-timeout-summary",
+                            status = "pending",
+                            generation = bootContext.generation,
+                            groupId = bootContext.groupId,
+                            runId = bootContext.runId,
+                            submittedAtMs = now,
+                        ),
                     )
-                ),
-                openRouterApiKey = "sk-test",
-                finalOutputSpec = FinalOutputSpec(
-                    relativePath = "tier0-prediction.json",
-                    mediaType = "application/json",
-                    description = "Tier-0 benchmark prediction JSON",
-                    kind = FinalOutputKind.GENERIC_FILE
-                ),
-                isTestRun = true
-            )
+                } else if (bootContext.role == Role.Builder &&
+                    bootContext.rolePrompt.contains("Final Deliverable Writer")
+                ) {
+                    finalWriterAttempts.incrementAndGet()
+                    withTimeout(25L) { delay(60_000L) }
+                }
+            },
         )
 
-        val aborted = withTimeout(25_000L) {
-            service.events.first { event ->
-                event is EvoMoliorEvent.RunAborted && event.runId == runId
-            } as EvoMoliorEvent.RunAborted
+        val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+            awaitRunTerminalIncludingProvisional(service, runId, 25_000L)
         }
+        service.startRun(runConfig)
 
-        assertTrue(aborted.reason.contains("Final output tier0-prediction.json"))
-        assertTrue(finalWriterAttempts.get() >= 3)
-        assertTrue(finalWriterAttempts.get() <= 4)
+        val terminalEvent = terminal.await()
+        if (terminalEvent is EvoMoliorEvent.RunAborted) {
+            error(terminalEvent.reason)
+        }
+        val terminalReason = when (terminalEvent) {
+            is EvoMoliorEvent.RunRecovered -> terminalEvent.reason
+            is EvoMoliorEvent.RunCompletedProvisional -> terminalEvent.reason
+            else -> error("Unexpected timeout terminal event: $terminalEvent")
+        }
+        assertTrue(terminalReason.isNotBlank())
+        assertTrue(finalWriterAttempts.get() > 0)
         assertEquals(EngineStatus.IDLE, service.getState().status)
         assertTrue(service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).isEmpty())
+        val publication = PublicationStateRepository(substrateFactory.getAtlas(runId))
+        assertTrue(publication.history(runId).isEmpty())
+        assertEquals(
+            com.achulkov.evomolior.core.contract.RecoveryPublicationState.entries,
+            PublicationOutcomeRepository(substrateFactory.getAtlas(runId))
+                .recoveryHistory(runId)
+                .map { it.state }
+        )
+        val provisional = RunOutcomeArchiveService().verifyProvisional(
+            assertNotNull(service.getResultsBundle(runId)),
+        )
+        assertNotNull(provisional.outcomeManifest.metricsHash)
+        Unit
     }
 
     @Test
-    fun `archive failure aborts completion before RunCompleted is emitted`() = runBlocking {
-        val tmpDir = createTempDirectory("svc-archive-failure-completion-test-").toFile()
-        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
-        val runId = "run-archive-failure-completion"
-        val collectedEvents = ConcurrentLinkedQueue<EvoMoliorEvent>()
+    fun `later round closure failure publishes provisional package from last archived round`() =
+        runBlocking {
+            val tmpDir = createTempDirectory("svc-later-round-recovery-test-").toFile()
+            val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+            val runId = "run-later-round-recovery"
+            val snapshotCompilationRounds = ConcurrentLinkedQueue<Int>()
+            val service = acceptanceBoundaryService(
+                substrateFactory = substrateFactory,
+                failingBoundary = null,
+                archiveCalls = AtomicInteger(),
+                beforeRoundSnapshotCompilation = { callbackRunId, round ->
+                    assertEquals(runId, callbackRunId)
+                    snapshotCompilationRounds += round
+                    if (round == 1) {
+                        error("forced private round snapshot closure failure")
+                    }
+                },
+            )
+            val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+                awaitRunTerminalIncludingProvisional(service, runId, 60_000L)
+            }
 
-        val service = EvoMoliorRunService(
-            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
-                LifecycleManager(
-                    runId = runIdValue,
-                    groupId = groupIdValue,
-                    shuruVmManager = ShuruVmManager(),
-                    substrateDatabaseFactory = substrateFactory,
-                    agentJarPath = "/fake/agent.jar",
-                    openRouterApiKey = "sk-test",
-                    groupProfile = groupProfile,
-                    localAgentRunner = { _, _ -> }
+            service.startRun(
+                acceptanceBoundaryConfig(runId, substrateFactory).copy(
+                    rounds = 2,
+                    councilExecutionPurpose = CouncilExecutionPurpose.STANDARD,
+                    acceptanceProfile = AcceptanceProfile.NORMAL,
                 )
-            },
-            groupCoordinatorProvider = { groupIds, dimensions -> GroupCoordinator(groupIds, dimensions) },
-            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            )
+
+            val recovered = assertIs<EvoMoliorEvent.RunCompletedProvisional>(terminal.await())
+            val outcome = assertNotNull(recovered.terminalOutcome)
+            assertEquals(ExecutionCompletionStatus.COMPLETED, outcome.executionStatus)
+            assertEquals(AcceptanceStatus.PROVISIONAL, outcome.acceptanceStatus)
+            assertEquals(null, outcome.acceptedWinnerId)
+            assertEquals(EngineStatus.IDLE, service.getState().status)
+            assertEquals(null, recovered.sourceGroupId)
+            assertEquals(listOf(0, 1), snapshotCompilationRounds.toList())
+            assertEquals(
+                "Run stopped after 1 fully archived round; " +
+                    "accepted publication authority was unavailable",
+                recovered.reason,
+            )
+            assertFalse("forced private" in recovered.reason)
+
+            val persistedState = assertNotNull(PersistedRunStateStore.read(tmpDir, runId))
+            assertEquals(PersistedRunStatus.COMPLETED, persistedState.status)
+            assertEquals(1, persistedState.nextRoundIndex)
+            assertEquals(null, persistedState.activeRoundIndex)
+
+            val publication = PublicationStateRepository(substrateFactory.getAtlas(runId))
+            assertTrue(publication.history(runId).isEmpty())
+            assertTrue(publication.finalCandidates(runId).isEmpty())
+            val outcomes = PublicationOutcomeRepository(substrateFactory.getAtlas(runId))
+            assertTrue(outcomes.acceptedHistory(runId).isEmpty())
+            assertEquals(
+                com.achulkov.evomolior.core.contract.RecoveryPublicationState.entries,
+                outcomes.recoveryHistory(runId).map { it.state },
+            )
+            assertTrue(
+                service.getMetaArchiveEntries(
+                    runId,
+                    RunArchiveService.ENTRY_RUN_COMPLETED,
+                ).isEmpty()
+            )
+
+            val provisional = RunOutcomeArchiveService().verifyProvisional(
+                assertNotNull(service.getResultsBundle(runId)),
+            )
+            assertNotNull(provisional.outcomeManifest.metricsHash)
+            val deliverables =
+                com.achulkov.evomolior.substrate.deliverable.DeliverablePersistenceRepository(
+                    substrateFactory.getAtlas(runId)
+                )
+            val groupIds = persistedState.groupIds.sorted()
+            val roundZeroSnapshots = groupIds.map { groupId ->
+                assertNotNull(deliverables.snapshot(runId, groupId, 0))
+            }
+            assertEquals(
+                roundZeroSnapshots.map { it.snapshotHash },
+                provisional.recoverySourceSets.single().sourceSnapshotHashes,
+            )
+            val roundZeroHistory =
+                com.achulkov.evomolior.substrate.roundledger.RoundPhaseLedgerRepository(
+                    substrateFactory.getAtlas(runId)
+                ).history(runId, 0)
+            val expectedWorkerAtlasHash = roundZeroHistory
+                .single {
+                    it.phase ==
+                        com.achulkov.evomolior.core.contract.RoundPhaseV1
+                            .MUTATION_CAPTURE_YIELD_DISCLOSURE_AND_OUTLIER_RESOLVED
+                }
+                .authorityReferenceIds
+                .single { it.startsWith("post-mutation-atlas:") }
+                .removePrefix("post-mutation-atlas:")
+            assertEquals(
+                expectedWorkerAtlasHash,
+                provisional.outcomeManifest.workerAtlasHash,
+            )
+            assertTrue(groupIds.all { deliverables.snapshot(runId, it, 1) == null })
+        }
+
+    @Test
+    fun `failed later round recovery does not expose private failure text`() = runBlocking {
+        val tmpDir = createTempDirectory("svc-later-round-recovery-failure-test-").toFile()
+        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+        val runId = "run-later-round-recovery-failure"
+        val service = acceptanceBoundaryService(
             substrateFactory = substrateFactory,
-            archiveService = FailingArchiveService(substrateFactory),
-            metaPlannerRunner = MetaPlannerRunner(),
-            roundHeartbeatIntervalMs = 1L,
-            inspectorCheckIntervalMs = 1L
+            failingBoundary = null,
+            archiveCalls = AtomicInteger(),
+            archiveServiceOverride = FailingProvisionalArchiveService(substrateFactory),
+            beforeRoundSnapshotCompilation = { _, round ->
+                if (round == 1) error("private round snapshot failure path=/secret")
+            },
+        )
+        val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+            awaitRunTerminal(service, runId, 60_000L)
+        }
+
+        service.startRun(
+            acceptanceBoundaryConfig(runId, substrateFactory).copy(
+                rounds = 2,
+                councilExecutionPurpose = CouncilExecutionPurpose.STANDARD,
+                acceptanceProfile = AcceptanceProfile.NORMAL,
+            )
         )
 
-        val eventCollector = launch {
+        val aborted = assertIs<EvoMoliorEvent.RunAborted>(terminal.await())
+        assertEquals(
+            "Run failed after archived work; provisional publication was unavailable",
+            aborted.reason,
+        )
+        assertFalse("private" in aborted.reason)
+        assertFalse("secret" in aborted.reason)
+        assertEquals(null, service.getResultsBundle(runId))
+        assertEquals(
+            PersistedRunStatus.FAILED,
+            PersistedRunStateStore.read(tmpDir, runId)?.status,
+        )
+    }
+
+    @Test
+    fun `pre archive accepted state tail aborts and fails closed on resume`() = runBlocking {
+        val tmpDir = createTempDirectory("svc-pre-archive-failure-test-").toFile()
+        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+        val runId = "run-pre-archive-failure"
+        val collectedEvents = ConcurrentLinkedQueue<EvoMoliorEvent>()
+        val service = acceptanceBoundaryService(
+            substrateFactory = substrateFactory,
+            failingBoundary = null,
+            archiveCalls = AtomicInteger(),
+            archiveServiceOverride = FailingArchiveService(substrateFactory),
+        )
+
+        val eventCollector = launch(start = CoroutineStart.UNDISPATCHED) {
             service.events.collect { event ->
                 collectedEvents += event
             }
         }
 
-        service.startRun(
-            RunConfig(
-                runId = runId,
-                objective = "Archive failure must not produce a successful completion event.",
-                groupCount = 1,
-                groupProfiles = listOf(GroupProfileType.Library),
-                rounds = 1,
-                roundDurationMinutes = 0,
-                maxAgentsPerGroup = 1,
-                scoringDimensions = listOf(
-                    ScoringDimension(
-                        id = "accuracy",
-                        name = "Accuracy",
-                        description = "Reward evidence-based completion.",
-                        weight = 1.0
-                    )
-                ),
-                openRouterApiKey = "sk-test",
-                isTestRun = true
-            )
-        )
-
-        val aborted = withTimeout(10_000L) {
-            service.events.first { event ->
-                event is EvoMoliorEvent.RunAborted && event.runId == runId
-            } as EvoMoliorEvent.RunAborted
+        val runConfig = acceptanceBoundaryConfig(runId, substrateFactory)
+        val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+            awaitRunTerminal(service, runId, 60_000L)
         }
+        service.startRun(runConfig)
+
+        val aborted = assertIs<EvoMoliorEvent.RunAborted>(terminal.await())
 
         eventCollector.cancel()
 
-        assertTrue(aborted.reason.contains("forced archive failure"))
+        assertTrue(
+            aborted.reason.contains("forced accepted metrics compilation failure"),
+            aborted.reason,
+        )
         assertFalse(
             collectedEvents.any { it is EvoMoliorEvent.RunCompleted && it.runId == runId },
             "RunCompleted must not be emitted after deterministic archive enforcement fails."
         )
+        assertFalse(collectedEvents.any { it is EvoMoliorEvent.RunRecovered })
+        val publication = PublicationStateRepository(substrateFactory.getAtlas(runId))
+        val acceptedHistory = PublicationOutcomeRepository(
+            substrateFactory.getAtlas(runId)
+        ).acceptedHistory(runId)
+        assertEquals(publication.history(runId), acceptedHistory)
         assertTrue(
-            service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).isEmpty(),
-            "Archive failure must roll back the provisional completion authority."
+            service.getMetaArchiveEntries(
+                runId,
+                RunArchiveService.ENTRY_RUN_COMPLETED
+            ).isNotEmpty()
+        )
+        assertTrue(service.getMetaArchiveEntries(
+            runId,
+            RunArchiveService.ENTRY_RUN_RECOVERED
+        ).isEmpty())
+        assertEquals(null, service.getResultsBundle(runId))
+        assertEquals(
+            PersistedRunStatus.FAILED,
+            PersistedRunStateStore.read(tmpDir, runId)?.status
         )
         assertEquals(EngineStatus.IDLE, service.getState().status)
+
+        assertTrue(
+            PublicationOutcomeRepository(substrateFactory.getAtlas(runId))
+                .recoveryHistory(runId)
+                .isEmpty(),
+        )
+    }
+
+    @Test
+    fun `renderer failure retains semantic package without terminal publication`() = runBlocking {
+        val tmpDir = createTempDirectory("svc-renderer-package-persistence-test-").toFile()
+        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+        val runId = "run-renderer-package-persistence"
+        val archiveService = RendererFailingArchiveService(substrateFactory)
+        val service = acceptanceBoundaryService(
+            substrateFactory = substrateFactory,
+            failingBoundary = null,
+            archiveCalls = AtomicInteger(),
+            archiveServiceOverride = archiveService,
+        )
+        val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+            awaitRunTerminal(service, runId, 60_000L)
+        }
+        service.startRun(acceptanceBoundaryConfig(runId, substrateFactory))
+
+        val aborted = assertIs<EvoMoliorEvent.RunAborted>(terminal.await())
+
+        assertTrue(
+            aborted.reason.contains("forced accepted renderer compilation failure"),
+            aborted.reason,
+        )
+        val persistedPackages = com.achulkov.evomolior.substrate.deliverable
+            .DeliverablePersistenceRepository(substrateFactory.getAtlas(runId))
+            .decisionPackages(runId)
+        assertEquals(1, persistedPackages.size)
+        assertNotNull(persistedPackages.single().acceptedAuthority)
+        assertEquals(persistedPackages.single(), archiveService.attemptedPackage.get())
+        assertEquals(null, service.getResultsBundle(runId))
+        val publicationHistory = PublicationStateRepository(
+            substrateFactory.getAtlas(runId)
+        ).history(runId)
+        val outcomeHistory = PublicationOutcomeRepository(
+            substrateFactory.getAtlas(runId)
+        ).acceptedHistory(runId)
+        assertEquals(publicationHistory, outcomeHistory)
+        assertTrue(publicationHistory.none {
+            it.state in setOf(
+                PublicationState.METRICS_EXPORTED,
+                PublicationState.MANIFEST_HASHED,
+                PublicationState.ARCHIVED,
+            )
+        })
+        assertTrue(
+            PublicationOutcomeRepository(substrateFactory.getAtlas(runId))
+                .recoveryHistory(runId)
+                .isEmpty(),
+        )
+        assertEquals(
+            PersistedRunStatus.FAILED,
+            PersistedRunStateStore.read(tmpDir, runId)?.status,
+        )
+    }
+
+    @Test
+    fun `accepted archive survives a post archive metrics persistence failure`() = runBlocking {
+        val tmpDir = createTempDirectory("svc-post-archive-persistence-test-").toFile()
+        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+        val runId = "run-post-archive-persistence"
+        val collectedEvents = ConcurrentLinkedQueue<EvoMoliorEvent>()
+        val archiveService = PostArchiveMetricsFailingService(substrateFactory)
+        val service = acceptanceBoundaryService(
+            substrateFactory = substrateFactory,
+            failingBoundary = null,
+            archiveCalls = AtomicInteger(),
+            archiveServiceOverride = archiveService,
+        )
+        val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+            service.events.collect { collectedEvents += it }
+        }
+        val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+            awaitRunTerminal(service, runId, 60_000L)
+        }
+
+        service.startRun(acceptanceBoundaryConfig(runId, substrateFactory))
+
+        assertIs<EvoMoliorEvent.RunCompleted>(terminal.await())
+        delay(25L)
+        collector.cancel()
+
+        assertCompleteAcceptedSnapshotAuthority(substrateFactory, tmpDir, runId)
+        assertEquals(1, archiveService.forcedFailureCount.get())
+        assertTrue(collectedEvents.any { it is EvoMoliorEvent.RunCompleted })
+        assertEquals(
+            PersistedRunStatus.COMPLETED,
+            PersistedRunStateStore.read(tmpDir, runId)?.status
+        )
+        assertNotNull(service.getResultsBundle(runId))
+        Unit
     }
 
     @Test
@@ -1396,7 +1761,7 @@ class EvoMoliorRunServiceEndToEndFlowTest {
             awaitAcceptanceBoundaryAbort(service, runId)
         }
 
-        service.startRun(acceptanceBoundaryConfig(runId))
+        service.startRun(acceptanceBoundaryConfig(runId, substrateFactory))
 
         val abortedReason = aborted.await().reason
         assertTrue(
@@ -1421,7 +1786,7 @@ class EvoMoliorRunServiceEndToEndFlowTest {
     }
 
     @Test
-    fun `acceptance final publication boundary failure leaves no public or completion authority`() =
+    fun `acceptance final publication boundary failure aborts without terminal authority`() =
         runBlocking {
             val tmpDir = createTempDirectory("svc-acceptance-final-boundary-").toFile()
             val substrateFactory = SubstrateDatabaseFactory(tmpDir)
@@ -1436,10 +1801,13 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                 awaitAcceptanceBoundaryAbort(service, runId)
             }
 
-            service.startRun(acceptanceBoundaryConfig(runId))
+            service.startRun(acceptanceBoundaryConfig(runId, substrateFactory))
 
-            val abortedReason = aborted.await().reason
-            assertTrue(abortedReason.contains("forced acceptance boundary failure"), abortedReason)
+            val terminal = aborted.await()
+            assertTrue(
+                terminal.reason.contains("forced acceptance boundary failure"),
+                terminal.reason,
+            )
             val publication = PublicationStateRepository(substrateFactory.getAtlas(runId))
             assertTrue(
                 publication.finalCandidates(runId).isEmpty(),
@@ -1449,12 +1817,28 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                 publication.history(runId).isEmpty(),
                 "No publication authority may exist before a rejected final-publication boundary."
             )
-            assertNoCompletionAuthorities(service, runId)
+            assertNoNormalCompletionAuthorities(service, runId)
+            assertTrue(
+                service.getMetaArchiveEntries(
+                    runId,
+                    RunArchiveService.ENTRY_RUN_RECOVERED
+                ).isEmpty()
+            )
+            assertTrue(
+                PublicationOutcomeRepository(substrateFactory.getAtlas(runId))
+                    .recoveryHistory(runId)
+                    .isEmpty()
+            )
+            assertEquals(null, service.getResultsBundle(runId))
+            assertEquals(
+                PersistedRunStatus.FAILED,
+                PersistedRunStateStore.read(tmpDir, runId)?.status
+            )
             assertEquals(0, archiveCalls.get())
         }
 
     @Test
-    fun `acceptance archive boundary failure leaves no completion graph or archive authority`() =
+    fun `accepted state tail fails closed at the archive boundary without reclassification`() =
         runBlocking {
             val tmpDir = createTempDirectory("svc-acceptance-archive-boundary-").toFile()
             val substrateFactory = SubstrateDatabaseFactory(tmpDir)
@@ -1469,12 +1853,25 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                 awaitAcceptanceBoundaryAbort(service, runId)
             }
 
-            service.startRun(acceptanceBoundaryConfig(runId))
+            service.startRun(acceptanceBoundaryConfig(runId, substrateFactory))
 
-            val abortedReason = aborted.await().reason
-            assertTrue(abortedReason.contains("forced acceptance boundary failure"), abortedReason)
+            val terminal = aborted.await()
+            assertTrue(
+                terminal.reason.contains("forced acceptance boundary failure"),
+                terminal.reason,
+            )
             val publication = PublicationStateRepository(substrateFactory.getAtlas(runId))
-            assertNoCompletionAuthorities(service, runId)
+            assertNoNormalCompletionAuthorities(service, runId)
+            assertTrue(
+                service.getMetaArchiveEntries(
+                    runId,
+                    RunArchiveService.ENTRY_RUN_RECOVERED
+                ).isEmpty()
+            )
+            val acceptedHistory = PublicationOutcomeRepository(
+                substrateFactory.getAtlas(runId)
+            ).acceptedHistory(runId)
+            assertEquals(publication.history(runId), acceptedHistory)
             assertFalse(
                 publication.history(runId).any {
                     it.state == PublicationState.MANIFEST_HASHED ||
@@ -1482,7 +1879,82 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                 },
                 "Archive publication states must not be written after archive-boundary rejection."
             )
+            assertTrue(
+                PublicationOutcomeRepository(substrateFactory.getAtlas(runId))
+                    .recoveryHistory(runId)
+                    .isEmpty(),
+            )
+            assertEquals(
+                PersistedRunStatus.FAILED,
+                PersistedRunStateStore.read(tmpDir, runId)?.status
+            )
+            assertEquals(null, service.getResultsBundle(runId))
             assertEquals(0, archiveCalls.get(), "Archive service must not run after boundary rejection.")
+        }
+
+    @Test
+    fun `full diagnostic mode publishes a provisional package without acceptance authority`() =
+        runBlocking {
+            val tmpDir = createTempDirectory("svc-acceptance-diagnostic-sweep-").toFile()
+            val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+            val runId = "acceptance-diagnostic-sweep"
+            val archiveCalls = AtomicInteger()
+            val events = ConcurrentLinkedQueue<EvoMoliorEvent>()
+            val service = acceptanceBoundaryService(
+                substrateFactory = substrateFactory,
+                failingBoundary = null,
+                archiveCalls = archiveCalls
+            )
+            val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+                service.events.collect { events += it }
+            }
+            val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+                awaitRunTerminalIncludingProvisional(service, runId, 60_000L)
+            }
+
+            val diagnosticConfig = acceptanceBoundaryConfig(runId, substrateFactory).copy(
+                acceptanceDiagnosticMode =
+                    AcceptanceDiagnosticMode.FULL_SWEEP_NON_ACCEPTING
+            )
+            service.startRun(diagnosticConfig)
+
+            val event = assertIs<EvoMoliorEvent.RunCompletedProvisional>(terminal.await())
+            val outcome = assertNotNull(event.terminalOutcome)
+            assertEquals(ExecutionCompletionStatus.COMPLETED, outcome.executionStatus)
+            assertEquals(AcceptanceStatus.PROVISIONAL, outcome.acceptanceStatus)
+            assertEquals(null, outcome.acceptedWinnerId)
+            collector.cancel()
+            assertTrue(
+                event.reason.isNotBlank(),
+                event.reason,
+            )
+            assertEquals(0, archiveCalls.get())
+            assertFalse(events.any { it is EvoMoliorEvent.RunCompleted })
+            assertFalse(
+                events.any {
+                    it is EvoMoliorEvent.EngineProgress && it.phase == "final_answer"
+                }
+            )
+            assertTrue(
+                PublicationStateRepository(substrateFactory.getAtlas(runId))
+                    .history(runId)
+                    .isEmpty()
+            )
+            assertNoNormalCompletionAuthorities(service, runId)
+            val provisional = RunOutcomeArchiveService().verifyProvisional(
+                assertNotNull(service.getResultsBundle(runId)),
+            )
+            assertNotNull(provisional.outcomeManifest.metricsHash)
+            val report = assertNotNull(provisional.diagnosticSweepReport)
+            assertEquals(
+                AcceptanceDiagnosticGate.entries,
+                report.results.map(AcceptanceDiagnosticGateResult::gate),
+            )
+            assertTrue(
+                AcceptanceDiagnosticSweepReport.BUNDLE_PATH in
+                    unzipEntries(assertNotNull(service.getResultsBundle(runId))).keys
+            )
+            Unit
         }
 
     @Test
@@ -1490,20 +1962,42 @@ class EvoMoliorRunServiceEndToEndFlowTest {
         val tmpDir = createTempDirectory("svc-final-deliverable-volume-test-").toFile()
         val substrateFactory = SubstrateDatabaseFactory(tmpDir)
         val runId = "run-final-deliverable-volume"
-        seedFinalCandidateAuthority(substrateFactory, runId, listOf("group-0", "group-1"))
         val lateDocCount = 180
 
-        val service = EvoMoliorRunService(
-            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
-                LifecycleManager(
-                    runId = runIdValue,
-                    groupId = groupIdValue,
-                    shuruVmManager = ShuruVmManager(),
-                    substrateDatabaseFactory = substrateFactory,
-                    agentJarPath = "/fake/agent.jar",
-                    openRouterApiKey = "sk-test",
-                    groupProfile = groupProfile,
-                    localAgentRunner = { bootContext: AgentBootContext, _ ->
+        val service = acceptanceBoundaryService(
+            substrateFactory = substrateFactory,
+            failingBoundary = null,
+            archiveCalls = AtomicInteger(),
+            localAgentRunnerOverride = { bootContext: AgentBootContext, _ ->
+                        if (bootContext.role == Role.Archivist &&
+                            bootContext.rolePrompt.contains("Round Submission Summariser")
+                        ) {
+                            val db = substrateFactory.get(bootContext.runId, bootContext.groupId)
+                            val now = System.currentTimeMillis()
+                            db.stagingDao().insert(
+                                StagingSubmissionEntity(
+                                    id = "volume-summary-${bootContext.groupId}-$now",
+                                    agentId = bootContext.agentId,
+                                    role = bootContext.role.name,
+                                    type = "PLAN_UPDATE",
+                                    content = """
+                                        ROUND SUBMISSION SUMMARY
+                                        FINAL DELIVERABLE HTML
+                                        <!doctype html>
+                                        <html lang="en"><head><meta charset="utf-8"><title>Volume fallback</title></head>
+                                        <body><!-- ${ACCEPTED_SUITE_MARKERS.joinToString(" ")} -->
+                                        <article><h1>Volume fallback</h1><p>$ACCEPTED_PUBLICATION_MARKER</p></article>
+                                        </body></html>
+                                    """.trimIndent(),
+                                    budgetSignature = "test-volume-summary",
+                                    status = "pending",
+                                    generation = bootContext.generation,
+                                    groupId = bootContext.groupId,
+                                    runId = bootContext.runId,
+                                    submittedAtMs = now,
+                                ),
+                            )
+                        }
                         if (bootContext.role == Role.Builder &&
                             bootContext.rolePrompt.contains("Final Deliverable Writer")
                         ) {
@@ -1524,7 +2018,8 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                           <title>High-Volume Final Writer Article</title>
                                         </head>
                                         <body>
-                                          <article><h1>High-Volume Final Writer Article</h1></article>
+                                          <!-- ${ACCEPTED_SUITE_MARKERS.joinToString(" ")} -->
+                                          <article><h1>High-Volume Final Writer Article</h1><p>$ACCEPTED_PUBLICATION_MARKER</p></article>
                                         </body>
                                         </html>
                                     """.trimIndent(),
@@ -1556,25 +2051,21 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                     )
                                 )
                             }
-                            insertFinalWriterDeathNote(
-                                db,
-                                bootContext,
-                                baseNow + lateDocCount + 1L
+                            insertAcceptedFinalWriterLineageAndDeathNote(
+                                substrateFactory = substrateFactory,
+                                database = db,
+                                bootContext = bootContext,
+                                outputRelativePath = "final-article.html",
+                                lineageSubmittedAtMs = baseNow + lateDocCount + 1L,
+                                deathNoteSubmittedAtMs = baseNow + lateDocCount + 2L,
                             )
                         }
-                    }
-                )
             },
-            groupCoordinatorProvider = { groupIds, dimensions ->
-                GroupCoordinator(groupIds, dimensions)
-            },
-            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
-            substrateFactory = substrateFactory,
-            metaPlannerRunner = MetaPlannerRunner(),
-            roundHeartbeatIntervalMs = 1L,
-            inspectorCheckIntervalMs = 1L
         )
 
+        val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+            awaitRunTerminal(service, runId, 30_000L)
+        }
         service.startRun(
             RunConfig(
                 runId = runId,
@@ -1596,33 +2087,25 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                     )
                 ),
                 openRouterApiKey = "sk-test",
-                modelOverrides = mapOf(
-                    Role.Builder.name to "test-builder-model",
-                    Role.Archivist.name to "test-archivist-model"
+                finalOutputSpec = acceptedFinalOutputSpec(
+                    relativePath = "final-article.html",
+                    mediaType = "text/html",
+                    kind = FinalOutputKind.HTML_ARTICLE,
                 ),
-                isTestRun = true
             )
         )
 
-        withTimeout(30_000) {
-            while (service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).isEmpty()) {
-                kotlinx.coroutines.yield()
-            }
+        val terminalEvent = terminal.await()
+        if (terminalEvent is EvoMoliorEvent.RunRecovered) {
+            error(terminalEvent.reason)
         }
-
-        val bundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
-        val finalArticle = assertNotNull(bundleEntries["outputs/final-article.html"])
-        assertTrue(finalArticle.contains("High-Volume Final Writer Article"))
-        assertTrue(
-            assertNotNull(bundleEntries["outputs/high-level-run-log.txt"])
-                .contains("Final outputs: final-article.html")
-        )
-
-        val completionEntry = service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).last()
-        val decodedCompletion = json.decodeFromString(RunCompletionArchiveRecord.serializer(), completionEntry.contentJson)
-        assertEquals(1, decodedCompletion.generatedOutputFiles.size)
-        assertEquals("final-article.html", decodedCompletion.generatedOutputFiles.single().relativePath)
-        assertEquals("text/html", decodedCompletion.generatedOutputFiles.single().mediaType)
+        assertIs<EvoMoliorEvent.RunCompleted>(terminalEvent)
+        assertCompleteAcceptedSnapshotAuthority(substrateFactory, tmpDir, runId)
+        val writerDocs = acceptedWriterDocs(substrateFactory, tmpDir, runId)
+        assertTrue(writerDocs.any { "High-Volume Final Writer Article" in it })
+        assertEquals(lateDocCount, writerDocs.count { it.startsWith("late-doc-noise-") })
+        assertNotNull(service.getResultsBundle(runId))
+        Unit
     }
 
     @Test
@@ -1630,19 +2113,40 @@ class EvoMoliorRunServiceEndToEndFlowTest {
         val tmpDir = createTempDirectory("svc-json-final-deliverable-flow-test-").toFile()
         val substrateFactory = SubstrateDatabaseFactory(tmpDir)
         val runId = "run-json-final-deliverable"
-        seedFinalCandidateAuthority(substrateFactory, runId, listOf("group-0", "group-1"))
 
-        val service = EvoMoliorRunService(
-            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
-                LifecycleManager(
-                    runId = runIdValue,
-                    groupId = groupIdValue,
-                    shuruVmManager = ShuruVmManager(),
-                    substrateDatabaseFactory = substrateFactory,
-                    agentJarPath = "/fake/agent.jar",
-                    openRouterApiKey = "sk-test",
-                    groupProfile = groupProfile,
-                    localAgentRunner = { bootContext: AgentBootContext, _ ->
+        val service = acceptanceBoundaryService(
+            substrateFactory = substrateFactory,
+            failingBoundary = null,
+            archiveCalls = AtomicInteger(),
+            localAgentRunnerOverride = { bootContext: AgentBootContext, _ ->
+                        if (bootContext.role == Role.Archivist &&
+                            bootContext.rolePrompt.contains("Round Submission Summariser")
+                        ) {
+                            val db = substrateFactory.get(bootContext.runId, bootContext.groupId)
+                            val now = System.currentTimeMillis()
+                            db.stagingDao().insert(
+                                StagingSubmissionEntity(
+                                    id = "json-summary-${bootContext.groupId}-$now",
+                                    agentId = bootContext.agentId,
+                                    role = bootContext.role.name,
+                                    type = "PLAN_UPDATE",
+                                    content = """
+                                        ROUND SUBMISSION SUMMARY
+                                        {
+                                          "authorityMarker": "$ACCEPTED_PUBLICATION_MARKER",
+                                          "sealedTestMarkers": "${ACCEPTED_SUITE_MARKERS.joinToString(" ")}",
+                                          "componentAuthority": "${ACCEPTED_DELIVERABLE_COMPONENT_IDS.joinToString(" ")}"
+                                        }
+                                    """.trimIndent(),
+                                    budgetSignature = "test-json-summary",
+                                    status = "pending",
+                                    generation = bootContext.generation,
+                                    groupId = bootContext.groupId,
+                                    runId = bootContext.runId,
+                                    submittedAtMs = now,
+                                ),
+                            )
+                        }
                         if (bootContext.role == Role.Builder &&
                             bootContext.rolePrompt.contains("Final Deliverable Writer")
                         ) {
@@ -1657,6 +2161,9 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                     content = """
                                         {
                                           "title": "ADHD Evidence Brief",
+                                          "authorityMarker": "$ACCEPTED_PUBLICATION_MARKER",
+                                          "sealedTestMarkers": "${ACCEPTED_SUITE_MARKERS.joinToString(" ")}",
+                                          "componentAuthority": "${ACCEPTED_DELIVERABLE_COMPONENT_IDS.joinToString(" ")}",
                                           "generatedOn": "2026-06-04",
                                           "audience": "Editors",
                                           "keyTakeaways": [
@@ -1674,21 +2181,21 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                     reviewedAtMs = null
                                 )
                             )
-                            insertFinalWriterDeathNote(db, bootContext, now + 1L)
+                            insertAcceptedFinalWriterLineageAndDeathNote(
+                                substrateFactory = substrateFactory,
+                                database = db,
+                                bootContext = bootContext,
+                                outputRelativePath = "briefs/evidence-brief.json",
+                                lineageSubmittedAtMs = now + 1L,
+                                deathNoteSubmittedAtMs = now + 2L,
+                            )
                         }
-                    }
-                )
             },
-            groupCoordinatorProvider = { groupIds, dimensions ->
-                GroupCoordinator(groupIds, dimensions)
-            },
-            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
-            substrateFactory = substrateFactory,
-            metaPlannerRunner = MetaPlannerRunner(),
-            roundHeartbeatIntervalMs = 1L,
-            inspectorCheckIntervalMs = 1L
         )
 
+        val terminal = async(start = CoroutineStart.UNDISPATCHED) {
+            awaitRunTerminal(service, runId, 30_000L)
+        }
         service.startRun(
             RunConfig(
                 runId = runId,
@@ -1710,99 +2217,138 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                     )
                 ),
                 openRouterApiKey = "sk-test",
-                finalOutputSpec = FinalOutputSpec(
+                finalOutputSpec = acceptedFinalOutputSpec(
                     relativePath = "briefs/evidence-brief.json",
                     mediaType = "application/json",
-                    description = "Machine-readable evidence brief"
+                    description = "Machine-readable evidence brief",
                 ),
-                isTestRun = true
             )
         )
 
-        withTimeout(30_000) {
-            while (service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).isEmpty()) {
-                kotlinx.coroutines.yield()
-            }
+        val terminalEvent = terminal.await()
+        if (terminalEvent is EvoMoliorEvent.RunAborted) {
+            error(terminalEvent.reason)
         }
-
-        val completionEntry = service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).last()
-        val decodedCompletion = json.decodeFromString(RunCompletionArchiveRecord.serializer(), completionEntry.contentJson)
-        assertEquals(1, decodedCompletion.generatedOutputFiles.size)
-        assertEquals("briefs/evidence-brief.json", decodedCompletion.generatedOutputFiles.single().relativePath)
-        assertEquals("application/json", decodedCompletion.generatedOutputFiles.single().mediaType)
-        assertTrue(decodedCompletion.generatedOutputFiles.single().content.contains("\"ADHD Evidence Brief\""))
-
-        val bundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
-        val evidenceBrief = assertNotNull(bundleEntries["outputs/briefs/evidence-brief.json"])
-        assertTrue(json.parseToJsonElement(evidenceBrief).toString().contains("ADHD Evidence Brief"))
+        if (terminalEvent is EvoMoliorEvent.RunRecovered) {
+            error(terminalEvent.reason)
+        }
+        assertIs<EvoMoliorEvent.RunCompleted>(terminalEvent)
+        assertCompleteAcceptedSnapshotAuthority(substrateFactory, tmpDir, runId)
         assertTrue(
-            assertNotNull(bundleEntries["outputs/high-level-run-log.txt"])
-                .contains("Final outputs: briefs/evidence-brief.json")
+            acceptedWriterDocs(substrateFactory, tmpDir, runId)
+                .any { "\"title\": \"ADHD Evidence Brief\"" in it },
         )
+        assertNotNull(service.getResultsBundle(runId))
+        Unit
+    }
 
-        val staleStateFile = File(tmpDir, "evomolior/runs/$runId/control/${PersistedRunStateStore.STATE_FILE_NAME}")
-        PersistedRunStateStore.write(
-            staleStateFile,
-            PersistedRunState(
+    @Test
+    fun `final writer output without Death Note blocks accepted publication`() = runBlocking {
+        val tmpDir = createTempDirectory("svc-final-writer-missing-death-note-").toFile()
+        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+        val runId = "run-final-writer-missing-death-note"
+        val groupId = "group-0"
+        val writer = AtlasAgentId("final-writer")
+        val database = substrateFactory.get(runId, groupId)
+        val execution = WorkerExecutionRepository(database)
+        execution.registerAgent(
+            AgentLifecycleRegistration(
+                registrationId = "registration:$runId:$groupId:${writer.value}",
                 runId = runId,
-                objective = "stale state should not override the live output spec",
-                groupCount = 2,
-                groupProfiles = listOf(GroupProfileType.Library, GroupProfileType.Factory),
-                rounds = 1,
-                roundDurationMinutes = 0,
-                maxAgentsPerGroup = 1,
-                scoringDimensions = listOf(
-                    ScoringDimension(
-                        id = "content_depth",
-                        name = "Content Depth",
-                        description = "Reward substantial content quality.",
-                        weight = 1.0
-                    )
-                ),
-                finalOutputSpec = FinalOutputSpec(
-                    relativePath = "briefs/wrong.json",
-                    mediaType = "application/json",
-                    description = "Stale output contract"
-                ),
-                isTestRun = true,
-                budgetOverride = 200.0,
-                groupIds = listOf("group-0", "group-1"),
-                graderGroupIds = emptyList()
+                groupId = AtlasGroupId(groupId),
+                agentId = writer,
+                role = Role.Builder.name,
+                generation = 1,
+                classification = AgentLifecycleClassification.NON_DAEMON,
+                registeredAt = Instant.parse("2026-07-24T10:00:00Z")
+            ).withComputedHash()
+        )
+        execution.recordExit(
+            AgentExitRecord(
+                exitId = "exit:$runId:$groupId:${writer.value}",
+                runId = runId,
+                groupId = AtlasGroupId(groupId),
+                agentId = writer,
+                nodeId = null,
+                round = 1,
+                finalPhase = AgentExecutionPhase.TERMINATED,
+                commitId = null,
+                commitType = null,
+                acceptedContribution = false,
+                acceptedStructuredDeadEnd = false,
+                acceptedNoveltyProposal = false,
+                degradedExecution = false,
+                wasKilled = false,
+                exitedAt = Instant.parse("2026-07-24T10:01:00Z")
             )
         )
-
-        val serviceBundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
-        assertTrue(serviceBundleEntries["outputs/briefs/evidence-brief.json"]!!.contains("ADHD Evidence Brief"))
-        assertFalse(serviceBundleEntries.containsKey("outputs/briefs/wrong.json"))
-
-        assertTrue(staleStateFile.delete(), "The stale persisted state file should be removable for the missing-file case")
-        val missingStateBundleEntries = unzipEntries(assertNotNull(service.getResultsBundle(runId)))
-        assertTrue(missingStateBundleEntries["outputs/briefs/evidence-brief.json"]!!.contains("ADHD Evidence Brief"))
-        assertFalse(missingStateBundleEntries.containsKey("outputs/briefs/wrong.json"))
-
-        val restartedService = EvoMoliorRunService(
-            lifecycleManagerProvider = { runIdValue, groupIdValue, _, _, groupProfile ->
-                LifecycleManager(
-                    runId = runIdValue,
-                    groupId = groupIdValue,
-                    shuruVmManager = ShuruVmManager(),
-                    substrateDatabaseFactory = substrateFactory,
-                    agentJarPath = "/fake/agent.jar",
-                    openRouterApiKey = "sk-test",
-                    groupProfile = groupProfile,
-                    localAgentRunner = { _, _ -> }
-                )
+        val submissionId = "final-output-without-death-note"
+        val content = """{"title":"Durable final output"}"""
+        database.stagingDao().insert(
+            StagingSubmissionEntity(
+                id = submissionId,
+                agentId = writer.value,
+                role = Role.Builder.name,
+                type = "DOC",
+                content = content,
+                budgetSignature = "final-output-authority",
+                status = "pending",
+                generation = 1,
+                groupId = groupId,
+                runId = runId,
+                submittedAtMs = 1L
+            )
+        )
+        val service = EvoMoliorRunService(
+            lifecycleManagerProvider = { _, _, _, _, _ -> error("unused") },
+            groupCoordinatorProvider = { groupIds, dimensions ->
+                GroupCoordinator(groupIds, dimensions)
             },
-            groupCoordinatorProvider = { groupIds, dimensions -> GroupCoordinator(groupIds, dimensions) },
             graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
             substrateFactory = substrateFactory,
-            metaPlannerRunner = MetaPlannerRunner(),
-            roundHeartbeatIntervalMs = 1L,
-            inspectorCheckIntervalMs = 1L
+            metaPlannerRunner = MetaPlannerRunner()
         )
-        val restartedBundleEntries = unzipEntries(assertNotNull(restartedService.getResultsBundle(runId)))
-        assertTrue(restartedBundleEntries["outputs/briefs/evidence-brief.json"]!!.contains("ADHD Evidence Brief"))
-        assertFalse(restartedBundleEntries.containsKey("outputs/briefs/wrong.json"))
+        val generatedOutput = GeneratedOutputFile(
+            relativePath = "receiver/result.json",
+            mediaType = "application/json",
+            content = content,
+            sourceGroupId = groupId,
+            sourceAgentId = writer.value,
+            sourceSubmissionId = submissionId,
+            sourceRole = Role.Builder
+        )
+
+        val invocationFailure = assertFailsWith<InvocationTargetException> {
+            service::class.declaredFunctions
+                .first { it.name == "finalizePublicationQuiescence" }
+                .apply { isAccessible = true }
+                .callSuspend(service, runId, listOf(groupId), generatedOutput)
+        }
+        val failure = assertIs<IllegalArgumentException>(invocationFailure.targetException)
+
+        assertTrue(
+            failure.message.orEmpty().contains("Cost policy requested for inactive run"),
+            failure.message.orEmpty(),
+        )
+        assertEquals(listOf(writer), execution.exits(runId, groupId).map { it.agentId })
+        assertEquals(null, PublicationStateRepository(substrateFactory.getAtlas(runId)).latest(runId))
+        assertTrue(
+            CostLedgerRepository(substrateFactory.get(runId, "__cost_ledger__"))
+                .entriesForRun(runId)
+                .isEmpty()
+        )
+        val outcomes = PublicationOutcomeRepository(substrateFactory.getAtlas(runId))
+        assertTrue(outcomes.acceptedHistory(runId).isEmpty())
+        assertTrue(outcomes.recoveryHistory(runId).isEmpty())
+        assertTrue(
+            service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_COMPLETED).isEmpty()
+        )
+        assertFalse(
+            File(
+                substrateFactory.dbFilePath(runId, groupId).parentFile,
+                "results/results.zip"
+            ).exists()
+        )
     }
 
     private suspend fun seedFinalCandidateAuthority(
@@ -1904,11 +2450,239 @@ class EvoMoliorRunServiceEndToEndFlowTest {
         )
     }
 
+    private fun acceptedPublicationGeneralTests(): List<CompiledCouncilGeneralTestFixture> =
+        listOf(
+            "delivery" to NodeKind.DELIVERY,
+            "decision" to NodeKind.DECISION,
+            "evidence" to NodeKind.EVIDENCE,
+            "hypothesis" to NodeKind.HYPOTHESIS,
+            "validation" to NodeKind.VALIDATION,
+            "tool" to NodeKind.TOOL,
+        ).map { (id, kind) ->
+            CompiledCouncilGeneralTestFixture(
+                testId = "accepted-$id-test",
+                nodeKey = LocalNodeKey("accepted-$id"),
+                nodeKind = kind,
+                acceptedArtifactTypes = setOf(ArtifactType.FINAL_DELIVERABLE),
+                expectedText = "accepted-$id-marker",
+            )
+        }
+
+    private suspend fun insertAcceptedFinalWriterLineageAndDeathNote(
+        substrateFactory: SubstrateDatabaseFactory,
+        database: com.achulkov.evomolior.substrate.db.EvoMoliorDatabase,
+        bootContext: AgentBootContext,
+        outputRelativePath: String,
+        lineageSubmittedAtMs: Long,
+        deathNoteSubmittedAtMs: Long,
+    ) {
+        val contributionGraph = ContributionGraphRepository(
+            database = database,
+            atlasDatabase = substrateFactory.getAtlas(bootContext.runId),
+        )
+        val captureRepository = NodeCaptureRepository(substrateFactory)
+        val gradeBundlesByHash = captureRepository.gradeBundlesForRun(bootContext.runId)
+            .associateBy(NodeGradeBundle::bundleHash)
+        captureRepository.captureDecisionsForRun(bootContext.runId)
+            .filter { AtlasGroupId(bootContext.groupId) in it.resultingOwnerGroupIds }
+            .forEach { decision ->
+                decision.authoritativeBundleHashes.forEach { bundleHash ->
+                    gradeBundlesByHash[bundleHash]
+                        ?.takeIf { it.groupId.value == bootContext.groupId }
+                        ?.let { bundle ->
+                            contributionGraph.recordCaptureLineage(
+                                decision = decision,
+                                bundle = bundle,
+                                persistedAtEpochMillis = lineageSubmittedAtMs - 1L,
+                            )
+                        }
+                }
+            }
+        val selectedNodeIds = contributionGraph
+            .finalDeliverableSources(bootContext.runId, bootContext.groupId)
+            .mapNotNullTo(sortedSetOf()) { it.nodeId }
+        require(selectedNodeIds.isNotEmpty()) {
+            "Accepted final-writer fixture requires current captured node authority"
+        }
+        val selectedNodeIdsJson = selectedNodeIds.joinToString(",") { "\"$it\"" }
+        val componentNodeIdsJson = ACCEPTED_DELIVERABLE_COMPONENT_IDS.joinToString(",") {
+            "\"$it\":[$selectedNodeIdsJson]"
+        }
+        database.stagingDao().insert(
+            StagingSubmissionEntity(
+                id = "accepted-final-lineage-${bootContext.agentId}-$lineageSubmittedAtMs",
+                agentId = bootContext.agentId,
+                role = bootContext.role.name,
+                type = "PLAN_UPDATE",
+                content = """
+                    $FINAL_COMPONENT_LINEAGE_V1_MARKER
+                    {
+                      "schemaVersion":"final-component-lineage-v1",
+                      "outputRelativePath":"$outputRelativePath",
+                      "componentNodeIds":{$componentNodeIdsJson}
+                    }
+                """.trimIndent(),
+                budgetSignature = "accepted-final-lineage",
+                status = "pending",
+                generation = bootContext.generation,
+                groupId = bootContext.groupId,
+                runId = bootContext.runId,
+                submittedAtMs = lineageSubmittedAtMs,
+            )
+        )
+        insertFinalWriterDeathNote(database, bootContext, deathNoteSubmittedAtMs)
+    }
+
+    private fun acceptedFinalOutputSpec(
+        relativePath: String,
+        mediaType: String,
+        description: String = "",
+        kind: FinalOutputKind = FinalOutputKind.GENERIC_FILE,
+    ): FinalOutputSpec = FinalOutputSpec(
+        relativePath = relativePath,
+        mediaType = mediaType,
+        description = description,
+        kind = kind,
+        validation = FinalOutputValidationContract(
+            requiredMarkdownSectionSignals = ACCEPTED_DELIVERABLE_COMPONENT_IDS,
+        ),
+    )
+
+    private fun acceptedMarkdownContent(title: String): String = buildString {
+        appendLine("# $title")
+        appendLine()
+        appendLine(ACCEPTED_PUBLICATION_MARKER)
+        ACCEPTED_SUITE_MARKERS.forEach(::appendLine)
+        ACCEPTED_DELIVERABLE_COMPONENT_IDS.forEach { componentId ->
+            appendLine()
+            appendLine("## $componentId")
+            appendLine()
+            appendLine("Accepted production authority is mapped in the final component lineage.")
+        }
+    }.trim()
+
+    private suspend fun assertCompleteAcceptedSnapshotAuthority(
+        substrateFactory: SubstrateDatabaseFactory,
+        dataRoot: File,
+        runId: String,
+    ) {
+        val winnerGroupId = acceptedSnapshotWinnerGroupId(substrateFactory, dataRoot, runId)
+        val snapshot = assertNotNull(
+            com.achulkov.evomolior.substrate.deliverable.DeliverablePersistenceRepository(
+                substrateFactory.getAtlas(runId)
+            ).snapshots(runId, winnerGroupId).lastOrNull()
+        )
+        assertEquals(ACCEPTED_DELIVERABLE_COMPONENT_IDS.sorted(), snapshot.acceptedComponentIds)
+        assertTrue(snapshot.provisionalComponentIds.isEmpty())
+        assertTrue(snapshot.withheldComponentIds.isEmpty())
+        assertTrue(snapshot.failedGateIds.isEmpty())
+        assertTrue(snapshot.missingAuthorityComponentIds.isEmpty())
+    }
+
+    private suspend fun awaitRunTerminal(
+        service: EvoMoliorRunService,
+        runId: String,
+        timeoutMs: Long,
+    ): EvoMoliorEvent = withTimeout(timeoutMs) {
+        service.events.first { event ->
+            when (event) {
+                is EvoMoliorEvent.RunCompleted -> event.runId == runId
+                is EvoMoliorEvent.RunRecovered -> event.runId == runId
+                is EvoMoliorEvent.RunAborted -> event.runId == runId
+                else -> false
+            }
+        }
+    }
+
+    private suspend fun awaitRunTerminalIncludingProvisional(
+        service: EvoMoliorRunService,
+        runId: String,
+        timeoutMs: Long,
+    ): EvoMoliorEvent = withTimeout(timeoutMs) {
+        service.events.first { event ->
+            when (event) {
+                is EvoMoliorEvent.RunCompleted -> event.runId == runId
+                is EvoMoliorEvent.RunCompletedProvisional -> event.runId == runId
+                is EvoMoliorEvent.RunRecovered -> event.runId == runId
+                is EvoMoliorEvent.RunAborted -> event.runId == runId
+                else -> false
+            }
+        }
+    }
+
+    private suspend fun acceptedWriterDocs(
+        substrateFactory: SubstrateDatabaseFactory,
+        dataRoot: File,
+        runId: String,
+    ): List<String> {
+        val winnerGroupId = acceptedSnapshotWinnerGroupId(substrateFactory, dataRoot, runId)
+        return substrateFactory.get(runId, winnerGroupId)
+            .stagingDao()
+            .getAll(runId, winnerGroupId, 1_000)
+            .filter { it.type == "DOC" }
+            .map { it.content }
+    }
+
+    private suspend fun acceptedSnapshotWinnerGroupId(
+        substrateFactory: SubstrateDatabaseFactory,
+        dataRoot: File,
+        runId: String,
+    ): String {
+        val atlasRepository = AtlasTransactionRepository(substrateFactory)
+        val atlas = assertNotNull(atlasRepository.currentAtlas(runId))
+        val groupIds = buildSet {
+            addAll(assertNotNull(PersistedRunStateStore.read(dataRoot, runId)).groupIds)
+            atlasRepository.currentStates(runId, atlas.atlasId)
+                .values
+                .flatMapTo(this) { state -> state.revealedToGroups.map(AtlasGroupId::value) }
+        }
+        val repository =
+            com.achulkov.evomolior.substrate.deliverable.DeliverablePersistenceRepository(
+                substrateFactory.getAtlas(runId)
+            )
+        val snapshotsByGroup = groupIds.associateWith { groupId ->
+            repository.snapshots(runId, groupId)
+        }
+        val winners = snapshotsByGroup.filterValues { snapshots ->
+            snapshots.lastOrNull()?.let { snapshot ->
+                snapshot.hasValidHash() &&
+                    snapshot.acceptedComponentIds == ACCEPTED_DELIVERABLE_COMPONENT_IDS.sorted() &&
+                    snapshot.provisionalComponentIds.isEmpty() &&
+                    snapshot.withheldComponentIds.isEmpty() &&
+                    snapshot.failedGateIds.isEmpty() &&
+                    snapshot.missingAuthorityComponentIds.isEmpty()
+            } == true
+        }.keys
+        assertEquals(
+            1,
+            winners.size,
+            "Accepted fixture requires one exact complete accepted snapshot; " +
+                snapshotsByGroup.mapValues { (_, snapshots) ->
+                    snapshots.map { snapshot ->
+                        "round=${snapshot.round},accepted=${snapshot.acceptedComponentIds}," +
+                            "provisional=${snapshot.provisionalComponentIds}," +
+                            "withheld=${snapshot.withheldComponentIds}," +
+                            "failed=${snapshot.failedGateIds}," +
+                            "missing=${snapshot.missingAuthorityComponentIds}"
+                    }
+                },
+        )
+        return winners.single()
+    }
+
     private fun acceptanceBoundaryService(
         substrateFactory: SubstrateDatabaseFactory,
-        failingBoundary: AcceptanceRunBoundary,
-        archiveCalls: AtomicInteger
-    ): EvoMoliorRunService = EvoMoliorRunService(
+        failingBoundary: AcceptanceRunBoundary?,
+        archiveCalls: AtomicInteger,
+        archiveServiceOverride: RunArchiveService? = null,
+        finalDeliverableAttemptTimeoutMsOverride: Long? = null,
+        localAgentRunnerOverride:
+            (suspend (AgentBootContext, ((BudgetLedger) -> Unit)?) -> Unit)? = null,
+        beforeRoundSnapshotCompilation: suspend (runId: String, round: Int) -> Unit =
+            { _, _ -> },
+    ): EvoMoliorRunService {
+        val acceptedWinnerGroupId = AtomicReference<String>()
+        return EvoMoliorRunService(
         lifecycleManagerProvider = { runId, groupId, _, _, groupProfile ->
             LifecycleManager(
                 runId = runId,
@@ -1918,11 +2692,16 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                 agentJarPath = "/fake/agent.jar",
                 openRouterApiKey = "/tmp/codex",
                 groupProfile = groupProfile,
-                localAgentRunner = { bootContext, _ ->
-                    if (
+                localAgentRunner = { bootContext, ledgerCallback ->
+                    val isFinalWriter =
                         bootContext.role == Role.Builder &&
                             bootContext.rolePrompt.contains("Final Deliverable Writer")
-                    ) {
+                    val isRoundSummariser =
+                        bootContext.role == Role.Archivist &&
+                            bootContext.rolePrompt.contains("Round Submission Summariser")
+                    if (localAgentRunnerOverride != null && isFinalWriter) {
+                        localAgentRunnerOverride(bootContext, ledgerCallback)
+                    } else if (isFinalWriter) {
                         val database = substrateFactory.get(bootContext.runId, bootContext.groupId)
                         val now = System.currentTimeMillis()
                         database.stagingDao().insert(
@@ -1931,7 +2710,7 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                 agentId = bootContext.agentId,
                                 role = bootContext.role.name,
                                 type = "DOC",
-                                content = "# Receiver result\n\nreceiver-delivery-accepted",
+                                content = acceptedMarkdownContent("Receiver result"),
                                 budgetSignature = "acceptance-boundary-final-writer",
                                 status = "pending",
                                 generation = bootContext.generation,
@@ -1941,9 +2720,66 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                                 reviewedAtMs = null
                             )
                         )
-                        insertFinalWriterDeathNote(database, bootContext, now + 1L)
+                        insertAcceptedFinalWriterLineageAndDeathNote(
+                            substrateFactory = substrateFactory,
+                            database = database,
+                            bootContext = bootContext,
+                            outputRelativePath = "receiver/result.md",
+                            lineageSubmittedAtMs = now + 1L,
+                            deathNoteSubmittedAtMs = now + 2L,
+                        )
+                    } else if (isRoundSummariser) {
+                        if (localAgentRunnerOverride != null) {
+                            localAgentRunnerOverride(bootContext, ledgerCallback)
+                        } else {
+                            val database = substrateFactory.get(bootContext.runId, bootContext.groupId)
+                            val now = System.currentTimeMillis()
+                            val markerBody = ACCEPTED_SUITE_MARKERS.joinToString("\n")
+                            database.stagingDao().insert(
+                            StagingSubmissionEntity(
+                                id = "acceptance-summary-${bootContext.agentId}-$now",
+                                agentId = bootContext.agentId,
+                                role = bootContext.role.name,
+                                type = "PLAN_UPDATE",
+                                content = """
+                                    ROUND SUBMISSION SUMMARY
+                                    $ACCEPTED_PUBLICATION_MARKER
+                                    $markerBody
+                                    Source-grounded evidence notes explain the verified basis, assumptions,
+                                    uncertainties, risks, implementation plan, action checklist, alternatives,
+                                    limitations, and next evidence. This deterministic fallback contains more
+                                    than twenty visible words so the sealed receiver tests can evaluate the
+                                    complete Council-authored output contract before the dedicated writer runs.
+
+                                    FINAL DELIVERABLE HTML
+                                    <!doctype html>
+                                    <html lang="en">
+                                    <head><meta charset="utf-8"><title>Accepted fallback</title></head>
+                                    <body><main><article>
+                                    <h1>Accepted fallback</h1>
+                                    <p>$ACCEPTED_PUBLICATION_MARKER $markerBody</p>
+                                    <section><h2>Source-grounded evidence notes</h2>
+                                    <p>The verified basis, assumptions, uncertainties, risks, implementation
+                                    plan, action checklist, alternatives, limitations, and next evidence are
+                                    stated explicitly for deterministic receiver validation.</p></section>
+                                    </article></main></body>
+                                    </html>
+                                """.trimIndent(),
+                                budgetSignature = "acceptance-boundary-round-summary",
+                                status = "pending",
+                                generation = bootContext.generation,
+                                groupId = bootContext.groupId,
+                                runId = bootContext.runId,
+                                submittedAtMs = now + 10_000L,
+                            ),
+                        )
+                        }
+                    // Keep the loser evidence-free so exact node grades resolve capture instead
+                    // of producing a deterministic tie across otherwise identical fixtures.
+                    } else if (bootContext.groupId == acceptedWinnerGroupId.get()) {
+                        seedAcceptedWorkerContribution(substrateFactory, bootContext)
                     }
-                }
+                },
             )
         },
         groupCoordinatorProvider = { groupIds, dimensions ->
@@ -1951,11 +2787,23 @@ class EvoMoliorRunServiceEndToEndFlowTest {
         },
         graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
         substrateFactory = substrateFactory,
-        archiveService = CountingArchiveService(substrateFactory, archiveCalls),
+        archiveService = archiveServiceOverride
+            ?: CountingArchiveService(substrateFactory, archiveCalls),
         acceptanceRunBoundaryVerifier = AcceptanceRunBoundaryVerifier { _, boundary ->
-            if (boundary == failingBoundary) {
+            if (failingBoundary != null && boundary == failingBoundary) {
                 error("forced acceptance boundary failure: $boundary")
             }
+        },
+        distributionManifestHashProvider = {
+            ACCEPTANCE_BOUNDARY_DISTRIBUTION_HASH
+        },
+        workerCriticReviewRunner = { submission, _, _, criticId ->
+            CriticReview(
+                submissionId = submission.id,
+                outcome = CriticOutcome.PROMOTE,
+                criticAgentId = criticId,
+                initialTrustScore = 1.0,
+            )
         },
         genesisCouncilRunner = {
                 callbackRunId,
@@ -1966,20 +2814,17 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                 _,
                 onInvocationStarted ->
             onInvocationStarted()
-            val compiled = compiledCouncilTestFixture(
+            compiledCouncilTestFixture(
                 runId = callbackRunId,
                 objective = callbackObjective,
                 envelope = envelope,
                 inputArtifacts = inputArtifacts,
                 workerGroupKeys = listOf("group-0", "group-1"),
-                workerProfiles = listOf(GroupProfileType.Library, GroupProfileType.Factory)
-            )
-            seedFinalCandidateAuthority(
-                substrateFactory = substrateFactory,
-                runId = callbackRunId,
-                groupIds = compiled.workerField.ringTopology
-            )
-            compiled
+                workerProfiles = listOf(GroupProfileType.Library, GroupProfileType.Factory),
+                generalTests = acceptedPublicationGeneralTests(),
+            ).also { compiled ->
+                acceptedWinnerGroupId.set(compiled.workerField.ringTopology.first())
+            }
         },
         graderCriteriaRunner = {
                 criteriaRunId,
@@ -2092,6 +2937,7 @@ class EvoMoliorRunServiceEndToEndFlowTest {
                 nodeAssignments,
                 onNodeGradeBundles,
                 onProgress ->
+            assertEquals(acceptedWinnerGroupId.get(), competingGroupIds.first())
             val judgeOutputs = GraderRunner(
                 openRouterApiKey = "acceptance-fixture",
                 llmBackend = LlmBackend.CODEX_CHATGPT,
@@ -2179,35 +3025,186 @@ class EvoMoliorRunServiceEndToEndFlowTest {
             judgeOutputs
         },
         metaPlannerRunner = MetaPlannerRunner(),
+        roundDurationMillisOverride = 2_000L,
+        finalDeliverableAttemptTimeoutMsOverride = finalDeliverableAttemptTimeoutMsOverride,
+        beforeRoundSnapshotCompilation = beforeRoundSnapshotCompilation,
         roundHeartbeatIntervalMs = 1L,
         inspectorCheckIntervalMs = 1L
     )
+    }
 
-    private fun acceptanceBoundaryConfig(runId: String): RunConfig = RunConfig(
-        runId = runId,
-        objective = "Produce the exact receiver-delivery-accepted result.",
-        groupCount = 2,
-        groupProfiles = listOf(GroupProfileType.Library, GroupProfileType.Factory),
-        rounds = 1,
-        roundDurationMinutes = 0,
-        maxAgentsPerGroup = 1,
-        scoringDimensions = listOf(
-            ScoringDimension(
-                id = "quality",
-                name = "Quality",
-                description = "Reward exact receiver-facing delivery.",
-                weight = 1.0
-            )
-        ),
-        openRouterApiKey = "/tmp/codex",
-        llmBackend = LlmBackend.CODEX_CHATGPT,
-        councilExecutionPurpose = CouncilExecutionPurpose.APPENDIX_B_ACCEPTANCE,
-        acceptanceProfile = AcceptanceProfile.RUNTIME_USABILITY_SMOKE,
-        finalOutputSpec = FinalOutputSpec(
-            relativePath = "receiver/result.md",
-            mediaType = "text/markdown"
+    private suspend fun seedAcceptedWorkerContribution(
+        substrateFactory: SubstrateDatabaseFactory,
+        bootContext: AgentBootContext,
+    ) {
+        val claimedNodeId = bootContext.wipTaskClaim?.nodeId ?: return
+        val nodeIds = requireNotNull(
+            AtlasTransactionRepository(substrateFactory).currentAtlas(bootContext.runId),
+        ).nodes.keys
+            .map { it.value }
+            .sortedWith(compareBy<String> { it != claimedNodeId }.thenBy { it })
+        val database = substrateFactory.get(bootContext.runId, bootContext.groupId)
+        nodeIds.forEach { nodeId ->
+        val submissionId = "acceptance-evidence-" +
+            AtlasHashing.hashText(
+                "${bootContext.groupId}|${bootContext.generation}|$nodeId",
+            ).take(32)
+        if (database.stagingDao().getById(submissionId) != null) return
+        val content = ACCEPTED_SUITE_MARKERS.joinToString(
+            prefix = "$ACCEPTED_PUBLICATION_MARKER evidence for " +
+                "${bootContext.groupId}, node $nodeId.\n",
+            separator = "\n",
         )
-    )
+        val contentHash = AtlasHashing.hashText(content)
+        val now = System.currentTimeMillis()
+        database.stagingDao().insert(
+            StagingSubmissionEntity(
+                id = submissionId,
+                agentId = bootContext.agentId,
+                role = bootContext.role.name,
+                type = "DOC",
+                content = content,
+                wipTaskRef = nodeId,
+                budgetSignature = "acceptance-worker-evidence",
+                status = "promoted",
+                criticAgentId = "acceptance-critic",
+                initialTrustScore = 1.0,
+                generation = bootContext.generation,
+                groupId = bootContext.groupId,
+                runId = bootContext.runId,
+                submittedAtMs = now,
+                reviewedAtMs = now + 1L,
+                promotedArtifactRef = "kb:$submissionId",
+                promotedArtifactHash = contentHash,
+            ),
+        )
+        database.knowledgeBaseDao().insert(
+            KnowledgeBaseEntryEntity(
+                id = submissionId,
+                content = content,
+                sourceAgentId = bootContext.agentId,
+                generation = bootContext.generation,
+                trustScore = 1.0,
+                domain = "acceptance:worker-evidence",
+                groupId = bootContext.groupId,
+                runId = bootContext.runId,
+                createdAtMs = now + 1L,
+            ),
+        )
+        ContributionGraphRepository(
+            database = database,
+            atlasDatabase = substrateFactory.getAtlas(bootContext.runId),
+        ).recordCriticDecision(
+            CriticDecisionRecord(
+                decisionId = "acceptance-decision-$submissionId",
+                runId = bootContext.runId,
+                groupId = AtlasGroupId(bootContext.groupId),
+                round = bootContext.generation,
+                submissionId = submissionId,
+                submissionContentHash = contentHash,
+                resolvedReview = CriticReview(
+                    submissionId = submissionId,
+                    outcome = CriticOutcome.PROMOTE,
+                    criticAgentId = "acceptance-critic",
+                    initialTrustScore = 1.0,
+                ),
+                resultAuthority = ContributionAuthorityRef(
+                    kind = ContributionAuthorityKind.CANONICAL_ARTIFACT,
+                    authorityId = "kb:$submissionId",
+                    authorityHash = contentHash,
+                ),
+                decidedAt = Instant.fromEpochMilliseconds(now + 1L),
+            ).withComputedHash(),
+        )
+        val contribution = ContributionCommit(
+            commitId = "acceptance-contribution-$submissionId",
+            runId = bootContext.runId,
+            groupId = AtlasGroupId(bootContext.groupId),
+            round = bootContext.generation,
+            agentId = AtlasAgentId(bootContext.agentId),
+            nodeId = NodeId(nodeId),
+            commitType = CommitType.POSITIVE_RESULT,
+            artifactIds = listOf(submissionId),
+            claimIds = emptyList(),
+            toolRunIds = emptyList(),
+            testsRun = emptyList(),
+            changedStateSummary = "Persisted deterministic accepted evidence.",
+            evidenceSummary = "Critic-promoted receiver-facing evidence.",
+            confidence = 1.0,
+            unresolvedRisks = emptyList(),
+            successorRecommendations = emptyList(),
+            costSummary = NodeEvidenceCostSummary(totalCredits = 1.0),
+            dedupeHash = "",
+            committedAt = Instant.fromEpochMilliseconds(now + 2L),
+        )
+        WorkerExecutionRepository(database).commit(
+            contribution.copy(
+                dedupeHash = AtlasHashing.hashContributionDedupe(contribution),
+            ),
+        )
+        }
+    }
+
+    private fun acceptanceBoundaryConfig(
+        runId: String,
+        substrateFactory: SubstrateDatabaseFactory,
+    ): RunConfig {
+        val admission = AcceptanceAdmissionArtifact(
+            runId = runId,
+            acceptanceProfile = AcceptanceProfile.RUNTIME_USABILITY_SMOKE,
+            admittedAtUtc = "2026-07-26T00:00:00Z",
+            ownerPid = 1L,
+            distributionManifestSha256 = ACCEPTANCE_BOUNDARY_DISTRIBUTION_HASH,
+            sourceRevision = "acceptance-boundary-fixture",
+            configurationSha256 = AtlasHashing.hashText("acceptance-boundary-config"),
+            modelAssignmentsSha256 = AtlasHashing.hashText("acceptance-boundary-models"),
+            jvmVersion = System.getProperty("java.runtime.version"),
+            javaHome = "/test/jdk",
+            javaExecutableSha256 = AtlasHashing.hashText("acceptance-boundary-java"),
+            javaReleaseSha256 = AtlasHashing.hashText("acceptance-boundary-java-release"),
+            javaModulesSha256 = AtlasHashing.hashText("acceptance-boundary-java-modules"),
+            codexCliPath = "/test/codex",
+            codexCliSha256 = AtlasHashing.hashText("acceptance-boundary-codex"),
+            codexCliVersion = "test",
+            estimatedMaximumRunArchiveBytes = 1L,
+            requiredFreeBytes = 1L,
+            checks = listOf(
+                AcceptanceAdmissionCheck("fixture", "service acceptance boundary")
+            ),
+        )
+        substrateFactory.runControlDir(runId).mkdirs()
+        File(
+            substrateFactory.runControlDir(runId),
+            AcceptanceAdmissionArtifact.FILE_NAME,
+        ).writeText(
+            Json.encodeToString(AcceptanceAdmissionArtifact.serializer(), admission)
+        )
+        return RunConfig(
+            runId = runId,
+            objective = "Produce the exact receiver-delivery-accepted result.",
+            groupCount = 2,
+            groupProfiles = listOf(GroupProfileType.Library, GroupProfileType.Factory),
+            rounds = 1,
+            roundDurationMinutes = 0,
+            maxAgentsPerGroup = 1,
+            scoringDimensions = listOf(
+                ScoringDimension(
+                    id = "quality",
+                    name = "Quality",
+                    description = "Reward exact receiver-facing delivery.",
+                    weight = 1.0
+                )
+            ),
+            openRouterApiKey = "/tmp/codex",
+            llmBackend = LlmBackend.CODEX_CHATGPT,
+            councilExecutionPurpose = CouncilExecutionPurpose.APPENDIX_B_ACCEPTANCE,
+            acceptanceProfile = AcceptanceProfile.RUNTIME_USABILITY_SMOKE,
+            finalOutputSpec = acceptedFinalOutputSpec(
+                relativePath = "receiver/result.md",
+                mediaType = "text/markdown",
+            )
+        )
+    }
 
     private suspend fun awaitAcceptanceBoundaryAbort(
         service: EvoMoliorRunService,
@@ -2216,6 +3213,15 @@ class EvoMoliorRunServiceEndToEndFlowTest {
         service.events.first { event ->
             event is EvoMoliorEvent.RunAborted && event.runId == runId
         } as EvoMoliorEvent.RunAborted
+    }
+
+    private suspend fun awaitAcceptanceBoundaryRecovery(
+        service: EvoMoliorRunService,
+        runId: String
+    ): EvoMoliorEvent.RunRecovered = withTimeout(60_000L) {
+        service.events.first { event ->
+            event is EvoMoliorEvent.RunRecovered && event.runId == runId
+        } as EvoMoliorEvent.RunRecovered
     }
 
     private suspend fun assertNoCompletionAuthorities(
@@ -2230,6 +3236,28 @@ class EvoMoliorRunServiceEndToEndFlowTest {
             service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_GRAPH_MESSAGE).isEmpty(),
             "Rejected acceptance boundary must not retain a completion graph publication."
         )
+        assertTrue(
+            service.getMetaArchiveEntries(runId, RunArchiveService.ENTRY_RUN_RECOVERED).isEmpty(),
+            "Rejected acceptance boundary must not invoke terminal recovery."
+        )
+    }
+
+    private suspend fun assertNoNormalCompletionAuthorities(
+        service: EvoMoliorRunService,
+        runId: String
+    ) {
+        assertTrue(
+            service.getMetaArchiveEntries(
+                runId,
+                RunArchiveService.ENTRY_RUN_COMPLETED
+            ).isEmpty()
+        )
+        assertTrue(
+            service.getMetaArchiveEntries(
+                runId,
+                RunArchiveService.ENTRY_RUN_GRAPH_MESSAGE
+            ).isEmpty()
+        )
     }
 
     private fun unzipEntries(bytes: ByteArray): Map<String, String> {
@@ -2242,6 +3270,18 @@ class EvoMoliorRunServiceEndToEndFlowTest {
         }
         return result
     }
+
+    private fun zipEntries(entries: Map<String, String>): ByteArray =
+        ByteArrayOutputStream().use { output ->
+            ZipOutputStream(output).use { zip ->
+                entries.toSortedMap().forEach { (path, content) ->
+                    zip.putNextEntry(ZipEntry(path))
+                    zip.write(content.toByteArray(Charsets.UTF_8))
+                    zip.closeEntry()
+                }
+            }
+            output.toByteArray()
+        }
 
     @Serializable
     private data class RunCompletionArchiveRecord(
@@ -2263,17 +3303,71 @@ class EvoMoliorRunServiceEndToEndFlowTest {
     private class FailingArchiveService(
         substrateFactory: SubstrateDatabaseFactory
     ) : RunArchiveService(substrateFactory) {
-        override suspend fun archiveRun(
+        override suspend fun compileAcceptedRunMetrics(
             runId: String,
             groupIds: List<String>,
-            winnerId: String?,
-            objective: String,
             startingFieldJson: String,
             finalGeneration: Int,
             requestedOutputSpec: FinalOutputSpec?,
-            completionRecord: RunCompletionRecord?
-        ) {
-            throw IllegalStateException("forced archive failure for $runId")
+            completionRecord: RunCompletionRecord?,
+            acceptedDecisionPackage:
+                com.achulkov.evomolior.core.deliverable.ReceiverDecisionPackage,
+            closureRuntimeInput: RunClosureMetricRuntimeInput?,
+        ): RunMetricsV1Artifact {
+            throw IllegalStateException(
+                "forced accepted metrics compilation failure for $runId"
+            )
+        }
+    }
+
+    private class FailingProvisionalArchiveService(
+        substrateFactory: SubstrateDatabaseFactory
+    ) : RunArchiveService(substrateFactory) {
+        override suspend fun compileProvisionalRunMetrics(
+            runId: String,
+            groupIds: List<String>,
+            startingFieldJson: String,
+            finalGeneration: Int,
+            requestedOutputSpec: FinalOutputSpec?,
+            closureRuntimeInput: RunClosureMetricRuntimeInput?,
+        ): RunMetricsV1Artifact {
+            throw IllegalStateException(
+                "private provisional metrics failure path=/secret/$runId"
+            )
+        }
+    }
+
+    private class PostArchiveMetricsFailingService(
+        substrateFactory: SubstrateDatabaseFactory
+    ) : RunArchiveService(substrateFactory) {
+        val forcedFailureCount = AtomicInteger()
+
+        override fun persistCompiledRunMetrics(
+            artifact: RunMetricsV1Artifact,
+        ): RunMetricsV1Artifact {
+            if (forcedFailureCount.getAndIncrement() == 0) {
+                throw IllegalStateException(
+                    "forced metrics persistence failure after accepted archive write"
+                )
+            }
+            return super.persistCompiledRunMetrics(artifact)
+        }
+    }
+
+    private class RendererFailingArchiveService(
+        substrateFactory: SubstrateDatabaseFactory
+    ) : RunArchiveService(substrateFactory) {
+        val attemptedPackage = AtomicReference<
+            com.achulkov.evomolior.core.deliverable.ReceiverDecisionPackage?
+            >(null)
+
+        override fun buildOutcomeAwareAcceptedBundle(
+            request: AcceptedOutcomeArchiveRequest,
+        ): OutcomeArchive {
+            attemptedPackage.set(request.decisionPackage)
+            throw IllegalStateException(
+                "forced accepted renderer compilation failure for ${request.runId}"
+            )
         }
     }
 

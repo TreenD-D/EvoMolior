@@ -14,9 +14,18 @@ import com.achulkov.evomolior.core.grader.GraderScoreBundleStatus
 import com.achulkov.evomolior.core.grader.GradingRequirementId
 import com.achulkov.evomolior.core.grader.RequirementResult
 import com.achulkov.evomolior.core.grader.RequirementResultStatus
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.io.InputStream
+import java.io.OutputStream
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -183,6 +192,74 @@ class ScoringIsolationSurfaceTest {
     }
 
     @Test
+    fun `cancelled cleanup still terminates scoring child`() = runBlocking {
+        val worker = ScoringWorkerProcess()
+        worker.start(listOf("group-0", "group-1"))
+
+        try {
+            val owner = launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    worker.stop()
+                }
+            }
+            owner.cancelAndJoin()
+
+            assertFalse(worker.isAlive())
+        } finally {
+            worker.stop()
+        }
+    }
+
+    @Test
+    fun `startup cancellation remains cancellation after child cleanup`() = runBlocking {
+        val worker = ScoringWorkerProcess(
+            startupTimeoutMs = 60_000,
+            workerMainClass = HangingScoringWorkerMain::class.java.name
+        )
+
+        try {
+            assertFailsWith<TimeoutCancellationException> {
+                withTimeout(1_000) {
+                    worker.start(listOf("group-0"))
+                }
+            }
+            assertFalse(worker.isAlive())
+        } finally {
+            worker.stop()
+        }
+    }
+
+    @Test
+    fun `child termination escalates through forced shutdown`() = runBlocking {
+        val child = EscalatingProcess()
+        var gracefulShutdowns = 0
+
+        terminateScoringWorkerChildProcess(child, shutdownTimeoutMs = 1) {
+            gracefulShutdowns += 1
+        }
+
+        assertEquals(1, gracefulShutdowns)
+        assertEquals(1, child.destroyCalls)
+        assertEquals(1, child.forcedDestroyCalls)
+        assertFalse(child.isAlive)
+    }
+
+    @Test
+    fun `child surviving forced shutdown fails closed`() = runBlocking {
+        val child = EscalatingProcess(survivesForcedShutdown = true)
+
+        assertFailsWith<IllegalStateException> {
+            terminateScoringWorkerChildProcess(child, shutdownTimeoutMs = 1) {}
+        }
+
+        assertTrue(child.isAlive)
+        assertEquals(1, child.destroyCalls)
+        assertEquals(1, child.forcedDestroyCalls)
+    }
+
+    @Test
     fun `worker startup failure includes bounded child diagnostics`() = runBlocking {
         val worker = ScoringWorkerProcess(
             startupTimeoutMs = 5_000,
@@ -266,4 +343,55 @@ class ScoringIsolationSurfaceTest {
         normalizationTrace = emptyList(),
         status = GraderScoreBundleStatus.VALID
     ).withComputedHash()
+}
+
+internal object HangingScoringWorkerMain {
+    @JvmStatic
+    fun main(@Suppress("UNUSED_PARAMETER") arguments: Array<String>) {
+        while (true) {
+            Thread.sleep(1_000)
+        }
+    }
+}
+
+private class EscalatingProcess(
+    private val survivesForcedShutdown: Boolean = false
+) : Process() {
+    private var alive = true
+    var destroyCalls: Int = 0
+        private set
+    var forcedDestroyCalls: Int = 0
+        private set
+
+    override fun getOutputStream(): OutputStream = OutputStream.nullOutputStream()
+
+    override fun getInputStream(): InputStream = InputStream.nullInputStream()
+
+    override fun getErrorStream(): InputStream = InputStream.nullInputStream()
+
+    override fun waitFor(): Int {
+        check(!alive) { "Test process is still alive" }
+        return 0
+    }
+
+    override fun waitFor(timeout: Long, unit: TimeUnit): Boolean = !alive
+
+    override fun exitValue(): Int {
+        check(!alive) { "Test process is still alive" }
+        return 0
+    }
+
+    override fun destroy() {
+        destroyCalls += 1
+    }
+
+    override fun destroyForcibly(): Process {
+        forcedDestroyCalls += 1
+        if (!survivesForcedShutdown) {
+            alive = false
+        }
+        return this
+    }
+
+    override fun isAlive(): Boolean = alive
 }

@@ -24,6 +24,24 @@ interface OutlierNoveltyDao {
     @Query("SELECT * FROM novelty_vector_proposals WHERE proposalHash = :proposalHash")
     suspend fun proposalByHash(proposalHash: String): NoveltyVectorProposalEntity?
 
+    /**
+     * Returns proposals whose independent verdict explicitly accepted them.
+     *
+     * This is an acceptance authority read, not an allocation or lifecycle inference.
+     */
+    @Query(
+        """
+        SELECT p.* FROM novelty_vector_proposals AS p
+        INNER JOIN shadow_node_grader_verdicts AS v
+            ON v.proposalHash = p.proposalHash
+        WHERE p.runId = :runId AND v.decision = 'ACCEPT'
+        ORDER BY p.round ASC, p.proposalId ASC
+        """
+    )
+    suspend fun acceptedProposalsForRun(
+        runId: String
+    ): List<NoveltyVectorProposalEntity>
+
     @Transaction
     suspend fun insertInitialProposal(
         proposal: NoveltyVectorProposalEntity,

@@ -28,6 +28,7 @@ import kotlin.math.abs
  * @param graderCriteriaFreezeHashes Exact competitive grader freezes used to construct the
  * node-grading assignments. Empty only for legacy/offline node-only grading.
  * @param previousCaptureDecision Exact prior owner authority required for recapture.
+ * @param atlasHistory Complete immutable Atlas lineage through [atlas].
  */
 data class NodeCaptureResolutionRequest(
     val atlas: NodeAtlas,
@@ -36,7 +37,8 @@ data class NodeCaptureResolutionRequest(
     val expectedGroupIds: Set<AtlasGroupId>,
     val bundles: List<NodeGradeBundle>,
     val graderCriteriaFreezeHashes: Map<String, String> = emptyMap(),
-    val previousCaptureDecision: NodeCaptureDecision? = null
+    val previousCaptureDecision: NodeCaptureDecision? = null,
+    val atlasHistory: List<NodeAtlas> = listOf(atlas),
 )
 
 /**
@@ -57,6 +59,49 @@ data class NodeCaptureResolution(
  * Completion time and generic group scores are intentionally absent from this API.
  */
 class NodeCaptureResolver {
+    /**
+     * Resolves the latest exact decision that established the current owner.
+     *
+     * Audit-only and failed recapture decisions can preserve a captured state, but they must not
+     * become the prior winning-score authority for a later recapture.
+     */
+    fun priorOwnerAuthority(
+        atlas: NodeAtlas,
+        currentState: NodeExecutionState,
+        decisions: List<NodeCaptureDecision>,
+        atlasHistory: List<NodeAtlas> = listOf(atlas),
+    ): NodeCaptureDecision? {
+        if (currentState.captureState !in ACCEPTED_CAPTURE_STATES) return null
+        val node = requireNotNull(atlas.nodes[currentState.nodeId]) {
+            "Current capture state references a node outside the sealed Atlas"
+        }
+        val atlasesByVersion = requireValidAtlasHistory(atlas, atlasHistory)
+        return decisions
+            .asSequence()
+            .filter {
+                val authorityAtlas = atlasesByVersion[it.atlasVersion]
+                val authorityNode = authorityAtlas?.nodes?.get(currentState.nodeId)
+                it.hasValidHash() &&
+                    it.runId == atlas.runId &&
+                    it.nodeId == currentState.nodeId &&
+                    authorityAtlas?.atlasHash == it.atlasHash &&
+                    authorityNode?.payloadHash == node.payloadHash &&
+                    AtlasHashing.hashCapturePolicy(authorityNode.capturePolicy) ==
+                    AtlasHashing.hashCapturePolicy(node.capturePolicy) &&
+                    it.nodePayloadHash == node.payloadHash &&
+                    it.capturePolicyHash == AtlasHashing.hashCapturePolicy(node.capturePolicy) &&
+                    it.decisionType in CAPTURE_AUTHORITY_DECISIONS &&
+                    it.resultingCaptureState == currentState.captureState &&
+                    ownersMatchCurrentState(currentState, it.resultingOwnerGroupIds) &&
+                    it.winningScore != null &&
+                    it.authoritativeBundleHashes.isNotEmpty()
+            }
+            .maxWithOrNull(
+                compareBy<NodeCaptureDecision>(NodeCaptureDecision::round)
+                    .thenBy(NodeCaptureDecision::decisionId)
+            )
+    }
+
     /** Replays one deterministic capture decision. */
     fun resolve(request: NodeCaptureResolutionRequest): NodeCaptureResolution {
         require(request.round >= 0) { "Capture round cannot be negative" }
@@ -65,12 +110,19 @@ class NodeCaptureResolver {
         }
         val atlas = request.atlas
         require(atlas.hasValidHash()) { "Capture resolution requires a valid sealed Atlas hash" }
+        requireValidAtlasHistory(atlas, request.atlasHistory)
         val node = requireNotNull(atlas.nodes[request.currentState.nodeId]) {
             "Execution state references a node outside the sealed Atlas"
         }
         require(node.hasValidPayloadHash()) { "Capture node payload commitment is invalid" }
         require(request.currentState.round <= request.round) {
             "Capture resolution cannot move execution state backward"
+        }
+        require(
+            request.previousCaptureDecision == null ||
+                validPriorCaptureAuthority(request, request.previousCaptureDecision)
+        ) {
+            "Prior capture decision does not authorize the current capture state"
         }
 
         if (node.capturePolicy.mode == CaptureMode.NONE) {
@@ -131,7 +183,7 @@ class NodeCaptureResolver {
                 decisionType = NodeCaptureDecisionType.BELOW_THRESHOLD,
                 reasonCode = NodeCaptureReasonCode.BELOW_MINIMUM_GRADE,
                 authoritativeBundles = evaluated.mapTo(linkedSetOf()) { it.bundleHash },
-                resultingOwners = currentOwners(request.currentState),
+                resultingOwners = currentOwners(request),
                 resultingCaptureState = request.currentState.captureState,
                 winningScore = evaluated.maxOfOrNull { requireNotNull(it.normalizedScore) },
                 yieldEligible = false
@@ -158,7 +210,7 @@ class NodeCaptureResolver {
                 },
                 reasonCode = NodeCaptureReasonCode.NEAR_TIE,
                 authoritativeBundles = nearTies.mapTo(linkedSetOf()) { it.bundleHash },
-                resultingOwners = if (shared) tiedOwners else currentOwners(request.currentState),
+                resultingOwners = if (shared) tiedOwners else currentOwners(request),
                 resultingCaptureState = if (shared) {
                     CaptureState.SHARED
                 } else {
@@ -389,7 +441,7 @@ class NodeCaptureResolver {
             decisionType = decisionType,
             reasonCode = reasonCode,
             authoritativeBundles = authoritativeBundles,
-            resultingOwners = currentOwners(request.currentState),
+            resultingOwners = currentOwners(request),
             resultingCaptureState = request.currentState.captureState,
             winningScore = null,
             priorWinningScore = request.previousCaptureDecision?.winningScore,
@@ -481,18 +533,78 @@ class NodeCaptureResolver {
         request: NodeCaptureResolutionRequest,
         decision: NodeCaptureDecision?,
         owner: AtlasGroupId
-    ): Boolean = decision != null &&
-        decision.hasValidHash() &&
-        decision.runId == request.atlas.runId &&
-        decision.nodeId == request.currentState.nodeId &&
-        decision.atlasVersion == request.atlas.version &&
-        decision.atlasHash == request.atlas.atlasHash &&
-        owner in decision.resultingOwnerGroupIds &&
-        decision.winningScore != null &&
-        decision.authoritativeBundleHashes.isNotEmpty()
+    ): Boolean =
+        decision != null &&
+            validPriorCaptureAuthority(request, decision) &&
+            owner in decision.resultingOwnerGroupIds
 
-    private fun currentOwners(state: NodeExecutionState): Set<AtlasGroupId> =
-        state.ownerGroupId?.let(::setOf).orEmpty()
+    private fun validPriorCaptureAuthority(
+        request: NodeCaptureResolutionRequest,
+        decision: NodeCaptureDecision
+    ): Boolean {
+        val authorityAtlas = requireValidAtlasHistory(
+            request.atlas,
+            request.atlasHistory,
+        )[decision.atlasVersion] ?: return false
+        val currentNode = request.atlas.nodes[request.currentState.nodeId] ?: return false
+        val authorityNode = authorityAtlas.nodes[request.currentState.nodeId] ?: return false
+        return decision.hasValidHash() &&
+            decision.runId == request.atlas.runId &&
+            decision.nodeId == request.currentState.nodeId &&
+            decision.atlasHash == authorityAtlas.atlasHash &&
+            decision.nodePayloadHash == authorityNode.payloadHash &&
+            decision.capturePolicyHash ==
+            AtlasHashing.hashCapturePolicy(authorityNode.capturePolicy) &&
+            authorityNode.payloadHash == currentNode.payloadHash &&
+            AtlasHashing.hashCapturePolicy(authorityNode.capturePolicy) ==
+            AtlasHashing.hashCapturePolicy(currentNode.capturePolicy) &&
+            decision.decisionType in CAPTURE_AUTHORITY_DECISIONS &&
+            decision.resultingCaptureState == request.currentState.captureState &&
+            ownersMatchCurrentState(
+                request.currentState,
+                decision.resultingOwnerGroupIds
+            ) &&
+            decision.winningScore != null &&
+            decision.authoritativeBundleHashes.isNotEmpty()
+    }
+
+    private fun requireValidAtlasHistory(
+        currentAtlas: NodeAtlas,
+        atlasHistory: List<NodeAtlas>,
+    ): Map<Int, NodeAtlas> {
+        require(atlasHistory.isNotEmpty()) { "Capture resolution requires Atlas history" }
+        val ordered = atlasHistory.sortedBy(NodeAtlas::version)
+        require(
+            ordered.first().version == 1 &&
+                ordered.map(NodeAtlas::version) == (1..currentAtlas.version).toList() &&
+                ordered.last() == currentAtlas &&
+                ordered.all { it.runId == currentAtlas.runId && it.atlasId == currentAtlas.atlasId }
+        ) { "Capture Atlas history is incomplete, foreign, or not current" }
+        ordered.forEachIndexed { index, atlas ->
+            require(atlas.validate(ordered.getOrNull(index - 1)).isValid) {
+                "Capture Atlas history contains an invalid version ${atlas.version}"
+            }
+        }
+        return ordered.associateBy(NodeAtlas::version)
+    }
+
+    private fun currentOwners(request: NodeCaptureResolutionRequest): Set<AtlasGroupId> =
+        request.currentState.ownerGroupId?.let(::setOf)
+            ?: request.previousCaptureDecision
+                ?.takeIf { request.currentState.captureState == CaptureState.SHARED }
+                ?.resultingOwnerGroupIds
+                .orEmpty()
+
+    private fun ownersMatchCurrentState(
+        state: NodeExecutionState,
+        owners: Set<AtlasGroupId>
+    ): Boolean = when (state.captureState) {
+        CaptureState.CAPTURED ->
+            state.ownerGroupId != null && owners == setOf(state.ownerGroupId)
+        CaptureState.SHARED ->
+            state.ownerGroupId == null && owners.size > 1
+        else -> false
+    }
 
     private fun com.achulkov.evomolior.core.atlas.NodeScoreVector.values(): List<Double> = listOf(
         correctness,
@@ -508,6 +620,12 @@ class NodeCaptureResolver {
 
     private companion object {
         const val SCORE_TOLERANCE = 1e-9
+        val ACCEPTED_CAPTURE_STATES = setOf(CaptureState.CAPTURED, CaptureState.SHARED)
+        val CAPTURE_AUTHORITY_DECISIONS = setOf(
+            NodeCaptureDecisionType.CAPTURED,
+            NodeCaptureDecisionType.RECAPTURED,
+            NodeCaptureDecisionType.SHARED_VALIDATION_CREDIT,
+        )
         val REPLICATION_REQUIRED_MODES = setOf(
             ReplicationMode.REQUIRED,
             ReplicationMode.ADVERSARIAL

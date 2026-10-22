@@ -8,6 +8,8 @@ import com.achulkov.evomolior.core.atlas.AtlasAgentId
 import com.achulkov.evomolior.core.atlas.ToolExecutionPurpose
 import com.achulkov.evomolior.core.atlas.ToolExecutionRecord
 import com.achulkov.evomolior.core.atlas.ToolExecutionResult
+import com.achulkov.evomolior.core.atlas.ToolLifecycleEvent
+import com.achulkov.evomolior.core.atlas.ToolLifecycleState
 import com.achulkov.evomolior.core.atlas.ToolVersionId
 import com.achulkov.evomolior.core.contract.AgentBootContext
 import com.achulkov.evomolior.core.contract.AgentTtlPolicy
@@ -16,8 +18,10 @@ import com.achulkov.evomolior.core.contract.WorkerLeaseAssignment
 import com.achulkov.evomolior.core.contract.WorkerView
 import com.achulkov.evomolior.core.model.Role
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
+import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
 import com.achulkov.evomolior.substrate.worker.WorkerExecutionRepository
 import com.achulkov.evomolior.substrate.db.entity.ToolExecutionRecordEntity
+import com.achulkov.evomolior.substrate.db.entity.ToolLifecycleEventEntity
 import com.achulkov.evomolior.substrate.tools.ToolInfrastructureRepository
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -115,6 +119,74 @@ class CommitContributionToolTest {
     }
 
     @Test
+    fun `reusable tool commit rejects preflight failure and accepts pending candidate`() = runTest {
+        val database = SubstrateDatabaseFactory(
+            createTempDirectory("commit-contribution-tool-authority-").toFile()
+        ).get("run-commit", "group-commit")
+        try {
+            listOf(
+                StagingSubmissionEntity(
+                    id = "tool-rejected",
+                    agentId = "agent-commit",
+                    role = Role.Researcher.name,
+                    type = "TOOL",
+                    content = """{"name":"rejected"}""",
+                    wipTaskRef = "node-assigned",
+                    budgetSignature = "test",
+                    status = "rejected",
+                    rejectionReason = "tool_validation_unexpected_output",
+                    generation = 1,
+                    groupId = "group-commit",
+                    runId = "run-commit",
+                    submittedAtMs = 1L
+                ),
+                StagingSubmissionEntity(
+                    id = "tool-pending",
+                    agentId = "agent-commit",
+                    role = Role.Researcher.name,
+                    type = "TOOL",
+                    content = """{"name":"pending"}""",
+                    wipTaskRef = "node-assigned",
+                    budgetSignature = "test",
+                    status = "pending",
+                    generation = 1,
+                    groupId = "group-commit",
+                    runId = "run-commit",
+                    submittedAtMs = 2L
+                )
+            ).forEach { database.stagingDao().insert(it) }
+            val tool = CommitContributionTool(
+                WorkerExecutionRepository(database),
+                context(Role.Researcher, assignedNodeId = NodeId("node-assigned")),
+                now = { instant }
+            )
+
+            val rejected = tool.execute(
+                CommitContributionTool.Args(
+                    commitType = "REUSABLE_TOOL",
+                    artifactIds = listOf("tool-rejected"),
+                    changedStateSummary = "Authored a reusable tool.",
+                    confidence = 0.8
+                )
+            )
+            val accepted = tool.execute(
+                CommitContributionTool.Args(
+                    commitType = "REUSABLE_TOOL",
+                    artifactIds = listOf("tool-pending"),
+                    changedStateSummary = "Authored a reusable tool.",
+                    confidence = 0.8
+                )
+            )
+
+            assertTrue(rejected.startsWith("Error: Contribution commit rejected"))
+            assertTrue(rejected.contains("tool_validation_unexpected_output"))
+            assertTrue(accepted.startsWith("Contribution committed"))
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun `successful persisted node executions are bound into contribution automatically`() =
         runTest {
             val database = SubstrateDatabaseFactory(
@@ -159,6 +231,7 @@ class CommitContributionToolTest {
                         createdAtMs = 1L
                     )
                 )
+                insertPromotedLifecycle(database, execution)
                 val repository = WorkerExecutionRepository(database)
                 val tool = CommitContributionTool(
                     repository = repository,
@@ -193,6 +266,207 @@ class CommitContributionToolTest {
                 database.close()
             }
         }
+
+    @Test
+    fun `reusable tool commit rejects caller supplied execution without authority`() = runTest {
+        val database = SubstrateDatabaseFactory(
+            createTempDirectory("commit-contribution-tool-run-rejection-").toFile()
+        ).get("run-commit", "group-commit")
+        try {
+            val tool = CommitContributionTool(
+                repository = WorkerExecutionRepository(database),
+                bootContext = context(
+                    Role.Researcher,
+                    assignedNodeId = NodeId("node-assigned")
+                ),
+                now = { instant }
+            )
+
+            val result = tool.execute(
+                CommitContributionTool.Args(
+                    commitType = "REUSABLE_TOOL",
+                    toolRunIds = listOf("missing-execution"),
+                    changedStateSummary = "Claimed an unverified execution.",
+                    confidence = 0.9
+                )
+            )
+
+            assertTrue(result.startsWith("Error: Contribution commit rejected"))
+            assertTrue(result.contains("unknown tool execution"))
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun `reusable tool commit rejects failed and cross scope execution records`() = runTest {
+        val database = SubstrateDatabaseFactory(
+            createTempDirectory("commit-contribution-tool-run-scope-").toFile()
+        ).get("run-commit", "group-commit")
+        try {
+            val base = ToolExecutionRecord(
+                executionId = "execution-base",
+                runId = "run-commit",
+                toolVersionId = ToolVersionId("tool-v1"),
+                opportunityId = "opportunity-1",
+                groupId = AtlasGroupId("group-commit"),
+                agentId = AtlasAgentId("agent-commit"),
+                round = 1,
+                nodeId = NodeId("node-assigned"),
+                purpose = ToolExecutionPurpose.AGENT_USE,
+                inputHash = "input-hash",
+                outputHash = "output-hash",
+                outputJson = kotlinx.serialization.json.JsonPrimitive("output"),
+                outputArtifactId = "execution-output",
+                startedAt = instant,
+                completedAt = instant,
+                durationMillis = 0,
+                exitCode = 0,
+                result = ToolExecutionResult.SUCCEEDED,
+                sandboxRecordHash = "sandbox-hash"
+            )
+            val invalidExecutions = listOf(
+                base.copy(
+                    executionId = "execution-failed",
+                    result = ToolExecutionResult.FAILED,
+                    failure = com.achulkov.evomolior.core.atlas.ToolExecutionFailure.NON_ZERO_EXIT
+                ).withComputedHash(),
+                base.copy(
+                    executionId = "execution-foreign-agent",
+                    agentId = AtlasAgentId("agent-other")
+                ).withComputedHash(),
+                base.copy(
+                    executionId = "execution-wrong-node",
+                    nodeId = NodeId("node-other")
+                ).withComputedHash(),
+                base.copy(
+                    executionId = "execution-wrong-round",
+                    round = 0
+                ).withComputedHash(),
+                base.copy(
+                    executionId = "execution-wrong-purpose",
+                    purpose = ToolExecutionPurpose.PROMOTION_TEST
+                ).withComputedHash()
+            )
+            invalidExecutions.forEach { execution ->
+                database.toolInfrastructureDao().insertExecution(
+                    ToolExecutionRecordEntity(
+                        executionId = execution.executionId,
+                        runId = execution.runId,
+                        opportunityId = execution.opportunityId,
+                        toolVersionId = execution.toolVersionId.value,
+                        groupId = execution.groupId.value,
+                        agentId = execution.agentId.value,
+                        round = execution.round,
+                        nodeId = execution.nodeId.value,
+                        purpose = execution.purpose.name,
+                        result = execution.result.name,
+                        recordHash = execution.recordHash,
+                        contentJson = Json.encodeToString(execution),
+                        createdAtMs = 1L
+                    )
+                )
+            }
+            database.stagingDao().insert(
+                StagingSubmissionEntity(
+                    id = "tool-pending-with-run",
+                    agentId = "agent-commit",
+                    role = Role.Researcher.name,
+                    type = "TOOL",
+                    content = """{"name":"pending"}""",
+                    wipTaskRef = "node-assigned",
+                    budgetSignature = "test",
+                    status = "pending",
+                    generation = 1,
+                    groupId = "group-commit",
+                    runId = "run-commit",
+                    submittedAtMs = 1L
+                )
+            )
+            val tool = CommitContributionTool(
+                repository = WorkerExecutionRepository(database),
+                bootContext = context(
+                    Role.Researcher,
+                    assignedNodeId = NodeId("node-assigned")
+                ),
+                now = { instant }
+            )
+
+            invalidExecutions.forEach { execution ->
+                val result = tool.execute(
+                    CommitContributionTool.Args(
+                        commitType = "REUSABLE_TOOL",
+                        artifactIds = listOf("tool-pending-with-run"),
+                        toolRunIds = listOf(execution.executionId),
+                        changedStateSummary = "Claimed an invalid execution.",
+                        confidence = 0.9
+                    )
+                )
+                assertTrue(result.startsWith("Error: Contribution commit rejected"))
+            }
+        } finally {
+            database.close()
+        }
+    }
+
+    private suspend fun insertPromotedLifecycle(
+        database: com.achulkov.evomolior.substrate.db.EvoMoliorDatabase,
+        execution: ToolExecutionRecord
+    ) {
+        var previous: ToolLifecycleEvent? = null
+        val states = listOf(
+            ToolLifecycleState.TOOL_SPEC,
+            ToolLifecycleState.IMPLEMENTED,
+            ToolLifecycleState.STATIC_VALIDATED,
+            ToolLifecycleState.SANDBOX_TESTED,
+            ToolLifecycleState.CRITIC_ACCEPTED,
+            ToolLifecycleState.PROMOTED,
+            ToolLifecycleState.EXECUTED_BY_LATER_AGENT
+        )
+        states.forEach { state ->
+            val event = ToolLifecycleEvent(
+                eventId = "event-${state.name.lowercase()}",
+                runId = execution.runId,
+                opportunityId = execution.opportunityId,
+                toolVersionId = execution.toolVersionId,
+                groupId = execution.groupId,
+                originNodeId = NodeId("node-origin"),
+                contextNodeId = if (state == ToolLifecycleState.EXECUTED_BY_LATER_AGENT) {
+                    execution.nodeId
+                } else {
+                    NodeId("node-origin")
+                },
+                state = state,
+                sequence = (previous?.sequence ?: -1L) + 1,
+                previousEventHash = previous?.eventHash,
+                authorityReferenceIds = if (
+                    state == ToolLifecycleState.EXECUTED_BY_LATER_AGENT
+                ) {
+                    setOf(execution.executionId)
+                } else {
+                    setOf("authority-${state.name.lowercase()}")
+                },
+                recordedAt = instant
+            ).withComputedHash()
+            database.toolInfrastructureDao().insertLifecycle(
+                ToolLifecycleEventEntity(
+                    eventId = event.eventId,
+                    runId = event.runId,
+                    opportunityId = event.opportunityId,
+                    toolVersionId = event.toolVersionId.value,
+                    groupId = event.groupId.value,
+                    originNodeId = event.originNodeId.value,
+                    contextNodeId = event.contextNodeId.value,
+                    state = event.state.name,
+                    sequence = event.sequence,
+                    eventHash = event.eventHash,
+                    contentJson = Json.encodeToString(event),
+                    createdAtMs = 1L
+                )
+            )
+            previous = event
+        }
+    }
 
     private fun context(role: Role, assignedNodeId: NodeId?): AgentBootContext {
         val view = WorkerView(

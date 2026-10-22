@@ -3,6 +3,7 @@ package com.achulkov.evomolior.competition.scoring
 import com.achulkov.evomolior.core.atlas.ArtifactType
 import com.achulkov.evomolior.core.atlas.AtlasGroupId
 import com.achulkov.evomolior.core.atlas.AtlasHashing
+import com.achulkov.evomolior.core.atlas.CaptureMode
 import com.achulkov.evomolior.core.atlas.CapturePolicy
 import com.achulkov.evomolior.core.atlas.CaptureState
 import com.achulkov.evomolior.core.atlas.DisclosureStage
@@ -240,6 +241,92 @@ class NodeCaptureResolverTest {
     }
 
     @Test
+    fun `prior owner authority ignores later audit-only frozen decisions`() {
+        val atlas = atlas(recaptureMargin = 0.05)
+        val initial = resolver.resolve(
+            request(
+                atlas,
+                state(),
+                round = 1,
+                bundles = listOf(
+                    bundle(atlas, groupA, 1, 0.80),
+                    bundle(atlas, groupB, 1, 0.70),
+                ),
+            )
+        )
+        val ownedState = assertNotNull(initial.nextState)
+        val frozen = resolver.resolve(
+            request(
+                atlas,
+                ownedState,
+                round = 2,
+                bundles = listOf(bundle(atlas, groupA, 2, 0.80)),
+            )
+        )
+
+        assertEquals(
+            NodeCaptureDecisionType.FROZEN_INVALID_AUTHORITY,
+            frozen.decision.decisionType,
+        )
+        assertEquals(
+            initial.decision,
+            resolver.priorOwnerAuthority(
+                atlas = atlas,
+                currentState = ownedState,
+                decisions = listOf(initial.decision, frozen.decision),
+            ),
+        )
+    }
+
+    @Test
+    fun `prior owner authority survives an unchanged node across Atlas versions`() {
+        val firstAtlas = atlas(recaptureMargin = 0.05)
+        val initial = resolver.resolve(
+            request(
+                firstAtlas,
+                state(),
+                round = 1,
+                bundles = listOf(
+                    bundle(firstAtlas, groupA, 1, 0.80),
+                    bundle(firstAtlas, groupB, 1, 0.70),
+                ),
+            )
+        )
+        val secondAtlas = firstAtlas.copy(
+            version = 2,
+            parentAtlasHash = firstAtlas.atlasHash,
+            amendmentIds = listOf("amendment-1"),
+        ).withComputedHash()
+        assertTrue(secondAtlas.validate(firstAtlas).isValid)
+        val history = listOf(firstAtlas, secondAtlas)
+        val prior = assertNotNull(
+            resolver.priorOwnerAuthority(
+                atlas = secondAtlas,
+                currentState = assertNotNull(initial.nextState),
+                decisions = listOf(initial.decision),
+                atlasHistory = history,
+            )
+        )
+
+        val recaptured = resolver.resolve(
+            request(
+                atlas = secondAtlas,
+                state = assertNotNull(initial.nextState),
+                round = 2,
+                bundles = listOf(
+                    bundle(secondAtlas, groupA, 2, 0.80),
+                    bundle(secondAtlas, groupB, 2, 0.90),
+                ),
+                previous = prior,
+                atlasHistory = history,
+            )
+        )
+
+        assertEquals(NodeCaptureDecisionType.RECAPTURED, recaptured.decision.decisionType)
+        assertEquals(groupB, assertNotNull(recaptured.nextState).ownerGroupId)
+    }
+
+    @Test
     fun `typed near tie contests without deterministic ownership`() {
         val atlas = atlas(nearTieMargin = 0.02)
         val result = resolver.resolve(
@@ -260,13 +347,66 @@ class NodeCaptureResolverTest {
         assertTrue(!result.decision.yieldEligible)
     }
 
+    @Test
+    fun `shared owners survive a later no evidence audit`() {
+        val atlas = atlas(
+            captureMode = CaptureMode.SHARED,
+            nearTieMargin = 0.02,
+        )
+        val shared = resolver.resolve(
+            request(
+                atlas,
+                state(),
+                round = 1,
+                bundles = listOf(
+                    bundle(atlas, groupA, 1, 0.90),
+                    bundle(atlas, groupB, 1, 0.89),
+                ),
+            )
+        )
+        val sharedState = assertNotNull(shared.nextState)
+        val priorAuthority = assertNotNull(
+            resolver.priorOwnerAuthority(
+                atlas = atlas,
+                currentState = sharedState,
+                decisions = listOf(shared.decision),
+            )
+        )
+        val noEvidence = listOf(groupA, groupB).map { groupId ->
+            bundle(atlas, groupId, round = 2, score = 0.0).copy(
+                evidencePacketId = null,
+                evidencePacketHash = null,
+                scoreVector = null,
+                normalizedScore = null,
+                verdict = NodeGradeBundleVerdict.NO_EVIDENCE,
+                bundleHash = "",
+            ).withComputedHash()
+        }
+
+        val audited = resolver.resolve(
+            request(
+                atlas = atlas,
+                state = sharedState,
+                round = 2,
+                bundles = noEvidence,
+                previous = priorAuthority,
+            )
+        )
+
+        assertEquals(NodeCaptureDecisionType.NO_EVIDENCE, audited.decision.decisionType)
+        assertEquals(setOf(groupA, groupB), audited.decision.resultingOwnerGroupIds)
+        assertEquals(CaptureState.SHARED, audited.decision.resultingCaptureState)
+        assertNull(audited.nextState)
+    }
+
     private fun request(
         atlas: NodeAtlas,
         state: NodeExecutionState,
         round: Int,
         bundles: List<NodeGradeBundle>,
         freezeHashes: Map<String, String> = emptyMap(),
-        previous: com.achulkov.evomolior.core.atlas.NodeCaptureDecision? = null
+        previous: com.achulkov.evomolior.core.atlas.NodeCaptureDecision? = null,
+        atlasHistory: List<NodeAtlas> = listOf(atlas),
     ): NodeCaptureResolutionRequest = NodeCaptureResolutionRequest(
         atlas = atlas,
         currentState = state,
@@ -274,7 +414,8 @@ class NodeCaptureResolverTest {
         expectedGroupIds = setOf(groupA, groupB),
         bundles = bundles,
         graderCriteriaFreezeHashes = freezeHashes,
-        previousCaptureDecision = previous
+        previousCaptureDecision = previous,
+        atlasHistory = atlasHistory,
     )
 
     private fun bundle(
@@ -329,7 +470,8 @@ class NodeCaptureResolverTest {
 
     private fun atlas(
         recaptureMargin: Double = 0.0,
-        nearTieMargin: Double? = null
+        nearTieMargin: Double? = null,
+        captureMode: CaptureMode = CaptureMode.GRADE_AUTHORITY,
     ): NodeAtlas {
         val receiver = ReceiverContract(
             rawObjective = "Resolve the node.",
@@ -369,6 +511,7 @@ class NodeCaptureResolverTest {
             revealPolicy = RevealPolicy("stage-0", RevealMode.INITIAL),
             replicationPolicy = ReplicationPolicy(),
             capturePolicy = CapturePolicy(
+                mode = captureMode,
                 minimumGrade = 0.7,
                 recaptureMargin = recaptureMargin,
                 nearTieMargin = nearTieMargin

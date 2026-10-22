@@ -156,6 +156,7 @@ data class FieldDegradationRecord(
  * @param graderFieldHash Grader field hash excluding its own seal.
  * @param atlasHash Atlas hash.
  * @param graderAtlasHash Grader Atlas hash.
+ * @param deliverableBlueprintHash Council-sealed receiver deliverable blueprint hash.
  * @param envelopeHash Execution envelope hash.
  * @param consistencyReportHash Consistency report hash.
  */
@@ -168,6 +169,7 @@ data class StartingFieldSeal(
     val graderFieldHash: String,
     val atlasHash: String,
     val graderAtlasHash: String = "",
+    val deliverableBlueprintHash: String = "",
     val envelopeHash: String,
     val consistencyReportHash: String
 )

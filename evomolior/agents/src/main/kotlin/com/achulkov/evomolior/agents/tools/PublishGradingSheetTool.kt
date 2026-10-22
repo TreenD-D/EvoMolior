@@ -240,7 +240,10 @@ class GraderMethodologyPublicationService(
         if (invalidPattern != null) {
             validationFailures +=
                 "automated test '${invalidPattern.first}' has invalid RE2/J pattern " +
-                    "'${invalidPattern.second.take(300)}': ${invalidPattern.third}"
+                    "'${invalidPattern.second.take(300)}': ${invalidPattern.third}. " +
+                    "Replace the entire pattern using no lookaround or backreferences and a " +
+                    "bounded-quantifier upper limit of at most 1000; for ordered tokens prefer " +
+                    "[\\s\\S]{0,512} or a smaller bound."
         }
         if (draft.automatedTests.any { it.penaltyOnFailure < 0.0 }) {
             return "Error: automated-test penalties cannot be negative."

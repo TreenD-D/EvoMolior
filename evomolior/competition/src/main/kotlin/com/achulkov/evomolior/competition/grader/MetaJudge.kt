@@ -111,6 +111,20 @@ class MetaJudge(
 
     // ── Private helpers ─────────────────────────────────────────────────────────
 
+    /**
+     * Returns [sheet]'s dimension weights rescaled to sum to 1.0.
+     *
+     * Sheets may express weights on different scales (for example raw configured weights versus
+     * normalised grader-authored weights); comparing or averaging them unscaled would make every
+     * shared dimension look contested and let the larger scale dominate the merge.
+     */
+    private fun normalisedWeights(sheet: GradingSheet): Map<String, Double> {
+        val total = sheet.rubricDimensions.sumOf { it.weight }
+        return sheet.rubricDimensions.associate { dim ->
+            dim.dimensionId to if (total > 0) dim.weight / total else dim.weight
+        }
+    }
+
     private fun mergeDimensionWeights(sheetList: List<GradingSheet>): Map<String, Double> {
         val allDimIds = sheetList.flatMap { it.rubricDimensions }.map { it.dimensionId }.toSet()
         val merged = mutableMapOf<String, Double>()
@@ -119,9 +133,9 @@ class MetaJudge(
             var weightedSum = 0.0
             var totalQuality = 0.0
             for (sheet in sheetList) {
-                val dim = sheet.rubricDimensions.find { it.dimensionId == dimId } ?: continue
+                val weight = normalisedWeights(sheet)[dimId] ?: continue
                 val quality = sheet.qualityScore ?: 0.5
-                weightedSum += dim.weight * quality
+                weightedSum += weight * quality
                 totalQuality += quality
             }
             merged[dimId] = if (totalQuality > 0) weightedSum / totalQuality else 0.0
@@ -146,10 +160,9 @@ class MetaJudge(
     ): List<String> {
         if (sheetList.size < 2) return emptyList()
         val contested = mutableListOf<String>()
+        val sheetWeights = sheetList.map(::normalisedWeights)
         for (dimId in mergedWeights.keys) {
-            val weights = sheetList.mapNotNull { sheet ->
-                sheet.rubricDimensions.find { it.dimensionId == dimId }?.weight
-            }
+            val weights = sheetWeights.mapNotNull { it[dimId] }
             if (weights.size < 2) continue
             val max = weights.max()
             val min = weights.min()

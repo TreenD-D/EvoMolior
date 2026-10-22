@@ -424,21 +424,21 @@ If you do not have a domain, use Tailscale, WireGuard, Cloudflare Tunnel, or sou
 The dashboard is only the default command. Override it to run any CLI command:
 
 ```bash
-docker run --rm -v evomolior-data:/data evomolior-cli-dashboard evomolior run \
+docker run --rm -e OPENROUTER_API_KEY="$OPENROUTER_API_KEY" -v evomolior-data:/data evomolior-cli-dashboard evomolior run \
   -prompt "Summarize the provided context" \
   -input /data/input \
   -output /data/manual-output \
-  -llm-backend qwen-cloud
+  -llm-backend openrouter
 ```
 
 Benchmarks work the same way:
 
 ```bash
-docker run --rm -e QWEN_API_KEY="$QWEN_API_KEY" -v evomolior-data:/data evomolior-cli-dashboard evomolior benchmark \
+docker run --rm -e OPENROUTER_API_KEY="$OPENROUTER_API_KEY" -v evomolior-data:/data evomolior-cli-dashboard evomolior benchmark \
   -benchmark frames \
   -limit 2 \
   -output /data/benchmark-output \
-  -llm-backend qwen-cloud
+  -llm-backend openrouter
 ```
 
 ## Configuration
@@ -461,7 +461,7 @@ Optional dashboard variables:
 
 Provider keys:
 
-- `QWEN_API_KEY`: required for Qwen Cloud runs and single-agent baseline benchmarks.
+- `QWEN_API_KEY`: required for Qwen Cloud runs.
 - `OPENROUTER_API_KEY`: required for OpenRouter runs.
 
 Generate a dashboard password with:

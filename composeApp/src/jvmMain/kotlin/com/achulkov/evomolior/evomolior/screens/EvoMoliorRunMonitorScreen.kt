@@ -496,6 +496,8 @@ private fun RunStatusChip(status: EngineStatus) {
         EngineStatus.PAUSED -> "PAUSED" to MaterialTheme.colorScheme.secondary
         EngineStatus.EVALUATING -> "EVALUATING" to MaterialTheme.colorScheme.tertiary
         EngineStatus.COMPLETED -> "COMPLETED" to MaterialTheme.colorScheme.secondary
+        EngineStatus.RECOVERED ->
+            "RECOVERED — NOT ACCEPTED" to MaterialTheme.colorScheme.tertiary
     }
     Surface(
         shape = RoundedCornerShape(50),

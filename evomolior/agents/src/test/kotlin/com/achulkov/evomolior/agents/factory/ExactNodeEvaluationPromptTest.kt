@@ -48,6 +48,12 @@ class ExactNodeEvaluationPromptTest {
         assertContains(prompt, "Does this exact artifact support the local claim?")
         assertContains(prompt, "The exact local claim has direct source support.")
         assertContains(prompt, context.assignment.assignmentId)
+        assertContains(
+            prompt,
+            "passing only assignmentId, verdict, scoreVector, and rationale"
+        )
+        assertContains(prompt, "binds all packet, node, criteria, capture-policy, and hash commitments server-side")
+        assertContains(prompt, "Do not copy or submit assignmentHash")
         assertContains(prompt, "Generic snapshots, broad criteria, dimensions, and weighted totals")
         assertContains(prompt, "is still evaluable evidence of that limitation")
         assertContains(prompt, "do not copy the artifact's own abstention")

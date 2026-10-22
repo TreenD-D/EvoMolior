@@ -3,8 +3,18 @@ package com.achulkov.evomolior.substrate
 import androidx.room.Room
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import com.achulkov.evomolior.core.atlas.AtlasAgentId
+import com.achulkov.evomolior.core.atlas.AtlasGroupId
+import com.achulkov.evomolior.core.contract.AgentLifecycleClassification
+import com.achulkov.evomolior.core.contract.AgentLifecycleRegistration
 import com.achulkov.evomolior.substrate.db.EvoMoliorDatabase
+import com.achulkov.evomolior.substrate.db.entity.AgentExitRecordEntity
+import com.achulkov.evomolior.substrate.db.entity.AgentLifecycleRegistrationEntity
+import com.achulkov.evomolior.substrate.db.entity.AgentRuntimeStateEventEntity
 import com.achulkov.evomolior.substrate.db.entity.GraderNodeStateEventEntity
+import com.achulkov.evomolior.substrate.db.entity.PublicationOutcomeEventEntity
+import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
+import com.achulkov.evomolior.substrate.worker.WorkerExecutionRepository
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -18,14 +28,203 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 /**
  * Verifies checked-in historical schemas upgrade through Room's generated migrations.
  */
+@OptIn(kotlin.time.ExperimentalTime::class)
 class EvoMoliorDatabaseMigrationTest {
 
     @Test
-    fun `v19 to v20 migration exposes portfolios and KG fact attempt authority`() = runBlocking {
+    fun `v24 to v25 supplies default ArtifactOwner fields and preserves legacy registration hash`() =
+        runBlocking {
+            val databaseFile = createTempDirectory("evomolior-v24-v25-registration-")
+                .resolve("substrate.db")
+                .toFile()
+            val legacy = AgentLifecycleRegistration(
+                registrationId = "legacy-registration-v24",
+                runId = "legacy-run-v24",
+                groupId = AtlasGroupId("legacy-group-v24"),
+                agentId = AtlasAgentId("legacy-builder-v24"),
+                role = "Builder",
+                generation = 2,
+                classification = AgentLifecycleClassification.NON_DAEMON,
+                registeredAt = Instant.parse("2026-08-02T12:00:00Z")
+            ).withComputedHash()
+            val legacyJson = Json {
+                encodeDefaults = false
+                explicitNulls = false
+            }.encodeToString(AgentLifecycleRegistration.serializer(), legacy)
+
+            createVersionFixture(databaseFile, 24)
+            BundledSQLiteDriver().open(databaseFile.absolutePath).use { connection ->
+                connection.execute(
+                    """
+                    INSERT INTO agent_lifecycle_registrations(
+                        registrationId, runId, groupId, agentId, role, generation,
+                        classification, registrationHash, contentJson, registeredAtMs
+                    ) VALUES (
+                        '${legacy.registrationId}', '${legacy.runId}', '${legacy.groupId.value}',
+                        '${legacy.agentId.value}', '${legacy.role}', ${legacy.generation},
+                        '${legacy.classification.name}', '${legacy.registrationHash}',
+                        '$legacyJson', ${legacy.registeredAt.toEpochMilliseconds()}
+                    )
+                    """.trimIndent()
+                )
+            }
+
+            val database = Room.databaseBuilder<EvoMoliorDatabase>(databaseFile.absolutePath)
+                .setDriver(BundledSQLiteDriver())
+                .build()
+            try {
+                val entity = requireNotNull(
+                    database.workerExecutionDao().registrationForAgent(
+                        legacy.runId,
+                        legacy.groupId.value,
+                        legacy.agentId.value
+                    )
+                )
+                assertEquals("NONE", entity.duty)
+                assertNull(entity.workspaceId)
+                assertNull(entity.workspaceSourceHash)
+                assertEquals(
+                    legacy,
+                    WorkerExecutionRepository(database).registration(
+                        legacy.runId,
+                        legacy.groupId.value,
+                        legacy.agentId.value
+                    )
+                )
+            } finally {
+                database.close()
+            }
+        }
+
+    @Test
+    fun `v21 to latest preserves compatible historical lifecycle exit and staging authority`() = runBlocking {
+        val databaseFile = createTempDirectory("evomolior-v21-latest-migration-")
+            .resolve("substrate.db")
+            .toFile()
+        createVersionFixture(databaseFile, 21)
+        seedVersion21HistoricalAuthority(databaseFile)
+
+        val database = Room.databaseBuilder<EvoMoliorDatabase>(databaseFile.absolutePath)
+            .setDriver(BundledSQLiteDriver())
+            .build()
+        try {
+            assertEquals(
+                historicalRegistration(),
+                database.workerExecutionDao().registrationForAgent(
+                    "legacy-run",
+                    "legacy-group",
+                    "legacy-agent"
+                )
+            )
+            assertEquals(
+                historicalExit(),
+                database.workerExecutionDao().exitForAgent(
+                    "legacy-run",
+                    "legacy-group",
+                    "legacy-agent"
+                )
+            )
+            assertEquals(
+                historicalStagingSubmission(),
+                database.stagingDao().getById("legacy-staging")
+            )
+            assertTrue(
+                database.workerExecutionDao().runtimeStateEvents(
+                    "legacy-run",
+                    "legacy-group",
+                    "legacy-agent",
+                    7
+                ).isEmpty()
+            )
+        } finally {
+            database.close()
+        }
+
+        val runtimeEntity = loadSchema(24)
+            .getValue("entities")
+            .jsonArray
+            .map { it.jsonObject }
+            .single {
+                it.getValue("tableName").jsonPrimitive.content ==
+                    "agent_runtime_state_events"
+            }
+        val indexNames = runtimeEntity["indices"]
+            ?.jsonArray
+            .orEmpty()
+            .map { it.jsonObject.getValue("name").jsonPrimitive.content }
+            .toSet()
+        assertTrue(
+            "index_agent_runtime_state_events_runId_groupId_agentId_generation_revision" in
+                indexNames
+        )
+        assertTrue(
+            "index_agent_runtime_state_events_runId_groupId_agentId_generation_occurredAtMs" in
+                indexNames
+        )
+    }
+
+    @Test
+    fun `v22 to v24 preserves runtime authority and exposes empty completion tables`() = runBlocking {
+        val databaseFile = createTempDirectory("evomolior-v22-v24-migration-")
+            .resolve("substrate.db")
+            .toFile()
+        createVersionFixture(databaseFile, 22)
+        seedVersion22RuntimeAuthority(databaseFile)
+
+        val database = Room.databaseBuilder<EvoMoliorDatabase>(databaseFile.absolutePath)
+            .setDriver(BundledSQLiteDriver())
+            .build()
+        try {
+            assertEquals(
+                historicalRuntimeEvent(),
+                database.workerExecutionDao().runtimeStateEventById("legacy-runtime")
+            )
+            val completion = database.completionPersistenceDao()
+            assertNull(completion.diagnostic("missing-diagnostic"))
+            assertNull(completion.attempt("missing-attempt"))
+            assertNull(completion.blueprint("missing-blueprint"))
+            assertNull(completion.snapshot("missing-run", "missing-group", 0))
+            assertNull(completion.decisionPackage("missing-package"))
+            assertTrue(
+                completion.publicationOutcomes("missing-run", "ACCEPTED_DECISION_PACKAGE")
+                    .isEmpty()
+            )
+            assertTrue(completion.roundPhaseHistory("missing-run", 0).isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun `v23 to v24 preserves completion authority and creates round phase ledger table`() = runBlocking {
+        val databaseFile = createTempDirectory("evomolior-v23-v24-migration-")
+            .resolve("substrate.db")
+            .toFile()
+        createVersionFixture(databaseFile, 23)
+        seedVersion23CompletionAuthority(databaseFile)
+
+        val database = Room.databaseBuilder<EvoMoliorDatabase>(databaseFile.absolutePath)
+            .setDriver(BundledSQLiteDriver())
+            .build()
+        try {
+            val completion = database.completionPersistenceDao()
+            assertEquals(
+                historicalPublicationOutcome(),
+                completion.publicationOutcome("legacy-publication")
+            )
+            assertTrue(completion.roundPhaseHistory("legacy-run", 7).isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun `v19 to latest migration exposes portfolios and KG fact attempt authority`() = runBlocking {
         val databaseFile = createTempDirectory("evomolior-v19-v20-migration-")
             .resolve("substrate.db")
             .toFile()
@@ -41,7 +240,7 @@ class EvoMoliorDatabaseMigrationTest {
             database.close()
         }
 
-        val tableNames = loadSchema(20)
+        val tableNames = loadSchema(24)
             .getValue("entities")
             .jsonArray
             .map { it.jsonObject.getValue("tableName").jsonPrimitive.content }
@@ -452,6 +651,168 @@ class EvoMoliorDatabaseMigrationTest {
     private fun createVersion10Fixture(databaseFile: File) {
         createVersionFixture(databaseFile, 10)
     }
+
+    private fun seedVersion21HistoricalAuthority(databaseFile: File) {
+        BundledSQLiteDriver().open(databaseFile.absolutePath).use { connection ->
+            connection.execute(
+                """
+                INSERT INTO agent_lifecycle_registrations(
+                    registrationId, runId, groupId, agentId, role, generation, classification,
+                    registrationHash, contentJson, registeredAtMs
+                ) VALUES (
+                    'legacy-registration', 'legacy-run', 'legacy-group', 'legacy-agent',
+                    'Historical worker', 7, 'NON_DAEMON',
+                    '${"1".repeat(64)}', '{"legacy":"registration"}', 101
+                )
+                """.trimIndent()
+            )
+            connection.execute(
+                """
+                INSERT INTO agent_exit_records(
+                    exitId, runId, groupId, agentId, nodeId, round, finalPhase, commitId,
+                    commitType, acceptedContribution, acceptedStructuredDeadEnd,
+                    acceptedNoveltyProposal, degradedExecution, wasKilled, contentJson, exitedAtMs
+                ) VALUES (
+                    'legacy-exit', 'legacy-run', 'legacy-group', 'legacy-agent', 'legacy-node',
+                    7, 'CONTRIBUTION_STAGED', 'legacy-commit', 'POSITIVE_RESULT',
+                    1, 0, 0, 0, 0, '{"legacy":"exit"}', 202
+                )
+                """.trimIndent()
+            )
+            connection.execute(
+                """
+                INSERT INTO staging_submissions(
+                    id, agentId, role, type, content, wipTaskRef, speculative, outlier,
+                    budgetSignature, status, rejectionReason, criticAgentId, initialTrustScore,
+                    generation, groupId, runId, submittedAtMs, reviewedAtMs,
+                    promotedArtifactRef, promotedArtifactHash
+                ) VALUES (
+                    'legacy-staging', 'legacy-agent', 'BUILDER', 'DOC',
+                    '{"legacy":"staging"}', 'legacy-node', 1, 0, 'legacy-signature',
+                    'promoted', 'historical-note', 'legacy-critic', 0.75, 7,
+                    'legacy-group', 'legacy-run', 303, 404,
+                    'kb:legacy-staging', '${"2".repeat(64)}'
+                )
+                """.trimIndent()
+            )
+        }
+    }
+
+    private fun seedVersion22RuntimeAuthority(databaseFile: File) {
+        BundledSQLiteDriver().open(databaseFile.absolutePath).use { connection ->
+            connection.execute(
+                """
+                INSERT INTO agent_runtime_state_events(
+                    eventId, runId, groupId, agentId, generation, revision, intent,
+                    previousStateHash, stateHash, eventHash, contentJson, occurredAtMs
+                ) VALUES (
+                    'legacy-runtime', 'legacy-run', 'legacy-group', 'legacy-agent',
+                    7, 3, 'START_EXECUTION', '${"3".repeat(64)}', '${"4".repeat(64)}',
+                    '${"5".repeat(64)}', '{"legacy":"runtime"}', 505
+                )
+                """.trimIndent()
+            )
+        }
+    }
+
+    private fun seedVersion23CompletionAuthority(databaseFile: File) {
+        BundledSQLiteDriver().open(databaseFile.absolutePath).use { connection ->
+            connection.execute(
+                """
+                INSERT INTO publication_outcome_events(
+                    eventId, runId, outcomeClass, state, sequence, previousEventHash,
+                    eventHash, occurredAtMs, contentJson
+                ) VALUES (
+                    'legacy-publication', 'legacy-run', 'ACCEPTED_DECISION_PACKAGE',
+                    'FINAL_CANDIDATES_SEALED', 0, NULL, '${"6".repeat(64)}', 606,
+                    '{"legacy":"publication"}'
+                )
+                """.trimIndent()
+            )
+        }
+    }
+
+    private fun historicalRegistration() = AgentLifecycleRegistrationEntity(
+        registrationId = "legacy-registration",
+        runId = "legacy-run",
+        groupId = "legacy-group",
+        agentId = "legacy-agent",
+        role = "Historical worker",
+        generation = 7,
+        classification = "NON_DAEMON",
+        registrationHash = "1".repeat(64),
+        contentJson = """{"legacy":"registration"}""",
+        registeredAtMs = 101
+    )
+
+    private fun historicalExit() = AgentExitRecordEntity(
+        exitId = "legacy-exit",
+        runId = "legacy-run",
+        groupId = "legacy-group",
+        agentId = "legacy-agent",
+        nodeId = "legacy-node",
+        round = 7,
+        finalPhase = "CONTRIBUTION_STAGED",
+        commitId = "legacy-commit",
+        commitType = "POSITIVE_RESULT",
+        acceptedContribution = true,
+        acceptedStructuredDeadEnd = false,
+        acceptedNoveltyProposal = false,
+        degradedExecution = false,
+        wasKilled = false,
+        contentJson = """{"legacy":"exit"}""",
+        exitedAtMs = 202
+    )
+
+    private fun historicalStagingSubmission() = StagingSubmissionEntity(
+        id = "legacy-staging",
+        agentId = "legacy-agent",
+        role = "BUILDER",
+        type = "DOC",
+        content = """{"legacy":"staging"}""",
+        wipTaskRef = "legacy-node",
+        speculative = true,
+        outlier = false,
+        budgetSignature = "legacy-signature",
+        status = "promoted",
+        rejectionReason = "historical-note",
+        criticAgentId = "legacy-critic",
+        initialTrustScore = 0.75,
+        generation = 7,
+        groupId = "legacy-group",
+        runId = "legacy-run",
+        submittedAtMs = 303,
+        reviewedAtMs = 404,
+        promotedArtifactRef = "kb:legacy-staging",
+        promotedArtifactHash = "2".repeat(64)
+    )
+
+    private fun historicalRuntimeEvent() = AgentRuntimeStateEventEntity(
+        eventId = "legacy-runtime",
+        runId = "legacy-run",
+        groupId = "legacy-group",
+        agentId = "legacy-agent",
+        generation = 7,
+        revision = 3,
+        intent = "START_EXECUTION",
+        previousStateHash = "3".repeat(64),
+        stateHash = "4".repeat(64),
+        eventHash = "5".repeat(64),
+        contentJson = """{"legacy":"runtime"}""",
+        occurredAtMs = 505
+    )
+
+    private fun historicalPublicationOutcome() = PublicationOutcomeEventEntity(
+        eventId = "legacy-publication",
+        runId = "legacy-run",
+        outcomeClass = "ACCEPTED_DECISION_PACKAGE",
+        state = "FINAL_CANDIDATES_SEALED",
+        sequence = 0,
+        previousEventHash = null,
+        eventHash = "6".repeat(64),
+        occurredAtMs = 606,
+        contentJson = """{"legacy":"publication"}"""
+    )
 
     private fun createVersionFixture(databaseFile: File, version: Int) {
         databaseFile.parentFile?.mkdirs()

@@ -52,9 +52,6 @@ object SourceAccessPolicy {
                     )
                 )
             }
-            if (containsAny(normalized, "hackathon", "devpost")) {
-                addAll(listOf("devpost.com", "qwencloud-hackathon.devpost.com"))
-            }
             if (containsAny(normalized, "kotlin", "gradle", "koog", "jetbrains")) {
                 addAll(listOf("kotlinlang.org", "docs.gradle.org", "gradle.org", "jetbrains.com", "github.com"))
             }

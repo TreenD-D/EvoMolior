@@ -10,6 +10,7 @@ import com.achulkov.evomolior.core.contract.OverseerExperimentPlan
 import com.achulkov.evomolior.core.contract.OverseerHypothesis
 import com.achulkov.evomolior.core.contract.OverseerKernelState
 import com.achulkov.evomolior.core.contract.OverseerHypothesisStatus
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
 import com.achulkov.evomolior.core.config.LlmBackend
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
 import io.github.aakira.napier.Napier
@@ -33,16 +34,24 @@ import kotlinx.serialization.json.jsonObject
  *
  * @param openRouterApiKey API key for the selected [llmBackend].
  * @param llmBackend Backend used for Overseer model resolution and prompt execution.
+ * @param codexReasoningEffort Codex reasoning authority when [llmBackend] is Codex ChatGPT.
  * @param modelId Model to use for the OverseerAgent (defaults to the council model).
  */
 class OverseerAgentRunner(
     private val openRouterApiKey: String,
     private val llmBackend: LlmBackend = LlmBackend.OPENROUTER,
+    private val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     private val modelId: String = ModelSelectionConfig.DEFAULT_COUNCIL_MODEL,
     private val promptExecutor: PromptExecutor? = null,
     private val providerCostRecorder: ProviderCallCostRecorder? = null
 ) {
-    private val executor by lazy { promptExecutor ?: LlmExecutorFactory.create(llmBackend, openRouterApiKey) }
+    private val executor by lazy {
+        promptExecutor ?: LlmExecutorFactory.create(
+            backend = llmBackend,
+            apiKey = openRouterApiKey,
+            codexReasoningEffort = codexReasoningEffort
+        )
+    }
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     /**

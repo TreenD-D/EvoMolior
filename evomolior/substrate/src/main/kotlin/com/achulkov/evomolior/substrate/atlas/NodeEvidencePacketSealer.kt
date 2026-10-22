@@ -15,6 +15,7 @@ import com.achulkov.evomolior.core.atlas.ToolExecutionResult
 import com.achulkov.evomolior.core.atlas.ToolLifecyclePolicy
 import com.achulkov.evomolior.core.atlas.ToolLifecycleState
 import com.achulkov.evomolior.core.atlas.ToolOpportunityCommitment
+import com.achulkov.evomolior.core.atlas.ToolOpportunityCommitmentAuthority
 import com.achulkov.evomolior.core.atlas.ToolVersionId
 import com.achulkov.evomolior.core.atlas.toolValidationNodeIds
 import com.achulkov.evomolior.core.contract.CommitType
@@ -69,6 +70,7 @@ class NodeEvidencePacketSealer(
     suspend fun seal(request: SealNodeEvidenceRequest): NodeEvidencePacket {
         validateRequestShape(request)
         val atlas = validateAtlasBinding(request)
+        val opportunityCommitments = resolveOpportunityCommitments(request, atlas)
 
         val groupDatabase = databaseFactory.get(request.runId, request.groupId.value)
         val stagingIds = (request.acceptedArtifactIds + request.acceptedClaimIds).distinct()
@@ -102,7 +104,8 @@ class NodeEvidencePacketSealer(
             atlas = atlas,
             promotions = promotions,
             contributions = contributions,
-            groupDatabase = groupDatabase
+            groupDatabase = groupDatabase,
+            opportunityCommitments = opportunityCommitments
         )
         validateContributionReferences(request, contributions)
         val toolRepository = ToolInfrastructureRepository(groupDatabase)
@@ -110,14 +113,16 @@ class NodeEvidencePacketSealer(
             request = request,
             atlas = atlas,
             contributions = contributions,
-            repository = toolRepository
+            repository = toolRepository,
+            opportunityCommitments = opportunityCommitments
         )
         validateRequiredToolExecutions(
             request = request,
             atlas = atlas,
             executions = toolExecutions.values,
             repository = toolRepository,
-            groupDatabase = groupDatabase
+            groupDatabase = groupDatabase,
+            opportunityCommitments = opportunityCommitments
         )
         rejectDegradedReferences(request, groupDatabase.workerExecutionDao()
             .degradedExecutionsForNode(
@@ -222,14 +227,38 @@ class NodeEvidencePacketSealer(
         return atlas
     }
 
+    private suspend fun resolveOpportunityCommitments(
+        request: SealNodeEvidenceRequest,
+        atlas: NodeAtlas
+    ): Map<String, ToolOpportunityCommitment> {
+        val history = databaseFactory.getAtlas(request.runId).atlasDao()
+            .versionHistory(atlas.atlasId)
+            .filter { it.version <= request.atlasVersion }
+            .map { json.decodeFromString(NodeAtlas.serializer(), it.sealedAtlasJson) }
+        require(
+            history.lastOrNull()?.let {
+                it.version == request.atlasVersion &&
+                    AtlasHashing.constantTimeEquals(it.atlasHash, request.atlasHash)
+            } == true
+        ) {
+            "Evidence packet lacks complete sealed Atlas history through its exact version"
+        }
+        return ToolOpportunityCommitmentAuthority.resolve(history).byOpportunityId
+    }
+
     private suspend fun validateRequiredToolExecutions(
         request: SealNodeEvidenceRequest,
         atlas: NodeAtlas,
         executions: Collection<ToolExecutionRecord>,
         repository: ToolInfrastructureRepository,
-        groupDatabase: com.achulkov.evomolior.substrate.db.EvoMoliorDatabase
+        groupDatabase: com.achulkov.evomolior.substrate.db.EvoMoliorDatabase,
+        opportunityCommitments: Map<String, ToolOpportunityCommitment>
     ) {
-        requiredToolExecutions(atlas, request.nodeId).forEach { requirement ->
+        requiredToolExecutions(
+            atlas,
+            request.nodeId,
+            opportunityCommitments
+        ).forEach { requirement ->
             val authoritativeExecutions = executions.filter { execution ->
                 execution.opportunityId ==
                     requirement.commitment.opportunity.opportunityId &&
@@ -285,15 +314,23 @@ class NodeEvidencePacketSealer(
         atlas: NodeAtlas,
         promotions: List<StagingSubmissionEntity>,
         contributions: List<ContributionCommit>,
-        groupDatabase: com.achulkov.evomolior.substrate.db.EvoMoliorDatabase
+        groupDatabase: com.achulkov.evomolior.substrate.db.EvoMoliorDatabase,
+        opportunityCommitments: Map<String, ToolOpportunityCommitment>
     ): ToolAuthoringEvidenceAuthority? {
         val opportunity = atlas.nodes.getValue(request.nodeId).toolOpportunity ?: return null
-        val commitment = ToolOpportunityCommitment(
-            runId = atlas.runId,
-            atlasHash = atlas.atlasHash,
-            nodeId = request.nodeId,
-            opportunity = opportunity
-        ).withComputedHash()
+        val commitment = requireNotNull(
+            opportunityCommitments[opportunity.opportunityId]
+        ) {
+            "Tool-opportunity node lacks origin-version sealed authority"
+        }
+        require(
+            commitment.hasValidHash() &&
+                commitment.runId == atlas.runId &&
+                commitment.nodeId == request.nodeId &&
+                commitment.opportunity == opportunity
+        ) {
+            "Tool-opportunity node does not match its origin-version sealed authority"
+        }
         val verifier = ToolAuthoringNodeAuthorityVerifier(groupDatabase)
         val authorized = promotions
             .filter { it.type == "TOOL" }
@@ -370,6 +407,9 @@ class NodeEvidencePacketSealer(
         require(submission.type != "DEATH_NOTE") {
             "Auto-promoted Death Notes are not node-grade evidence"
         }
+        require(submission.type != "HYPOTHESIS") {
+            "Provisional novel hypotheses are not node-grade evidence"
+        }
         require(!submission.isRuntimeFallback()) {
             "Runtime fallback submissions are not node-grade evidence"
         }
@@ -412,9 +452,14 @@ class NodeEvidencePacketSealer(
         request: SealNodeEvidenceRequest,
         atlas: NodeAtlas,
         contributions: List<ContributionCommit>,
-        repository: ToolInfrastructureRepository
+        repository: ToolInfrastructureRepository,
+        opportunityCommitments: Map<String, ToolOpportunityCommitment>
     ): Map<String, ToolExecutionRecord> {
-        val requirements = requiredToolExecutions(atlas, request.nodeId)
+        val requirements = requiredToolExecutions(
+            atlas,
+            request.nodeId,
+            opportunityCommitments
+        )
             .associateBy { it.commitment.opportunity.opportunityId }
         return request.toolRunIds.associateWith { executionId ->
             val execution = requireNotNull(repository.execution(executionId)) {
@@ -450,7 +495,8 @@ class NodeEvidencePacketSealer(
 
     private fun requiredToolExecutions(
         atlas: NodeAtlas,
-        nodeId: NodeId
+        nodeId: NodeId,
+        opportunityCommitments: Map<String, ToolOpportunityCommitment>
     ): List<RequiredToolExecution> {
         val requirements = atlas.nodes.values.mapNotNull { sourceNode ->
             val opportunity = sourceNode.toolOpportunity ?: return@mapNotNull null
@@ -465,13 +511,21 @@ class NodeEvidencePacketSealer(
                 reuseTarget -> ToolExecutionPurpose.AGENT_USE
                 else -> return@mapNotNull null
             }
+            val commitment = requireNotNull(
+                opportunityCommitments[opportunity.opportunityId]
+            ) {
+                "Required tool execution lacks origin-version sealed authority"
+            }
+            require(
+                commitment.hasValidHash() &&
+                    commitment.runId == atlas.runId &&
+                    commitment.nodeId == sourceNode.id &&
+                    commitment.opportunity == opportunity
+            ) {
+                "Required tool execution authority does not match its sealed Atlas node"
+            }
             RequiredToolExecution(
-                commitment = ToolOpportunityCommitment(
-                    runId = atlas.runId,
-                    atlasHash = atlas.atlasHash,
-                    nodeId = sourceNode.id,
-                    opportunity = opportunity
-                ).withComputedHash(),
+                commitment = commitment,
                 purpose = purpose
             )
         }

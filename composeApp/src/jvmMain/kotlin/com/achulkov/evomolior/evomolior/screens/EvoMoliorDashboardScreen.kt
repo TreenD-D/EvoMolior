@@ -46,6 +46,8 @@ fun EvoMoliorDashboardScreen(
     val history by viewModel.gradingHistory.collectAsState()
     val availableRuns by viewModel.availableRuns.collectAsState()
     val graderGroupIds by viewModel.activeGraderGroupIds.collectAsState()
+    val runOutcomePresentation by viewModel.runOutcomePresentation.collectAsState()
+    val outcome = runOutcomePresentation
 
     Row(modifier = Modifier.fillMaxSize()) {
         // ── Left Panel: Status + Groups ──────────────────────────────────────
@@ -89,7 +91,9 @@ fun EvoMoliorDashboardScreen(
             // Action buttons
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (state.status) {
-                    EngineStatus.IDLE, EngineStatus.COMPLETED -> {
+                    EngineStatus.IDLE,
+                    EngineStatus.COMPLETED,
+                    EngineStatus.RECOVERED -> {
                         Button(onClick = { navigate(EvoMoliorRoute.RunSetup) }) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(4.dp))
@@ -282,6 +286,13 @@ fun EvoMoliorDashboardScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            outcome?.let {
+                OutcomePresentationPanel(
+                    outcome = it,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            if (outcome == null) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Live Event Log", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
@@ -317,6 +328,7 @@ fun EvoMoliorDashboardScreen(
                         EventLogRow(event = event)
                     }
                 }
+            }
             }
         }
     }
@@ -376,6 +388,8 @@ private fun EngineStatusBadge(status: EngineStatus) {
         EngineStatus.PAUSED -> "PAUSED" to MaterialTheme.colorScheme.secondary
         EngineStatus.EVALUATING -> "EVALUATING" to MaterialTheme.colorScheme.tertiary
         EngineStatus.COMPLETED -> "COMPLETED" to MaterialTheme.colorScheme.secondary
+        EngineStatus.RECOVERED ->
+            "RECOVERED — NOT ACCEPTED" to MaterialTheme.colorScheme.tertiary
     }
     Surface(
         shape = RoundedCornerShape(50),
@@ -437,6 +451,10 @@ internal fun EventLogRow(event: EvoMoliorEvent) {
         is EvoMoliorEvent.RoundStarted -> "🔁" to "[ROUND ${event.roundIndex}] started"
         is EvoMoliorEvent.RoundCompleted -> "🏁" to "[ROUND ${event.result.roundIndex}] winner=${event.result.winnerId}"
         is EvoMoliorEvent.RunCompleted -> "✅" to "[RUN COMPLETED] winner=${event.winnerId ?: "none"}"
+        is EvoMoliorEvent.RunCompletedProvisional -> "🟡" to
+            "[RUN COMPLETED — PROVISIONAL / NOT ACCEPTED] ${event.reason}"
+        is EvoMoliorEvent.RunRecovered -> "🛟" to
+            "[RECOVERED — NOT ACCEPTED] ${event.reason}"
         is EvoMoliorEvent.RunAborted -> "❌" to "[ABORTED] ${event.reason}"
         is EvoMoliorEvent.AgentSpawned -> "🤖" to "[${event.groupId}] spawned ${event.role.name} (${event.agentId.take(6)})"
         is EvoMoliorEvent.AgentDied -> "💀" to "[${event.groupId}] agent ${event.agentId.take(6)} died: ${event.reason}"

@@ -31,6 +31,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class GraderMethodologyBindingCatalogTest {
@@ -70,6 +71,83 @@ class GraderMethodologyBindingCatalogTest {
             wire.requirements.single().criterion,
             result.draft.requirements.single().criterion
         )
+    }
+
+    @Test
+    fun `persisted exact methodology projects back to the same redacted repair draft`() {
+        val catalog = catalog(view())
+        val wire = wire(catalog)
+        val exact = assertIs<GraderMethodologyBindingResolution.Resolved>(
+            catalog.resolve(wire)
+        ).draft
+
+        assertEquals(wire, catalog.projectForRepair(exact))
+        assertNull(
+            catalog.projectForRepair(
+                exact.copy(
+                    requirements = exact.requirements.map {
+                        it.copy(mappedWorkerNodeIds = setOf(NodeId("worker-foreign")))
+                    }
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `accepted methodology carries into the next round only while its frontier is still leased`() {
+        val previousRound = catalog(view())
+        val accepted = assertIs<GraderMethodologyBindingResolution.Resolved>(
+            previousRound.resolve(wire(previousRound))
+        ).draft
+
+        // Next round re-leases the same grader node under a new lease: the baseline re-binds.
+        val nextRound = catalog(view(leaseId = "lease-r2", leaseHash = "lease-hash-r2").copy(round = 2))
+        val baseline = kotlin.test.assertNotNull(nextRound.projectForRepair(accepted))
+        assertEquals(
+            accepted,
+            assertIs<GraderMethodologyBindingResolution.Resolved>(nextRound.resolve(baseline)).draft
+        )
+
+        // A moved frontier cannot silently reuse bindings for nodes it no longer leases.
+        val moved = catalog(
+            view().copy(
+                round = 2,
+                nodes = listOf(
+                    view().nodes.single().copy(
+                        nodeId = GraderNodeId("grader-exact-b"),
+                        mappedWorkerNodeIds = setOf(NodeId("worker-exact-c"))
+                    )
+                )
+            )
+        )
+        assertNull(moved.projectForRepair(accepted))
+    }
+
+    @Test
+    fun `repair feedback redacts exact Atlas lease and catalog authority`() {
+        val catalog = catalog(view())
+        val exactAuthorities = buildList {
+            add(catalog.graderAtlasHash)
+            add(catalog.workerAtlasHash)
+            add(catalog.catalogHash)
+            catalog.activeLeases.forEach { lease ->
+                add(lease.graderNodeId.value)
+                add(lease.leaseId)
+                add(lease.leaseHash)
+            }
+            catalog.nodeBindings.forEach { row ->
+                add(row.graderNodeId.value)
+                row.workerBindings.forEach { add(it.workerNodeId.value) }
+            }
+        }
+        val feedback = "Keep the semantic criterion; invalid authority: " +
+            exactAuthorities.joinToString(" ")
+
+        val redacted = catalog.redactExactAuthority(feedback)
+
+        assertTrue(redacted.startsWith("Keep the semantic criterion"))
+        assertTrue(exactAuthorities.none(redacted::contains), redacted)
+        assertTrue("redacted-authority-" in redacted)
     }
 
     @Test

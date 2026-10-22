@@ -457,6 +457,7 @@ data class NodeCaptureDecision(
 enum class InstrumentalRewardType {
     SPAWN_CREDITS,
     TOOL_COMPUTE_CREDITS,
+    ARTIFACT_VALIDATION_CREDITS,
     SOURCE_ACCESS_CREDITS,
     RETRIEVAL_BUDGET,
     DISCLOSURE_TOKEN,

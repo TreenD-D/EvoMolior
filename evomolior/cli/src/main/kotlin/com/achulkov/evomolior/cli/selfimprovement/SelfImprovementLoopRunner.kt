@@ -17,6 +17,8 @@ import com.achulkov.evomolior.core.contract.OverseerOrigin
 import com.achulkov.evomolior.core.contract.OverseerOriginType
 import com.achulkov.evomolior.core.contract.OverseerTargetScope
 import com.achulkov.evomolior.core.contract.OverseerVariationSpec
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
+import com.achulkov.evomolior.core.config.LlmBackend
 import com.achulkov.evomolior.cli.selfimprovement.RepoWorkspaceManager
 import com.achulkov.evomolior.runtime.createProductionRuntime
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
@@ -51,11 +53,15 @@ private val loopJson = Json { prettyPrint = true; encodeDefaults = true }
  * @param sourceRepoRoot Read-only source checkout used as the initial baseline.
  * @param workspaceRoot Output root for the loop's persistent state, run data, and mutable copy.
  * @param openRouterApiKey API key for LLM calls.
+ * @param llmBackend Backend authority for Overseer proposals.
+ * @param codexReasoningEffort Codex reasoning authority for Overseer proposals.
  */
 class SelfImprovementLoopRunner(
     private val sourceRepoRoot: Path,
     private val workspaceRoot: Path,
     private val openRouterApiKey: String,
+    private val llmBackend: LlmBackend = LlmBackend.OPENROUTER,
+    private val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     private val proposalProvider: ProposalProvider? = null,
     private val experimentCycleRunner: (suspend () -> Int)? = null,
     private val executeScheduledExperiments: Boolean = false,
@@ -116,6 +122,8 @@ class SelfImprovementLoopRunner(
         proposalProvider ?: ProposalProvider { kernelState, metaArchiveSummary ->
             OverseerAgentRunner(
                 openRouterApiKey = openRouterApiKey,
+                llmBackend = llmBackend,
+                codexReasoningEffort = codexReasoningEffort,
                 providerCostRecorder = ProviderCallCostRecorder(
                     repository = CostLedgerRepository(
                         substrateFactory.get(

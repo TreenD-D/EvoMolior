@@ -77,4 +77,35 @@ class MetaJudgeTest {
         )
         assertEquals(2, verdict.graderSheetIds.size)
     }
+
+    @Test
+    fun `sheets with equal weight ratios on different scales are not contested`() {
+        val metaJudge = MetaJudge(minGraderGroups = 1)
+        fun sheet(id: String, correctness: Double, evidence: Double, clarity: Double) = GradingSheet(
+            sheetId = id,
+            runId = "run-metajudge-scale",
+            roundIndex = 0,
+            graderGroupId = "grader-$id",
+            rubricDimensions = listOf(
+                RubricDimension("correctness", "Correctness", correctness, "Correct claims"),
+                RubricDimension("evidence", "Evidence", evidence, "Cited evidence"),
+                RubricDimension("clarity", "Clarity", clarity, "Clear writing")
+            ),
+            automatedTests = emptyList(),
+            failureModes = emptyList(),
+            comparativePairs = emptyList(),
+            sealedAt = 1L
+        )
+
+        // Raw configured weights (sum 2.5) versus the same ratios normalised to 1.0.
+        metaJudge.registerSheet(sheet("raw", 1.25, 0.75, 0.5))
+        metaJudge.registerSheet(sheet("normalised", 0.5, 0.3, 0.2))
+
+        val verdict = metaJudge.verdict(0)
+
+        assertEquals(emptyList(), verdict.contestedDimensionIds)
+        assertEquals(0.5, verdict.dimensionWeights.getValue("correctness"), 1e-9)
+        assertEquals(0.3, verdict.dimensionWeights.getValue("evidence"), 1e-9)
+        assertEquals(0.2, verdict.dimensionWeights.getValue("clarity"), 1e-9)
+    }
 }

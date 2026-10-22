@@ -17,6 +17,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class CostLedgerRepositoryTest {
@@ -96,6 +97,36 @@ class CostLedgerRepositoryTest {
             database.close()
         }
     }
+
+    @Test
+    fun `publication closure atomically requires settlement and blocks future reservations`() =
+        runTest {
+            val runId = "run-cost-publication-closure"
+            val database = SubstrateDatabaseFactory(
+                createTempDirectory("cost-ledger-publication-closure-").toFile()
+            ).get(runId, "group-1")
+            try {
+                val repository = CostLedgerRepository(database)
+                repository.reserve(reservation(runId, "active", 0.4))
+
+                val activeFailure = assertFailsWith<IllegalStateException> {
+                    repository.closeForPublication(runId)
+                }
+                assertTrue(activeFailure.message.orEmpty().contains("1 active cost reservation"))
+
+                repository.release(release(runId, "active"))
+                val closure = repository.closeForPublication(runId)
+                assertEquals(CostLedgerEntryKind.PUBLICATION_CLOSED, closure.kind)
+                assertEquals(CostSubjectType.PUBLICATION_BARRIER, closure.subjectType)
+                assertEquals(closure, repository.closeForPublication(runId))
+                assertFailsWith<IllegalStateException> {
+                    repository.reserve(reservation(runId, "late", 0.1))
+                }
+                assertEquals(0L, repository.summary(runId).activeReservationCount)
+            } finally {
+                database.close()
+            }
+        }
 
     private fun reservation(runId: String, id: String, maximum: Double?) = CostLedgerEntry(
         entryId = "cost-reserved-$id",

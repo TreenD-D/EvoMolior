@@ -2,7 +2,11 @@
 
 package com.achulkov.evomolior.orchestration.lifecycle
 
+import com.achulkov.evomolior.core.config.CodexRuntimePreset
+
 import com.achulkov.evomolior.core.budget.BudgetLedger
+import com.achulkov.evomolior.core.contract.ExpectedAgentStopCancellationException
+import com.achulkov.evomolior.core.atlas.AtlasHashing
 import com.achulkov.evomolior.core.contract.BlockingAgentAbortException
 import com.achulkov.evomolior.core.contract.AgentBootContext
 import com.achulkov.evomolior.core.contract.RunInputArtifact
@@ -13,7 +17,10 @@ import com.achulkov.evomolior.core.contract.AgentExecutionPhase
 import com.achulkov.evomolior.core.contract.AgentExitRecord
 import com.achulkov.evomolior.core.contract.AgentLifecycleClassification
 import com.achulkov.evomolior.core.contract.AgentLifecycleRegistration
+import com.achulkov.evomolior.core.contract.AgentLifecycleDuty
+import com.achulkov.evomolior.core.contract.AgentRuntimeStateEvent
 import com.achulkov.evomolior.core.contract.CommitType
+import com.achulkov.evomolior.core.contract.PersistExitResult
 import com.achulkov.evomolior.core.contract.TtlCheckpointEvent
 import com.achulkov.evomolior.core.contract.TtlCheckpointKind
 import com.achulkov.evomolior.core.contract.WorkerLeaseAssignment
@@ -47,17 +54,24 @@ import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -65,8 +79,8 @@ import kotlinx.serialization.json.buildJsonArray
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentSkipListMap
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicReference
 import kotlin.random.Random
 import kotlin.time.Clock
 
@@ -81,6 +95,10 @@ private const val CANONICAL_CONTEXT_WIP_LIMIT = 8
 private const val CANONICAL_CONTEXT_ARTIFACT_LIMIT = 5
 private const val CANONICAL_CONTEXT_EXCERPT_CHARS = 700
 private const val CANONICAL_CONTEXT_ARTIFACT_EXCERPT_CHARS = 1_200
+private const val RUNTIME_TRANSITION_PERSISTENCE_ATTEMPTS = 3
+private const val RUNTIME_TRANSITION_PERSISTENCE_RETRY_DELAY_MS = 25L
+private const val EXIT_FINALIZATION_RETRY_ATTEMPTS = 3
+private const val EXIT_FINALIZATION_RETRY_DELAY_MS = 25L
 private val CANONICAL_CONTEXT_SYNTHETIC_MARKERS = listOf(
     "AUTO-GENERATED",
     "SUBSTRATE CONTRACT FALLBACK",
@@ -116,6 +134,7 @@ private val CANONICAL_CONTEXT_SYNTHETIC_MARKERS = listOf(
  * @param groupProfile The group's cost profile — injected as `EVOMOLIOR_GROUP_PROFILE` env var
  *   in Shuru VMs so the in-VM runner constructs the correct [BudgetConfig].
  * @param modelSelectionRandom RNG used to sample a concrete model from each role pool at spawn time.
+ * @param codexRuntimePreset Optional bounded Codex model policy; null preserves legacy selection.
  * @param localAgentRunner Optional suspend function that runs an agent in-process.
  *   The second parameter is an optional callback the runner uses to register the agent's
  *   [BudgetLedger] with this manager, enabling live budget polling. When provided,
@@ -123,6 +142,9 @@ private val CANONICAL_CONTEXT_SYNTHETIC_MARKERS = listOf(
  * @param gracePeriodSeconds How long to wait for Death Note after SIGTERM.
  * @param budgetPollingIntervalMs How often to check agent budgets and emit budget change events.
  * @param ipcPortBase Base port for IPC; incremented per agent.
+ * @param terminationCommitBarrier Optional control barrier entered after a runtime cell owns one
+ * termination request but before exit freezing and process cancellation.
+ * @param registrationCommitBarrier Optional control barrier before durable runtime registration.
  */
 class LifecycleManager(
     private val runId: String,
@@ -138,7 +160,11 @@ class LifecycleManager(
     private val nestedGroupRunBlock: (suspend (NestedGroupConfig) -> NestedGroupResult)? = null,
     private val gracePeriodSeconds: Int = 30,
     private val budgetPollingIntervalMs: Long = 5_000L,
-    private val ipcPortBase: Int = 10_000
+    private val ipcPortBase: Int = 10_000,
+    private val terminationCommitBarrier:
+        suspend (agentId: String, cause: AgentTerminationCause) -> Unit = { _, _ -> },
+    private val codexRuntimePreset: CodexRuntimePreset? = null,
+    private val registrationCommitBarrier: suspend (agentId: String) -> Unit = {},
 ) {
     internal fun networkAllowlistFor(
         role: Role,
@@ -156,10 +182,34 @@ class LifecycleManager(
 
     private val db get() = substrateDatabaseFactory.get(runId, groupId)
 
-    /** Live agent registry: agentId → (VmHandle/Job, status). */
-    private val liveAgents = ConcurrentHashMap<String, LiveAgentEntry>()
+    /** Stable live-agent registry. Mutable runtime state is reduced inside each cell. */
+    private val liveAgents = ConcurrentHashMap<String, AgentRuntimeCell>()
+    private val inProcessExecutionJobs = ConcurrentHashMap<String, Job>()
+    private val exitFinalizationMutexes = ConcurrentHashMap<String, Mutex>()
+    private val exitFinalizationPersistenceMutex = Mutex()
+    private val runtimeRegistrationMutex = Mutex()
+    private val runtimeTransitionPersistenceJobs = ConcurrentHashMap<String, Job>()
+    private val pendingRuntimeTransitions =
+        ConcurrentHashMap<String, ConcurrentSkipListMap<Long, AgentRuntimeStateEvent>>()
+    private val nextRuntimeTransitionRevision = ConcurrentHashMap<String, Long>()
+    private val runtimeTransitionPersistenceFailures = ConcurrentHashMap<String, Throwable>()
+    private val fatalExitConflicts = ConcurrentHashMap<String, AgentExitIdentityConflictException>()
+    private val exitFinalizationRetryJobs = ConcurrentHashMap<String, Job>()
+    private val exitFinalizationRetriesInProgress = ConcurrentHashMap.newKeySet<String>()
+    private val exitFinalizationRetryAttempts = ConcurrentHashMap<String, Int>()
+    private val exitFinalizationFailures = ConcurrentHashMap<String, Throwable>()
+    private val exitFinalizationRetryCount = AtomicInteger(0)
+    private val deathCallbackDuplicateCount = AtomicInteger(0)
+    private val maxExitToQuiescenceMs = java.util.concurrent.atomic.AtomicLong(0L)
+    private val runtimeTransitionPersistenceScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val activeNestedGroupJobs = ConcurrentHashMap<String, Job>()
     private val refundedBudgetByAgent = ConcurrentHashMap<String, Double>()
+    // Registry membership and settled totals move atomically, so an exit is never lost or counted twice.
+    private val budgetTelemetryLock = Any()
+    private data class SettledCredits(val allocated: Double = 0.0, val returned: Double = 0.0)
+    private val settledCreditsByGeneration = mutableMapOf<Int, SettledCredits>()
+    private var budgetTelemetryRevision = 0L
     private val ipcPortCounter = AtomicInteger(ipcPortBase)
     private var lastTurnTakingImbalanceSignature: String? = null
     private var startingField: StartingField? = null
@@ -222,24 +272,67 @@ class LifecycleManager(
     var onAgentSpawned: (agentId: String, role: Role, modelId: String) -> Unit = { _, _, _ -> }
 
     /**
-     * Called when an agent exits (normally or killed).
+     * Observes an already-finalized agent exit (normally or killed).
+     *
+     * Durable exit authority and lease/WiP cleanup complete before this callback. Implementations
+     * must not attach required lifecycle cleanup here: notification failures are logged and not
+     * retried so an observer receives at most one invocation per agent.
+     *
      * Parameters: agentId, wasKilled.
      */
     var onAgentDied: (agentId: String, wasKilled: Boolean) -> Unit = { _, _ -> }
 
     /**
-     * Called when a claimed WiP task is abandoned because its owner exited before the task
-     * was canonically completed.
+     * Observes an already-persisted claimed WiP task abandonment.
+     *
+     * Implementations must not attach required lifecycle cleanup here; database state is
+     * authoritative and callback failures are not retried.
      *
      * Parameters: agentId, taskNodeId, generation.
      */
     var onWipTaskAbandoned: (agentId: String, taskNodeId: String, generation: Int) -> Unit = { _, _, _ -> }
 
     /**
-     * Called periodically with the updated total remaining budget for this group
-     * (sum of all live agents' current budget balances).
+     * Legacy group availability observation: live balances plus policy refunds.
+     * This is not cumulative unspent credit or a generation depletion signal.
+     * Use [onBudgetTelemetryChanged] for population-aware budget monitoring.
      */
     var onBudgetChanged: (totalRemainingBudget: Double) -> Unit = { _ -> }
+
+    /** Immutable generation observations after spawning, ledger polling, and fully settled exits. */
+    var onBudgetTelemetryChanged: (LifecycleBudgetTelemetry) -> Unit = {}
+
+    /**
+     * Observes live ledger balances and settled unused credits without changing budget policy.
+     *
+     * Membership is captured atomically with settlement; each live ledger balance is sampled once.
+     * @param generation Generation whose actual allocations should be included.
+     * @return Immutable observation; allocated = live + spent + returned credits.
+     */
+    fun snapshotBudgetTelemetry(generation: Int): LifecycleBudgetTelemetry =
+        synchronized(budgetTelemetryLock) {
+            val settled = settledCreditsByGeneration[generation] ?: SettledCredits()
+            val cells = liveAgents.values.filter { it.generation == generation }
+            val liveAllocated = cells.sumOf { it.allocatedBudget }
+            val live = cells.sumOf { it.ledger()?.balance ?: it.snapshot().budgetRemaining }
+            LifecycleBudgetTelemetry(
+                generation = generation,
+                allocatedCredits = settled.allocated + liveAllocated,
+                liveAllocatedCredits = liveAllocated,
+                liveCredits = live,
+                spentCredits = settled.allocated - settled.returned + liveAllocated - live,
+                returnedCredits = settled.returned,
+                liveAgentCount = cells.size,
+                revision = ++budgetTelemetryRevision
+            )
+        }
+
+    private fun emitBudgetTelemetry(generation: Int) {
+        val telemetry = snapshotBudgetTelemetry(generation)
+        runCatching { onBudgetTelemetryChanged(telemetry) }.onFailure { error ->
+            Napier.w(error) { "[$groupId] Budget telemetry callback failed for generation $generation" }
+        }
+    }
 
     fun configureRunArtifacts(
         inputArtifacts: List<RunInputArtifact>,
@@ -281,6 +374,7 @@ class LifecycleManager(
 
         for (entry in allocation.entries) {
             repeat(entry.count) {
+                currentCoroutineContext().ensureActive()
                 try {
                     spawnAgent(
                         role = entry.role,
@@ -304,6 +398,8 @@ class LifecycleManager(
                         generationWipNodeIds = generationWipNodeIds,
                         scope = scope
                     )
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Napier.e(e) { "[$groupId] Failed to spawn agent for role ${entry.role}" }
                 }
@@ -347,11 +443,48 @@ class LifecycleManager(
         budgetMonitorJob?.cancelAndJoin()
         budgetMonitorJob = null
         activeNestedGroupJobs.values.toList().forEach { it.cancel() }
-        liveAgents.keys.toList().forEach { agentId ->
-            initiateKillSequence(agentId, "run_termination")
+        // Registration must finish publishing execution ownership before shutdown snapshots it.
+        val registeredAgentIds = runtimeRegistrationMutex.withLock { liveAgents.keys.toList() }
+        registeredAgentIds.forEach { agentId ->
+            initiateKillSequence(agentId, AgentTerminationCause.RUN_TERMINATION)
         }
         activeNestedGroupJobs.values.toList().forEach { nestedJob ->
             runCatching { nestedJob.cancelAndJoin() }
+        }
+    }
+
+    /**
+     * Waits for actual runner completion and durable publication accounting after shutdown.
+     *
+     * Callers must stop spawning before calling [terminateAll] and this barrier. This does not
+     * terminate agents or manufacture settlement for cancellation-resistant providers. A timeout
+     * leaves ongoing execution and finalization intact, and publication must remain blocked.
+     * Caller cancellation and [kotlinx.coroutines.TimeoutCancellationException] propagate.
+     *
+     * @param timeoutMillis Positive maximum drain wait, including persistence and cleanup.
+     * @return Quiescent durable accounting for this group.
+     */
+    suspend fun awaitQuiescence(timeoutMillis: Long = 30_000L): AgentPublicationAccounting {
+        require(timeoutMillis > 0L) { "Quiescence timeout must be positive" }
+        return withTimeout(timeoutMillis) {
+            while (true) {
+                // Join only from the cancellable waiter, never from non-cancellable finalization.
+                // Keep jobs tracked past live-cell removal so trailing lifecycle callbacks finish.
+                inProcessExecutionJobs.values.toList().forEach { it.join() }
+                val accounting = publicationAccounting()
+                if (
+                    accounting.isQuiescent &&
+                    inProcessExecutionJobs.isEmpty() &&
+                    exitFinalizationRetryJobs.isEmpty() &&
+                    exitFinalizationRetriesInProgress.isEmpty()
+                ) {
+                    return@withTimeout accounting
+                }
+                // Finalization retries own their work independently of the stopped budget monitor.
+                delay(50L)
+            }
+            @Suppress("UNREACHABLE_CODE")
+            error("Quiescence loop exited without accounting")
         }
     }
 
@@ -367,8 +500,55 @@ class LifecycleManager(
      */
     suspend fun terminateAgent(agentId: String, reason: String = "targeted_termination"): Boolean {
         if (!liveAgents.containsKey(agentId)) return false
-        initiateKillSequence(agentId, reason.take(120))
+        initiateKillSequence(
+            agentId = agentId,
+            cause = AgentTerminationCause.TARGETED_TERMINATION,
+            detail = reason.take(120)
+        )
         return true
+    }
+
+    /**
+     * Requests the explicitly expected stop of a writer after its candidate is durably staged.
+     *
+     * This changes cancellation telemetry only; the exit remains killed and strict cleanup,
+     * termination authority, and Death Note requirements are unchanged.
+     * @param agentId Writer whose candidate was staged by the caller.
+     * @return Whether a live agent was found for the stop request.
+     */
+    suspend fun terminateAgentAfterCandidateStaged(agentId: String): Boolean {
+        if (!liveAgents.containsKey(agentId)) return false
+        initiateKillSequence(
+            agentId = agentId,
+            cause = AgentTerminationCause.TARGETED_TERMINATION,
+            detail = "candidate_staged",
+            cancellationCause = ExpectedAgentStopCancellationException("candidate_staged")
+        )
+        return true
+    }
+
+    /**
+     * Waits for one agent's execution and strict lifecycle cleanup without stopping other agents.
+     *
+     * A timeout leaves ownership and exit accounting intact; a durable exit alone is insufficient.
+     * @param agentId Agent whose lifecycle ownership must be released.
+     * @param timeoutMs Maximum wait duration.
+     */
+    suspend fun awaitAgentQuiescence(agentId: String, timeoutMs: Long) {
+        require(timeoutMs > 0) { "Agent quiescence timeout must be positive" }
+        withTimeout(timeoutMs) {
+            while (true) {
+                inProcessExecutionJobs[agentId]?.join()
+                fatalExitConflicts[agentId]?.let { throw it }
+                if (
+                    !liveAgents.containsKey(agentId) &&
+                    !inProcessExecutionJobs.containsKey(agentId) &&
+                    !exitFinalizationRetryJobs.containsKey(agentId) &&
+                    agentId !in exitFinalizationRetriesInProgress
+                ) return@withTimeout
+                delay(50L)
+            }
+        }
     }
 
     /**
@@ -426,26 +606,99 @@ class LifecycleManager(
     @Suppress("unused") // called by orchestration layer to gate round advancement
     fun getLiveAgentCount(): Int = liveAgents.size
 
+    /**
+     * Returns a point-in-time copy of the remaining budgets for currently live agents.
+     *
+     * The snapshot is read from the public [agentStates] StateFlow so callers observe one
+     * thread-safe state publication rather than iterating mutable lifecycle registries.
+     *
+     * @return Immutable agent-id to remaining-budget snapshot.
+     */
+    fun snapshotLiveAgentBudgets(): Map<String, Double> =
+        agentStates.value.entries.associate { (agentId, state) ->
+            agentId to state.budgetRemaining
+        }
+
     /** Returns the number of currently active nested-group jobs. */
     fun getLiveNestedGroupCount(): Int = activeNestedGroupJobs.size
 
     /** Returns exact durable and live accounting for publication quiescence. */
     suspend fun publicationAccounting(): AgentPublicationAccounting {
+        awaitRuntimeTransitionPersistence()
         val repository = WorkerExecutionRepository(db)
-        val registered = repository.registrations(runId, groupId)
+        val registrationsByAgentId = repository.registrations(runId, groupId)
             .filter { it.classification == AgentLifecycleClassification.NON_DAEMON }
-            .mapTo(linkedSetOf()) { it.agentId.value }
+            .associateBy { it.agentId.value }
+        val registered = registrationsByAgentId.keys
         val exited = repository.exits(runId, groupId)
             .mapTo(linkedSetOf()) { it.agentId.value }
         val live = liveAgents.entries
             .filter { it.value.classification == AgentLifecycleClassification.NON_DAEMON }
             .mapTo(linkedSetOf()) { it.key }
+        val latestRuntimeStates = registered.associateWith { registeredAgentId ->
+            val registration = registrationsByAgentId.getValue(registeredAgentId)
+            repository.runtimeStateEvents(
+                runId,
+                groupId,
+                registeredAgentId,
+                registration.generation
+            ).lastOrNull()?.state
+        }
+        val orphanedUnsettled = latestRuntimeStates
+            .filter { (registeredAgentId, state) ->
+                registeredAgentId !in live &&
+                    state?.exitPersisted == true &&
+                    !state.executionSettled
+            }
+            .keys
         return AgentPublicationAccounting(
             registeredNonDaemonAgentIds = registered,
             exitedNonDaemonAgentIds = exited intersect registered,
             liveNonDaemonAgentIds = live,
             unaccountedNonDaemonAgentIds = registered - exited,
-            liveNestedGroupCount = activeNestedGroupJobs.size
+            liveNestedGroupCount = activeNestedGroupJobs.size,
+            pendingRuntimeTransitionCount = pendingRuntimeTransitions.values.sumOf { it.size },
+            runtimeTransitionFailureCount = runtimeTransitionPersistenceFailures.size,
+            exitIdentityConflictCount = fatalExitConflicts.size,
+            exitFinalizationFailureCount = exitFinalizationFailures.size,
+            orphanedUnsettledAgentIds = orphanedUnsettled
+        )
+    }
+
+    /** Exports the blueprint's lifecycle reconciliation and quiescence metrics. */
+    suspend fun lifecycleReconciliationMetrics(): LifecycleReconciliationMetrics {
+        val accounting = publicationAccounting()
+        val repository = WorkerExecutionRepository(db)
+        val registered = repository.registrations(runId, groupId)
+        val exits = repository.exits(runId, groupId)
+        val registeredIds = registered.mapTo(linkedSetOf()) { it.agentId.value }
+        val exitIds = exits.mapTo(linkedSetOf()) { it.agentId.value }
+        val persistedQuiescenceDurations = registered.mapNotNull { registration ->
+            val cleanup = repository.runtimeStateEvents(
+                runId,
+                groupId,
+                registration.agentId.value,
+                registration.generation
+            ).lastOrNull { it.state.cleanupComplete } ?: return@mapNotNull null
+            val exit = exits.firstOrNull { it.agentId == registration.agentId }
+                ?: return@mapNotNull null
+            (cleanup.occurredAt.toEpochMilliseconds() - exit.exitedAt.toEpochMilliseconds())
+                .coerceAtLeast(0L)
+        }
+        return LifecycleReconciliationMetrics(
+            exitIdentityConflictCount = fatalExitConflicts.size,
+            exitFinalizationRetryCount = exitFinalizationRetryCount.get(),
+            registeredWithoutExitCount = (registeredIds - exitIds).size,
+            exitWithoutRegisteredAgentCount = (exitIds - registeredIds).size,
+            liveExecutionAfterArchiveBarrier = accounting.liveNonDaemonAgentIds.size +
+                accounting.orphanedUnsettledAgentIds.size,
+            deathCallbackDuplicateCount = deathCallbackDuplicateCount.get(),
+            unsettledCostReservationCount = liveAgents.values.count {
+                !it.snapshot().costSettled
+            },
+            maxExitToQuiescenceMs = (
+                persistedQuiescenceDurations + maxExitToQuiescenceMs.get()
+                ).maxOrNull()
         )
     }
 
@@ -496,6 +749,147 @@ class LifecycleManager(
 
     // ---- Private ----
 
+    private fun newRuntimeCell(
+        agentId: String,
+        generation: Int,
+        role: Role,
+        allocatedBudget: Double,
+        wipTaskClaim: WipTaskClaim?,
+        workerAuthority: WorkerAuthorityAssignment?,
+        classification: AgentLifecycleClassification,
+        spawnedAtMs: Long
+    ): AgentRuntimeCell = AgentRuntimeCell(
+        runId = runId,
+        groupId = groupId,
+        agentId = agentId,
+        generation = generation,
+        role = role,
+        allocatedBudget = allocatedBudget,
+        wipTaskClaim = wipTaskClaim,
+        workerAuthority = workerAuthority,
+        classification = classification,
+        spawnedAtMs = spawnedAtMs,
+        transitionSink = ::persistRuntimeTransition,
+        duty = lifecycleDutyFor(role),
+        workspaceId = artifactWorkspaceIdentity(role)?.first,
+        workspaceSourceHash = artifactWorkspaceIdentity(role)?.second
+    )
+
+    private fun lifecycleDutyFor(role: Role): AgentLifecycleDuty =
+        if (role == Role.Builder) {
+            AgentLifecycleDuty.ARTIFACT_OWNER
+        } else {
+            AgentLifecycleDuty.NONE
+        }
+
+    private fun markArtifactOwnerWorkspaceUse(cell: AgentRuntimeCell) {
+        if (cell.duty != AgentLifecycleDuty.ARTIFACT_OWNER) return
+        cell.markArtifactWorkspaceUsed(
+            workspaceId = requireNotNull(cell.workspaceId) {
+                "ArtifactOwner runtime cell lacks its registered workspace identity"
+            },
+            workspaceSourceHash = requireNotNull(cell.workspaceSourceHash) {
+                "ArtifactOwner runtime cell lacks its registered workspace source hash"
+            },
+        )
+    }
+
+    private fun artifactWorkspaceIdentity(role: Role): Pair<String, String>? {
+        if (role != Role.Builder) return null
+        val workspaceId = "artifact-workspace:$runId:$groupId"
+        val sourceHash = AtlasHashing.hashText(
+            "artifact-workspace-source:$runId:$groupId:${runArtifactsMountPath.orEmpty()}"
+        )
+        return workspaceId to sourceHash
+    }
+
+    private fun persistRuntimeTransition(event: AgentRuntimeStateEvent) {
+        pendingRuntimeTransitions
+            .computeIfAbsent(event.agentId.value) { ConcurrentSkipListMap() }[event.revision] = event
+        scheduleRuntimeTransitionDrain(event.agentId.value)
+    }
+
+    private fun scheduleRuntimeTransitionDrain(agentId: String) {
+        lateinit var persistenceJob: Job
+        persistenceJob = runtimeTransitionPersistenceScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                drainRuntimeTransitions(agentId)
+            } finally {
+                runtimeTransitionPersistenceJobs.remove(agentId, persistenceJob)
+                if (
+                    pendingRuntimeTransitions[agentId]?.isNotEmpty() == true &&
+                    !hasBlockedRuntimeTransition(agentId)
+                ) {
+                    scheduleRuntimeTransitionDrain(agentId)
+                }
+            }
+        }
+        if (runtimeTransitionPersistenceJobs.putIfAbsent(agentId, persistenceJob) == null) {
+            persistenceJob.start()
+        } else {
+            persistenceJob.cancel()
+        }
+    }
+
+    private suspend fun awaitRuntimeTransitionPersistence() {
+        while (true) {
+            runtimeTransitionPersistenceJobs.values.toList().forEach { it.join() }
+            val schedulableAgentIds = pendingRuntimeTransitions.entries
+                .filter { (_, events) -> events.isNotEmpty() }
+                .map { it.key }
+                .filterNot(::hasBlockedRuntimeTransition)
+            if (schedulableAgentIds.isEmpty()) return
+            schedulableAgentIds.forEach(::scheduleRuntimeTransitionDrain)
+        }
+    }
+
+    private fun hasBlockedRuntimeTransition(agentId: String): Boolean {
+        val firstPending = pendingRuntimeTransitions[agentId]?.firstEntry()?.value ?: return false
+        return runtimeTransitionPersistenceFailures.containsKey(firstPending.eventId)
+    }
+
+    private fun runtimeTransitionFailureFor(agentId: String): Throwable? =
+        pendingRuntimeTransitions[agentId]
+            ?.values
+            ?.firstNotNullOfOrNull { event ->
+                runtimeTransitionPersistenceFailures[event.eventId]
+            }
+
+    private suspend fun drainRuntimeTransitions(agentId: String) {
+        val pending = pendingRuntimeTransitions[agentId] ?: return
+        while (true) {
+            val nextRevision = nextRuntimeTransitionRevision.getOrPut(agentId) { 1L }
+            val event = pending[nextRevision] ?: return
+            var persisted = false
+            var failure: Throwable? = null
+            repeat(RUNTIME_TRANSITION_PERSISTENCE_ATTEMPTS) { attempt ->
+                if (!persisted) {
+                    runCatching {
+                        WorkerExecutionRepository(db).appendRuntimeStateEvent(event)
+                    }.onSuccess {
+                        persisted = true
+                        failure = null
+                        runtimeTransitionPersistenceFailures.remove(event.eventId)
+                    }.onFailure { error ->
+                        failure = error
+                        if (attempt + 1 < RUNTIME_TRANSITION_PERSISTENCE_ATTEMPTS) {
+                            delay(RUNTIME_TRANSITION_PERSISTENCE_RETRY_DELAY_MS)
+                        }
+                    }
+                }
+            }
+            failure?.let { error ->
+                runtimeTransitionPersistenceFailures[event.eventId] = error
+                Napier.e(error) {
+                    "[$groupId] Failed to persist runtime transition ${event.eventId}"
+                }
+                return
+            }
+            pending.remove(nextRevision, event)
+            nextRuntimeTransitionRevision[agentId] = nextRevision + 1
+        }
+    }
+
     private fun buildNestedGroupRunner(config: NestedGroupConfig): NestedGroupRunner =
         NestedGroupRunner(
             config = config,
@@ -532,7 +926,8 @@ class LifecycleManager(
             nestedGroupRunBlock = nestedGroupRunBlock,
             gracePeriodSeconds = gracePeriodSeconds,
             budgetPollingIntervalMs = budgetPollingIntervalMs,
-            ipcPortBase = ipcPortCounter.getAndAdd(100)
+            ipcPortBase = ipcPortCounter.getAndAdd(100),
+            terminationCommitBarrier = terminationCommitBarrier
         ).also { nestedLifecycleManager ->
             nestedLifecycleManager.configureStartingField(startingField)
         }
@@ -679,13 +1074,24 @@ class LifecycleManager(
     ): String =
         """{"nestedGroupId":"${result.nestedGroupId}","completedNormally":${result.completedNormally},"budgetConsumed":${result.budgetConsumed},"kbImported":${importedKbDocumentIds.size},"kgImported":${importedKgFactIds.size},"toolsImported":${importedToolIds.size}}"""
 
-    private fun resolveModelForRole(
+    internal fun resolveModelForRole(
         role: Role,
         modelAssignments: Map<String, String>,
         modelPools: Map<String, List<String>>,
         explicitModelAssignment: String? = null
     ): String {
-        explicitModelAssignment?.let { return it }
+        explicitModelAssignment?.let { modelId ->
+            require(codexRuntimePreset == null || modelId in codexRuntimePreset.supportedModelIds) {
+                "Explicit model assignment exceeds preset authority"
+            }
+            return modelId
+        }
+        codexRuntimePreset?.let { preset ->
+            val candidates = modelPools[role.name]?.takeIf { it.isNotEmpty() }
+                ?: modelAssignments[role.name]?.let(::listOf)
+                ?: preset.modelPool(role)
+            return preset.selectModel(role, candidates, modelSelectionRandom)
+        }
         modelPools[role.name]?.takeIf { it.isNotEmpty() }?.let { pool ->
             return pool.random(modelSelectionRandom)
         }
@@ -738,7 +1144,8 @@ class LifecycleManager(
         } else null
         if (workerAuthorityFactory != null &&
             workerAuthorityScope == WorkerAuthorityScope.NODE_ASSIGNMENT &&
-            wipClaim == null
+            wipClaim == null &&
+            role != Role.Builder
         ) {
             Napier.i {
                 "[$groupId] Skipping ${role.name} spawn because the compiled worker portfolio " +
@@ -776,7 +1183,10 @@ class LifecycleManager(
             } else null
         }.getOrNull()
 
-        val workerAuthority = if (role.isOrdinaryWorkerRole) {
+        val workerAuthority = if (
+            role.isOrdinaryWorkerRole &&
+                !(role == Role.Builder && wipClaim == null)
+        ) {
             workerAuthorityFactory?.let { factory ->
                 runCatching {
                     val assignment = factory(
@@ -913,99 +1323,147 @@ class LifecycleManager(
         if (localAgentRunner != null) {
             // ── In-process mode: run agent as a coroutine ────────────────────
             val spawnTimeMs = System.currentTimeMillis()
-            val completedBeforeRegistration = AtomicReference<Boolean?>(null)
-            val agentJob = scope.launch {
+            val agentJob = scope.launch(start = CoroutineStart.LAZY) {
                 try {
                     Napier.i { "[$groupId] In-process agent $agentId (${role.name}) starting — model=$modelAssignment budget=$budgetPerAgent" }
                     // Pass a callback so the runner can register the BudgetLedger for live polling
                     localAgentRunner.invoke(bootContext) { ledger ->
-                        // Store the live ledger reference so monitorBudgets() can poll it
-                        liveAgents[agentId]?.let { entry ->
-                            liveAgents[agentId] = entry.copy(budgetLedger = ledger)
-                        }
+                        liveAgents[agentId]?.attachBudgetLedger(ledger)
                         Napier.d { "[$groupId] Agent $agentId registered BudgetLedger (initialBudget=${ledger.initialBudget})" }
                     }
                     val durationMs = System.currentTimeMillis() - spawnTimeMs
                     Napier.i { "[$groupId] In-process agent $agentId completed normally in ${durationMs}ms" }
-                    val entry = liveAgents[agentId]
+                    val entry = markInProcessExecutionFinished(agentId)
                     if (entry != null) {
-                        handleAgentExit(agentId, wasKilled = false)
-                    } else {
-                        completedBeforeRegistration.set(false)
+                        handleAgentExit(
+                            agentId,
+                            wasKilled = entry.snapshot().exitRecord?.wasKilled ?: false
+                        )
                     }
                 } catch (e: CancellationException) {
                     Napier.i { "[$groupId] In-process agent $agentId was cancelled after ${System.currentTimeMillis() - spawnTimeMs}ms" }
-                    val entry = liveAgents[agentId]
-                    if (entry != null) {
-                        handleAgentExit(agentId, wasKilled = true)
-                    } else {
-                        completedBeforeRegistration.set(true)
-                    }
-                    throw e // propagate to properly cancel the coroutine
-                } catch (e: BlockingAgentAbortException) {
-                    Napier.w(e) { "[$groupId] In-process agent $agentId aborted due to blocking runtime error after ${System.currentTimeMillis() - spawnTimeMs}ms: ${e.message}" }
-                    val entry = liveAgents[agentId]
+                    val entry = markInProcessExecutionFinished(agentId)
                     if (entry != null) {
                         handleAgentExit(
-                            agentId = agentId,
-                            wasKilled = true,
-                            refundedBudget = entry.budgetLedger?.initialBudget ?: entry.budgetRemaining
+                            agentId,
+                            wasKilled = entry.snapshot().exitRecord?.wasKilled ?: true
                         )
-                    } else {
-                        completedBeforeRegistration.set(true)
+                    }
+                    throw e // propagate to properly cancel the coroutine
+                } catch (e: AgentExitIdentityConflictException) {
+                    throw e
+                } catch (e: BlockingAgentAbortException) {
+                    Napier.w(e) { "[$groupId] In-process agent $agentId aborted due to blocking runtime error after ${System.currentTimeMillis() - spawnTimeMs}ms: ${e.message}" }
+                    val entry = markInProcessExecutionFinished(agentId)
+                    if (entry != null) {
+                        val state = entry.snapshot()
+                        handleAgentExit(
+                            agentId = agentId,
+                            wasKilled = state.exitRecord?.wasKilled ?: true,
+                            refundedBudget = entry.ledger()?.initialBudget ?: state.budgetRemaining
+                        )
                     }
                 } catch (e: Exception) {
                     val durationMs = System.currentTimeMillis() - spawnTimeMs
                     Napier.e(e) { "[$groupId] In-process agent $agentId [${e::class.simpleName}] error after ${durationMs}ms: ${e.message}" }
-                    val entry = liveAgents[agentId]
+                    val entry = markInProcessExecutionFinished(agentId)
                     if (entry != null) {
+                        val state = entry.snapshot()
                         handleAgentExit(
                             agentId = agentId,
-                            wasKilled = true,
-                            refundedBudget = entry.budgetLedger?.initialBudget ?: entry.budgetRemaining
+                            wasKilled = state.exitRecord?.wasKilled ?: true,
+                            refundedBudget = entry.ledger()?.initialBudget ?: state.budgetRemaining
                         )
-                    } else {
-                        completedBeforeRegistration.set(true)
                     }
                 }
             }
 
-            liveAgents[agentId] = LiveAgentEntry(
-                handle = null,
-                job = agentJob,
-                status = AgentStatus.Active,
-                generation = generation,
-                role = role,
-                allocatedBudget = budgetPerAgent,
-                budgetRemaining = budgetPerAgent,
-                budgetLedger = null,  // will be set by the runner callback above
-                wipTaskClaim = effectiveWipClaim,
-                workerAuthority = workerAuthority,
-                classification = classification,
-                spawnedAtMs = spawnTimeMs
-            )
-            WorkerExecutionRepository(db).registerAgent(
-                AgentLifecycleRegistration(
-                    registrationId = "registration:$runId:$groupId:$agentId",
-                    runId = runId,
-                    groupId = com.achulkov.evomolior.core.atlas.AtlasGroupId(groupId),
-                    agentId = com.achulkov.evomolior.core.atlas.AtlasAgentId(agentId),
-                    role = role.name,
-                    generation = generation,
-                    classification = classification,
-                    registeredAt = kotlin.time.Instant.fromEpochMilliseconds(spawnTimeMs)
-                ).withComputedHash()
-            )
-            updateAgentStates()
-            maybeEmitTurnTakingImbalanceSignal()
-            emitEvent(EventTypes.AGENT_SPAWN, agentId, generation, buildSpawnPayload(agentId, role, generation))
-            onAgentSpawned(agentId, role, modelAssignment)
-            Napier.i { "[$groupId] Launched in-process agent: $agentId (${role.name}) model=$modelAssignment" }
-            completedBeforeRegistration.get()?.let { wasKilled ->
-                liveAgents[agentId]?.let {
-                    handleAgentExit(agentId, wasKilled = wasKilled)
+            try {
+                // Durable registration and published execution ownership form one cancellation
+                // boundary. Shutdown must never observe a partially registered runtime cell.
+                withContext(NonCancellable) {
+                    runtimeRegistrationMutex.withLock {
+                        val runtimeCell = newRuntimeCell(
+                            agentId = agentId,
+                            generation = generation,
+                            role = role,
+                            allocatedBudget = budgetPerAgent,
+                            wipTaskClaim = effectiveWipClaim,
+                            workerAuthority = workerAuthority,
+                            classification = classification,
+                            spawnedAtMs = spawnTimeMs
+                        )
+                        registrationCommitBarrier(agentId)
+                        WorkerExecutionRepository(db).registerAgent(
+                            AgentLifecycleRegistration(
+                                registrationId = "registration:$runId:$groupId:$agentId",
+                                runId = runId,
+                                groupId = com.achulkov.evomolior.core.atlas.AtlasGroupId(groupId),
+                                agentId = com.achulkov.evomolior.core.atlas.AtlasAgentId(agentId),
+                                role = role.name,
+                                generation = generation,
+                                classification = classification,
+                                registeredAt = kotlin.time.Instant.fromEpochMilliseconds(spawnTimeMs),
+                                duty = lifecycleDutyFor(role),
+                                workspaceId = artifactWorkspaceIdentity(role)?.first,
+                                workspaceSourceHash = artifactWorkspaceIdentity(role)?.second
+                            ).withComputedHash()
+                        )
+                        runtimeCell.confirmRegistration()
+                        runtimeCell.attachExecutionJob(agentJob)
+                        markArtifactOwnerWorkspaceUse(runtimeCell)
+                        synchronized(budgetTelemetryLock) {
+                            check(liveAgents.putIfAbsent(agentId, runtimeCell) == null) {
+                                "Agent runtime identity already registered: $agentId"
+                            }
+                        }
+                        inProcessExecutionJobs[agentId] = agentJob
+                        agentJob.invokeOnCompletion {
+                            // A cancelled lazy job never enters its body. Install fallback
+                            // settlement only after its registered cell is visible.
+                            if (!runtimeCell.snapshot().executionSettled) {
+                                val cleanupJob = runtimeTransitionPersistenceScope.launch(
+                                    start = CoroutineStart.LAZY,
+                                ) {
+                                    markInProcessExecutionFinished(agentId)?.let { completedEntry ->
+                                        handleAgentExit(
+                                            agentId,
+                                            wasKilled = completedEntry.snapshot().exitRecord?.wasKilled
+                                                ?: agentJob.isCancelled
+                                        )
+                                    }
+                                }
+                                inProcessExecutionJobs.replace(agentId, agentJob, cleanupJob)
+                                cleanupJob.invokeOnCompletion {
+                                    inProcessExecutionJobs.remove(agentId, cleanupJob)
+                                }
+                                cleanupJob.start()
+                            } else {
+                                inProcessExecutionJobs.remove(agentId, agentJob)
+                            }
+                        }
+                    }
                 }
+                currentCoroutineContext().ensureActive()
+                updateAgentStates()
+                maybeEmitTurnTakingImbalanceSignal()
+                emitEvent(
+                    EventTypes.AGENT_SPAWN,
+                    agentId,
+                    generation,
+                    buildSpawnPayload(agentId, role, generation),
+                )
+                onAgentSpawned(agentId, role, modelAssignment)
+                emitBudgetTelemetry(generation)
+                Napier.i {
+                    "[$groupId] Launched in-process agent: $agentId (${role.name}) model=$modelAssignment"
+                }
+                agentJob.start()
+            } catch (failure: Throwable) {
+                agentJob.cancel()
+                throw failure
             }
+            yield()
 
         } else {
             // ── Shuru VM mode: spawn via CLI ──────────────────────────────────
@@ -1043,20 +1501,21 @@ class LifecycleManager(
                 return
             }
 
-            liveAgents[agentId] = LiveAgentEntry(
-                handle = handle,
-                job = null,
-                status = AgentStatus.Active,
+            val runtimeCell = newRuntimeCell(
+                agentId = agentId,
                 generation = generation,
                 role = role,
                 allocatedBudget = budgetPerAgent,
-                budgetRemaining = budgetPerAgent,
-                budgetLedger = null,  // Shuru VM agents manage their own ledger internally
                 wipTaskClaim = effectiveWipClaim,
                 workerAuthority = workerAuthority,
                 classification = classification,
                 spawnedAtMs = System.currentTimeMillis()
             )
+            synchronized(budgetTelemetryLock) {
+                check(liveAgents.putIfAbsent(agentId, runtimeCell) == null) {
+                    "Agent runtime identity already registered: $agentId"
+                }
+            }
             val registeredAt = Clock.System.now()
             WorkerExecutionRepository(db).registerAgent(
                 AgentLifecycleRegistration(
@@ -1067,13 +1526,20 @@ class LifecycleManager(
                     role = role.name,
                     generation = generation,
                     classification = classification,
-                    registeredAt = registeredAt
+                    registeredAt = registeredAt,
+                    duty = lifecycleDutyFor(role),
+                    workspaceId = artifactWorkspaceIdentity(role)?.first,
+                    workspaceSourceHash = artifactWorkspaceIdentity(role)?.second
                 ).withComputedHash()
             )
+            runtimeCell.confirmRegistration()
+            runtimeCell.attachVmHandle(handle)
+            markArtifactOwnerWorkspaceUse(runtimeCell)
             updateAgentStates()
             maybeEmitTurnTakingImbalanceSignal()
             emitEvent(EventTypes.AGENT_SPAWN, agentId, generation, buildSpawnPayload(agentId, role, generation))
             onAgentSpawned(agentId, role, modelAssignment)
+            emitBudgetTelemetry(generation)
             Napier.i { "[$groupId] Spawned Shuru VM agent: $agentId (${role.name}) model=$modelAssignment" }
         }
     }
@@ -1281,38 +1747,62 @@ class LifecycleManager(
             var totalBudgetChanged = false
 
             for (agentId in agentIds) {
-                val entry = liveAgents[agentId] ?: continue
-                processTtlCheckpoints(agentId, entry)
+                fatalExitConflicts[agentId]?.let { throw it }
+                val cell = liveAgents[agentId] ?: continue
+                val state = cell.snapshot()
+                val frozenExit = state.exitRecord
+                if (frozenExit != null) {
+                    // A prior cleanup attempt failed after the durable exit was written. Keep the
+                    // agent live for publication accounting. Scheduled retries own cleanup after
+                    // a failure; polling only resumes finalization once execution later settles.
+                    if (
+                        !exitFinalizationFailures.containsKey(agentId) &&
+                        !exitFinalizationRetryJobs.containsKey(agentId) &&
+                        agentId !in exitFinalizationRetriesInProgress
+                    ) {
+                        handleAgentExit(agentId, wasKilled = frozenExit.wasKilled)
+                    }
+                    continue
+                }
+                processTtlCheckpoints(cell)
                 when {
-                    entry.job != null -> {
+                    cell.executionJob() != null -> {
                         // In-process agents self-cleanup via their coroutine completion handlers.
-                        if (!entry.job.isActive) {
+                        if (cell.executionJob()?.isCompleted == true) {
                             Napier.d { "[$groupId] In-process agent $agentId job completed (late detection)" }
-                            handleAgentExit(agentId, wasKilled = false)
+                            markInProcessExecutionFinished(agentId)?.let { completedEntry ->
+                                handleAgentExit(
+                                    agentId,
+                                    wasKilled = completedEntry.snapshot().exitRecord?.wasKilled ?: false
+                                )
+                            }
                         } else {
                             // Poll the live BudgetLedger balance if available
-                            val ledger = entry.budgetLedger
+                            val ledger = cell.ledger()
                             if (ledger != null) {
                                 val currentBalance = ledger.balance
-                                if (currentBalance != entry.budgetRemaining) {
-                                    liveAgents[agentId] = entry.copy(budgetRemaining = currentBalance)
+                                if (cell.observeBudget(currentBalance)) {
                                     totalBudgetChanged = true
                                     Napier.d { "[$groupId] Agent $agentId budget: ${currentBalance} (spent=${ledger.initialBudget - currentBalance})" }
                                 }
                                 // ── Budget floor kill (§2a) ─────────────────────────────
                                 // If the ledger has hit its floor, immediately cancel the
                                 // agent coroutine so it writes its Death Note and exits.
-                                if (ledger.isAtFloor && entry.status != AgentStatus.DyingGracefully) {
+                                if (ledger.isAtFloor && !cell.snapshot().killRequested) {
                                     Napier.w { "[$groupId] Agent $agentId hit budget floor — initiating kill" }
-                                    initiateKillSequence(agentId, "budget_floor")
+                                    initiateKillSequence(
+                                        agentId,
+                                        AgentTerminationCause.BUDGET_FLOOR
+                                    )
                                 }
                             }
                         }
                     }
-                    entry.handle != null -> {
+                    cell.vmHandle() != null -> {
                         // Shuru VM: poll status via CLI
-                        val status = shuruVmManager.status(entry.handle)
+                        val status = shuruVmManager.status(requireNotNull(cell.vmHandle()))
                         if (status == "stopped" || status == "unknown") {
+                            cell.markExecutionSettled()
                             handleAgentExit(agentId, wasKilled = false)
                         }
                     }
@@ -1321,22 +1811,28 @@ class LifecycleManager(
 
             // Emit aggregate budget update if any agent's balance changed
             if (totalBudgetChanged) {
-                val totalRemaining = liveAgents.values.sumOf { it.budgetLedger?.balance ?: it.budgetRemaining }
-                onBudgetChanged(totalRemaining)
+                liveAgents.values.map { it.generation }.distinct().forEach(::emitBudgetTelemetry)
+                runCatching {
+                    onBudgetChanged(totalRemainingBudget())
+                }.onFailure { error ->
+                    Napier.w(error) { "[$groupId] Budget callback failed during polling" }
+                }
                 maybeEmitTurnTakingImbalanceSignal()
                 updateAgentStates()
             }
         }
     }
 
-    private suspend fun processTtlCheckpoints(agentId: String, entry: LiveAgentEntry) {
-        val policy = entry.workerAuthority?.ttlPolicy ?: return
+    private suspend fun processTtlCheckpoints(cell: AgentRuntimeCell) {
+        val agentId = cell.agentId
+        val policy = cell.workerAuthority?.ttlPolicy ?: return
+        val initialState = cell.snapshot()
         val elapsedFraction = (
-            (System.currentTimeMillis() - entry.spawnedAtMs).coerceAtLeast(0L).toDouble() /
+            (System.currentTimeMillis() - cell.spawnedAtMs).coerceAtLeast(0L).toDouble() /
                 (policy.lifetimeSeconds * 1_000L).toDouble()
             ).coerceIn(0.0, 1.0)
         val repository = WorkerExecutionRepository(db)
-        var persisted = entry.ttlCheckpoints
+        var persisted = initialState.ttlCheckpoints
         for ((checkpoint, threshold) in policy.checkpointFractions.entries.sortedBy { it.value }) {
             if (elapsedFraction < threshold || checkpoint in persisted) continue
             val phase = when (checkpoint) {
@@ -1352,50 +1848,65 @@ class LifecycleManager(
                     runId = runId,
                     groupId = com.achulkov.evomolior.core.atlas.AtlasGroupId(groupId),
                     agentId = com.achulkov.evomolior.core.atlas.AtlasAgentId(agentId),
-                    round = entry.generation,
+                    round = cell.generation,
                     checkpoint = checkpoint,
                     elapsedFraction = threshold,
-                    remainingBudget = entry.budgetLedger?.balance ?: entry.budgetRemaining,
+                    remainingBudget = cell.ledger()?.balance ?: cell.snapshot().budgetRemaining,
                     phase = phase,
                     occurredAt = Clock.System.now()
                 )
             )
             persisted = persisted + checkpoint
-            liveAgents[agentId]?.let { current ->
-                liveAgents[agentId] = current.copy(ttlCheckpoints = persisted)
-            }
+            cell.recordTtlCheckpoint(checkpoint)
         }
         if (
             elapsedFraction >= 1.0 &&
-            entry.status != AgentStatus.DyingGracefully &&
+            !cell.snapshot().killRequested &&
             liveAgents.containsKey(agentId)
         ) {
-            initiateKillSequence(agentId, "ttl_expired")
+            initiateKillSequence(agentId, AgentTerminationCause.TTL_EXPIRED)
         }
     }
 
-    private suspend fun initiateKillSequence(agentId: String, reason: String) {
+    private suspend fun initiateKillSequence(
+        agentId: String,
+        cause: AgentTerminationCause,
+        detail: String = cause.name.lowercase(),
+        cancellationCause: CancellationException? = null
+    ) {
         val entry = liveAgents[agentId] ?: return
-        Napier.i { "[$groupId] Kill sequence initiated for $agentId: $reason" }
+        val ownsKillSequence = entry.requestTermination()
+        if (!ownsKillSequence) {
+            entry.snapshot().exitRecord?.let { exit ->
+                handleAgentExit(agentId, wasKilled = exit.wasKilled)
+            }
+            return
+        }
+        Napier.i {
+            if (cancellationCause is ExpectedAgentStopCancellationException) {
+                "[$groupId] Controlled stop initiated for $agentId: $detail"
+            } else {
+                "[$groupId] Kill sequence initiated for $agentId: $detail"
+            }
+        }
 
-        // Mark as dying
-        liveAgents[agentId] = entry.copy(status = AgentStatus.DyingGracefully)
         updateAgentStates()
+        terminationCommitBarrier(agentId, cause)
 
-        if (entry.job != null) {
+        if (entry.executionJob() != null) {
             // In-process mode: cancel the coroutine, but do not join it. Provider/Koog calls are
             // not guaranteed to be cancellation-cooperative; joining a stuck call blocks the run
             // loop forever and prevents final-output publication.
-            entry.job.cancel()
-            liveAgents[agentId]?.let {
-                handleAgentExit(agentId, wasKilled = true)
-            }
+            handleAgentExit(agentId, wasKilled = true)
+            entry.executionJob()?.cancel(cancellationCause)
             return
         }
 
         // Shuru VM mode: SIGTERM → grace period → SIGKILL
+        handleAgentExit(agentId, wasKilled = true)
+        val handle = requireNotNull(entry.vmHandle())
         try {
-            shuruVmManager.signal(entry.handle!!, "SIGTERM")
+            shuruVmManager.signal(handle, "SIGTERM")
         } catch (e: Exception) {
             Napier.w(e) { "SIGTERM failed for $agentId" }
         }
@@ -1404,16 +1915,17 @@ class LifecycleManager(
         delay(gracePeriodSeconds * 1000L)
 
         // Check if VM still running
-        val status = shuruVmManager.status(entry.handle!!)
+        val status = shuruVmManager.status(handle)
         if (status == "running") {
             Napier.w { "[$groupId] Agent $agentId did not exit during grace period — SIGKILL" }
             try {
-                shuruVmManager.killVm(entry.handle)
+                shuruVmManager.killVm(handle)
             } catch (e: Exception) {
                 Napier.e(e) { "SIGKILL failed for $agentId" }
             }
         }
 
+        entry.markExecutionSettled()
         handleAgentExit(agentId, wasKilled = true)
     }
 
@@ -1422,57 +1934,21 @@ class LifecycleManager(
         wasKilled: Boolean,
         refundedBudget: Double = 0.0
     ) {
-        val exitEntry = liveAgents.remove(agentId) ?: return
+        val mutex = exitFinalizationMutexes.computeIfAbsent(agentId) { Mutex() }
         withContext(NonCancellable) {
-            if (refundedBudget > 0.0) {
-                refundedBudgetByAgent[agentId] = refundedBudget
-            } else {
-                refundedBudgetByAgent.remove(agentId)
-            }
-            updateAgentStates()
+            mutex.withLock {
+                exitFinalizationPersistenceMutex.withLock persistenceLock@{
+                try {
+                fatalExitConflicts[agentId]?.let { throw it }
+                val exitEntry = liveAgents[agentId] ?: return@persistenceLock
+                val initialState = exitEntry.snapshot()
+                val workerRepository = WorkerExecutionRepository(db)
 
-            // Log final budget snapshot if we have a live ledger (in-process mode)
-            val finalSnapshot = exitEntry.budgetLedger?.snapshot()
-            if (finalSnapshot != null) {
-                Napier.i {
-                    "[$groupId] Agent $agentId final budget: initial=${finalSnapshot.initialBudget} " +
-                        "remaining=${finalSnapshot.currentBalance} " +
-                        "actions=${finalSnapshot.actionLog.size} " +
-                        "spent=${finalSnapshot.initialBudget - finalSnapshot.currentBalance}"
-                }
-                if (finalSnapshot.actionLog.isNotEmpty()) {
-                    val actionSummary = finalSnapshot.actionLog
-                        .groupBy { it.actionType }
-                        .map { (type, deductions) -> "${type.name}=${deductions.size}" }
-                        .joinToString(", ")
-                    Napier.d { "[$groupId] Agent $agentId action breakdown: $actionSummary" }
-                }
-            }
-
-            val exitPayload = buildString {
-                append("""{"agentId":"$agentId","wasKilled":$wasKilled""")
-                if (finalSnapshot != null) {
-                    append(""","budgetRemaining":${finalSnapshot.currentBalance}""")
-                    append(""","budgetSpent":${finalSnapshot.initialBudget - finalSnapshot.currentBalance}""")
-                    append(""","actionCount":${finalSnapshot.actionLog.size}""")
-                }
-                append("}")
-            }
-            emitEvent(
-                if (wasKilled) EventTypes.AGENT_KILLED else EventTypes.AGENT_DEATH,
-                agentId,
-                exitEntry.generation,
-                exitPayload
-            )
-
-            val workerRepository = WorkerExecutionRepository(db)
-            val contribution = workerRepository
-                .contributionsForAgent(runId, groupId, agentId)
-                .lastOrNull()
-            val usefulCommit = contribution?.isPotentiallyUseful == true
-            exitEntry.workerAuthority?.finalizeLease?.invoke(usefulCommit)
-            workerRepository.recordExit(
-                AgentExitRecord(
+                val contribution = workerRepository
+                    .contributionsForAgent(runId, groupId, agentId)
+                    .lastOrNull()
+                val contributionPotentiallyUseful = contribution?.isPotentiallyUseful == true
+                val candidateExit = AgentExitRecord(
                     exitId = "exit:$runId:$groupId:$agentId",
                     runId = runId,
                     groupId = com.achulkov.evomolior.core.atlas.AtlasGroupId(groupId),
@@ -1486,7 +1962,7 @@ class LifecycleManager(
                     },
                     commitId = contribution?.commitId,
                     commitType = contribution?.commitType,
-                    acceptedContribution = usefulCommit &&
+                    acceptedContribution = contributionPotentiallyUseful &&
                         contribution?.commitType !in setOf(
                             CommitType.STRUCTURED_DEAD_END,
                             CommitType.NOVELTY_PROPOSAL
@@ -1498,55 +1974,241 @@ class LifecycleManager(
                     degradedExecution = db.workerExecutionDao()
                         .degradedExecutionsForAgent(runId, groupId, agentId)
                         .isNotEmpty(),
-                    wasKilled = wasKilled,
+                    wasKilled = wasKilled || initialState.killRequested,
                     exitedAt = Clock.System.now()
                 )
-            )
-            onAgentDied(agentId, wasKilled)
+                val exitRecord = exitEntry.freezeExit(candidateExit)
+                val exitWasKilled = exitRecord.wasKilled
 
-            val taskClaim = exitEntry.wipTaskClaim
-            if (taskClaim != null) {
-                runCatching {
-                    val pendingReviewCount = db.stagingDao().countPendingCompletionCandidates(
-                        runId = runId,
-                        groupId = groupId,
-                        agentId = agentId,
-                        nodeId = taskClaim.nodeId
-                    )
-                    if (usefulCommit && pendingReviewCount > 0) {
-                        Napier.i {
-                            "[$groupId] WiP task ${taskClaim.nodeId} retained for Critic review " +
-                                "after $agentId exit (pending=$pendingReviewCount, wasKilled=$wasKilled)"
+                // This is the lifecycle authority boundary. Do not release a lease, abandon WIP,
+                // or notify observers until the immutable exit is durable.
+                if (!exitEntry.snapshot().exitPersisted) {
+                    when (val persisted = workerRepository.recordExit(exitRecord)) {
+                        is PersistExitResult.Inserted -> exitEntry.confirmExitPersisted()
+                        is PersistExitResult.AlreadyPersisted -> {
+                            exitEntry.confirmExitPersisted()
                         }
-                    } else {
-                        val released = db.wipTaskDao().abandonTask(
-                            nodeId = taskClaim.nodeId,
-                            runId = runId,
-                            groupId = groupId,
-                            agentId = agentId,
-                            generation = exitEntry.generation
-                        )
-                        if (released > 0) {
-                            onWipTaskAbandoned(agentId, taskClaim.nodeId, exitEntry.generation)
-                            Napier.i {
-                                "[$groupId] WiP task ${taskClaim.nodeId} abandoned by $agentId " +
-                                    "(wasKilled=$wasKilled)"
-                            }
+                        is PersistExitResult.Conflict -> {
+                            throw AgentExitIdentityConflictException(
+                                agentId = agentId,
+                                attemptedExitRecordHash = persisted.exitRecordHash,
+                                persistedExitRecordHash = persisted.persistedExitRecordHash
+                            )
                         }
                     }
-                }.onFailure { e ->
-                    Napier.w(e) { "[$groupId] Failed to abandon WiP task ${taskClaim.nodeId} for $agentId" }
+                }
+
+                if (refundedBudget > 0.0) {
+                    refundedBudgetByAgent[agentId] = refundedBudget
+                } else {
+                    refundedBudgetByAgent.remove(agentId)
+                }
+                if (!exitEntry.snapshot().authorityCleanupComplete) {
+                    finalizeFrozenAgentAuthority(exitEntry, exitRecord)
+                    exitEntry.markAuthorityCleanupComplete()
+                }
+                updateAgentStates()
+
+                // Cancellation-resistant in-process providers may outlive the bounded kill
+                // request. Preserve the durable frozen exit classification, but keep the agent
+                // live and publication non-quiescent until its runner has actually returned.
+                if (!exitEntry.snapshot().executionSettled) {
+                    Napier.w {
+                        "[$groupId] Agent $agentId has durable exit authority but is still executing; " +
+                            "strict publication remains blocked"
+                    }
+                    return@persistenceLock
+                }
+                exitEntry.markCostSettled()
+
+                // Log final budget snapshot if we have a live ledger (in-process mode)
+                val finalSnapshot = exitEntry.ledger()?.snapshot()
+                if (finalSnapshot != null) {
+                    Napier.i {
+                        "[$groupId] Agent $agentId final budget: initial=${finalSnapshot.initialBudget} " +
+                            "remaining=${finalSnapshot.currentBalance} " +
+                            "actions=${finalSnapshot.actionLog.size} " +
+                            "spent=${finalSnapshot.initialBudget - finalSnapshot.currentBalance}"
+                    }
+                    if (finalSnapshot.actionLog.isNotEmpty()) {
+                        val actionSummary = finalSnapshot.actionLog
+                            .groupBy { it.actionType }
+                            .map { (type, deductions) -> "${type.name}=${deductions.size}" }
+                            .joinToString(", ")
+                        Napier.d { "[$groupId] Agent $agentId action breakdown: $actionSummary" }
+                    }
+                }
+
+                val exitPayload = buildString {
+                    append("""{"agentId":"$agentId","wasKilled":$exitWasKilled""")
+                    if (finalSnapshot != null) {
+                        append(""","budgetRemaining":${finalSnapshot.currentBalance}""")
+                        append(""","budgetSpent":${finalSnapshot.initialBudget - finalSnapshot.currentBalance}""")
+                        append(""","actionCount":${finalSnapshot.actionLog.size}""")
+                    }
+                    append("}")
+                }
+                runCatching {
+                    emitEvent(
+                        if (exitWasKilled) EventTypes.AGENT_KILLED else EventTypes.AGENT_DEATH,
+                        agentId,
+                        exitEntry.generation,
+                        exitPayload
+                    )
+                }.onFailure { error ->
+                    Napier.w(error) { "[$groupId] Failed to emit durable exit event for $agentId" }
+                }
+                if (exitEntry.claimDeathCallbackEmission()) {
+                    runCatching {
+                        onAgentDied(agentId, exitWasKilled)
+                    }.onFailure { error ->
+                        Napier.w(error) { "[$groupId] Agent death callback failed for $agentId" }
+                    }
+                } else {
+                    deathCallbackDuplicateCount.incrementAndGet()
+                }
+
+                exitEntry.confirmCleanupComplete()
+                awaitRuntimeTransitionPersistence()
+                runtimeTransitionFailureFor(agentId)?.let { throw it }
+                maxExitToQuiescenceMs.accumulateAndGet(
+                    (System.currentTimeMillis() - exitRecord.exitedAt.toEpochMilliseconds())
+                        .coerceAtLeast(0L),
+                    ::maxOf
+                )
+                synchronized(budgetTelemetryLock) {
+                    if (liveAgents.remove(agentId, exitEntry)) {
+                        val settled = settledCreditsByGeneration[exitEntry.generation] ?: SettledCredits()
+                        settledCreditsByGeneration[exitEntry.generation] = SettledCredits(
+                            allocated = settled.allocated + exitEntry.allocatedBudget,
+                            returned = settled.returned +
+                                (finalSnapshot?.currentBalance ?: exitEntry.snapshot().budgetRemaining)
+                        )
+                    }
+                }
+                exitFinalizationRetryAttempts.remove(agentId)
+                exitFinalizationFailures.remove(agentId)
+                updateAgentStates()
+
+                // Emit updated group budget after agent exit
+                emitBudgetTelemetry(exitEntry.generation)
+                val totalRemaining = totalRemainingBudget()
+                runCatching {
+                    onBudgetChanged(totalRemaining)
+                }.onFailure { error ->
+                    Napier.w(error) { "[$groupId] Budget callback failed after $agentId exit" }
+                }
+                maybeEmitTurnTakingImbalanceSignal()
+
+                Napier.i {
+                    "[$groupId] Agent $agentId ${if (exitWasKilled) "stopped" else "completed normally"} " +
+                        "(wasKilled=$exitWasKilled, inProcess=${exitEntry.executionJob() != null})"
+                }
+                } catch (conflict: AgentExitIdentityConflictException) {
+                    fatalExitConflicts.putIfAbsent(agentId, conflict)
+                    Napier.e(conflict) {
+                        "[$groupId] Fatal immutable exit conflict for $agentId; retry is forbidden"
+                    }
+                    throw conflict
+                } catch (error: Exception) {
+                    Napier.w(error) {
+                        "[$groupId] Exit finalization deferred for $agentId; accounting remains non-quiescent until retry"
+                    }
+                    scheduleExitFinalizationRetry(
+                        agentId = agentId,
+                        wasKilled = wasKilled,
+                        refundedBudget = refundedBudget,
+                        failure = error
+                    )
+                }
                 }
             }
-
-            // Emit updated group budget after agent exit
-            val totalRemaining = totalRemainingBudget()
-            onBudgetChanged(totalRemaining)
-            maybeEmitTurnTakingImbalanceSignal()
-
-            Napier.i { "[$groupId] Agent $agentId exited (wasKilled=$wasKilled, inProcess=${exitEntry.job != null})" }
+        }
+        if (!liveAgents.containsKey(agentId)) {
+            exitFinalizationMutexes.remove(agentId, mutex)
         }
     }
+
+    private suspend fun finalizeFrozenAgentAuthority(
+        cell: AgentRuntimeCell,
+        exitRecord: AgentExitRecord
+    ) {
+        val usefulCommit = exitRecord.acceptedContribution
+        cell.workerAuthority?.finalizeLease?.invoke(usefulCommit)
+
+        val taskClaim = cell.wipTaskClaim ?: return
+        val pendingReviewCount = db.stagingDao().countPendingCompletionCandidates(
+            runId = runId,
+            groupId = groupId,
+            agentId = cell.agentId,
+            nodeId = taskClaim.nodeId
+        )
+        if (usefulCommit && pendingReviewCount > 0) {
+            Napier.i {
+                "[$groupId] WiP task ${taskClaim.nodeId} retained for Critic review " +
+                    "after ${cell.agentId} exit (pending=$pendingReviewCount, " +
+                    "wasKilled=${exitRecord.wasKilled})"
+            }
+            return
+        }
+        val released = db.wipTaskDao().abandonTask(
+            nodeId = taskClaim.nodeId,
+            runId = runId,
+            groupId = groupId,
+            agentId = cell.agentId,
+            generation = cell.generation
+        )
+        if (released > 0) {
+            runCatching {
+                onWipTaskAbandoned(cell.agentId, taskClaim.nodeId, cell.generation)
+            }.onFailure { error ->
+                Napier.w(error) {
+                    "[$groupId] WiP abandonment callback failed for ${taskClaim.nodeId}"
+                }
+            }
+            Napier.i {
+                "[$groupId] WiP task ${taskClaim.nodeId} abandoned by ${cell.agentId} " +
+                    "(wasKilled=${exitRecord.wasKilled})"
+            }
+        }
+    }
+
+    private fun scheduleExitFinalizationRetry(
+        agentId: String,
+        wasKilled: Boolean,
+        refundedBudget: Double,
+        failure: Throwable
+    ) {
+        lateinit var retryJob: Job
+        var retryAttempt = 0
+        retryJob = runtimeTransitionPersistenceScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                delay(EXIT_FINALIZATION_RETRY_DELAY_MS * retryAttempt)
+                exitFinalizationRetriesInProgress.add(agentId)
+                exitFinalizationRetryJobs.remove(agentId, retryJob)
+                handleAgentExit(agentId, wasKilled, refundedBudget)
+            } finally {
+                exitFinalizationRetryJobs.remove(agentId, retryJob)
+                exitFinalizationRetriesInProgress.remove(agentId)
+            }
+        }
+        if (exitFinalizationRetryJobs.putIfAbsent(agentId, retryJob) != null) {
+            retryJob.cancel()
+            return
+        }
+        retryAttempt = exitFinalizationRetryAttempts.merge(agentId, 1, Int::plus) ?: 1
+        if (retryAttempt > EXIT_FINALIZATION_RETRY_ATTEMPTS) {
+            exitFinalizationFailures[agentId] = failure
+            exitFinalizationRetryJobs.remove(agentId, retryJob)
+            retryJob.cancel()
+            return
+        }
+        exitFinalizationRetryCount.incrementAndGet()
+        retryJob.start()
+    }
+
+    private fun markInProcessExecutionFinished(agentId: String): AgentRuntimeCell? =
+        liveAgents[agentId]?.also(AgentRuntimeCell::markExecutionSettled)
 
     private suspend fun emitEvent(type: String, agentId: String?, generation: Int, payload: String) {
         db.eventLogDao().insert(
@@ -1564,13 +2226,17 @@ class LifecycleManager(
     }
 
     private fun updateAgentStates() {
-        _agentStates.value = liveAgents.mapValues { (agentId, entry) ->
+        _agentStates.value = liveAgents.mapValues { (agentId, cell) ->
+            val state = cell.snapshot()
             AgentState(
                 agentId = agentId,
-                status = entry.status,
-                generation = entry.generation,
-                // Use live ledger balance if available, else last-known snapshot
-                budgetRemaining = entry.budgetLedger?.balance ?: entry.budgetRemaining
+                status = if (state.killRequested || state.exitRecord != null) {
+                    AgentStatus.DyingGracefully
+                } else {
+                    AgentStatus.Active
+                },
+                generation = cell.generation,
+                budgetRemaining = cell.ledger()?.balance ?: state.budgetRemaining
             )
         }
     }
@@ -1603,14 +2269,13 @@ class LifecycleManager(
         }
 
         val activeAgents = liveAgents.values
-            .filter { it.status == AgentStatus.Active || it.status == AgentStatus.DyingGracefully }
         val liveSpentSignal = if (activeAgents.size >= 3) {
             val spentByRole = activeAgents
                 .groupBy { it.role }
                 .mapValues { (_, entries) ->
-                    entries.sumOf { entry ->
-                        val currentBalance = entry.budgetLedger?.balance ?: entry.budgetRemaining
-                        (entry.allocatedBudget - currentBalance).coerceAtLeast(0.0)
+                    entries.sumOf { cell ->
+                        val currentBalance = cell.ledger()?.balance ?: cell.snapshot().budgetRemaining
+                        (cell.allocatedBudget - currentBalance).coerceAtLeast(0.0)
                     }
                 }
                 .filterValues { value -> value > 0.0 }
@@ -1716,7 +2381,9 @@ class LifecycleManager(
     }
 
     private fun totalRemainingBudget(): Double =
-        liveAgents.values.sumOf { it.budgetLedger?.balance ?: it.budgetRemaining } +
+        liveAgents.values.sumOf { cell ->
+            cell.ledger()?.balance ?: cell.snapshot().budgetRemaining
+        } +
             refundedBudgetByAgent.values.sum()
 
     private fun buildSpawnPayload(agentId: String, role: Role, generation: Int): String =
@@ -1727,21 +2394,13 @@ class LifecycleManager(
 
 }
 
-private data class LiveAgentEntry(
-    val handle: VmHandle?,          // non-null in Shuru VM mode
-    val job: Job?,                  // non-null in in-process mode
-    val status: AgentStatus,
-    val generation: Int,
-    val role: Role,
-    val allocatedBudget: Double,
-    val budgetRemaining: Double,
-    val budgetLedger: BudgetLedger?, // non-null once the in-process runner registers it
-    val wipTaskClaim: WipTaskClaim?,
-    val workerAuthority: WorkerAuthorityAssignment? = null,
-    val classification: AgentLifecycleClassification,
-    val spawnedAtMs: Long = System.currentTimeMillis(),
-    val ttlCheckpoints: Set<TtlCheckpointKind> = emptySet()
-)
+/** Closed cause for the single runtime-cell termination request. */
+enum class AgentTerminationCause {
+    BUDGET_FLOOR,
+    TTL_EXPIRED,
+    RUN_TERMINATION,
+    TARGETED_TERMINATION
+}
 
 /** Exact publication-time accounting for one group lifecycle manager. */
 data class AgentPublicationAccounting(
@@ -1749,14 +2408,46 @@ data class AgentPublicationAccounting(
     val exitedNonDaemonAgentIds: Set<String>,
     val liveNonDaemonAgentIds: Set<String>,
     val unaccountedNonDaemonAgentIds: Set<String>,
-    val liveNestedGroupCount: Int
+    val liveNestedGroupCount: Int,
+    val pendingRuntimeTransitionCount: Int = 0,
+    val runtimeTransitionFailureCount: Int = 0,
+    val exitIdentityConflictCount: Int = 0,
+    val exitFinalizationFailureCount: Int = 0,
+    val orphanedUnsettledAgentIds: Set<String> = emptySet()
 ) {
     /** True only when every registered non-daemon agent exited and no nested work remains. */
     val isQuiescent: Boolean
         get() = liveNonDaemonAgentIds.isEmpty() &&
             unaccountedNonDaemonAgentIds.isEmpty() &&
-            liveNestedGroupCount == 0
+            liveNestedGroupCount == 0 &&
+            pendingRuntimeTransitionCount == 0 &&
+            runtimeTransitionFailureCount == 0 &&
+            exitIdentityConflictCount == 0 &&
+            exitFinalizationFailureCount == 0 &&
+            orphanedUnsettledAgentIds.isEmpty()
 }
+
+/** First-class lifecycle reconciliation metrics required by the completion blueprint. */
+data class LifecycleReconciliationMetrics(
+    val exitIdentityConflictCount: Int,
+    val exitFinalizationRetryCount: Int,
+    val registeredWithoutExitCount: Int,
+    val exitWithoutRegisteredAgentCount: Int,
+    val liveExecutionAfterArchiveBarrier: Int,
+    val deathCallbackDuplicateCount: Int,
+    val unsettledCostReservationCount: Int,
+    val maxExitToQuiescenceMs: Long?
+)
+
+/** Fatal signal that a registered agent already owns a different immutable exit authority. */
+class AgentExitIdentityConflictException(
+    val agentId: String,
+    val attemptedExitRecordHash: String,
+    val persistedExitRecordHash: String
+) : IllegalStateException(
+    "Agent $agentId exit identity conflict: attempted=$attemptedExitRecordHash " +
+        "persisted=$persistedExitRecordHash"
+)
 
 /** Input used by run authority to allocate one concrete ordinary-worker context. */
 data class WorkerAuthorityRequest(

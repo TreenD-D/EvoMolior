@@ -29,15 +29,20 @@ class GraderCivilizationController(
     /**
      * Selects criteria agents and creates their generation-scoped WiP tasks.
      *
-     * A researcher and builder are always retained. Rejection pressure selects an additional
-     * researcher, while failure telemetry selects an additional builder for automated checks.
+     * Without an accepted baseline, a researcher and builder are retained. Rejection pressure
+     * selects an additional researcher, while failure telemetry selects an additional builder.
+     * When [refineFromBaseline] is set and neither pressure is present, the previous round's
+     * accepted criteria still hold, so a single builder revises them instead of re-researching
+     * every dimension (the October 2026 logs spent ~7.5 minutes per researcher per round).
      *
      * @param generation One-based grader generation.
      * @param scoringDimensions Active scoring dimensions.
+     * @param refineFromBaseline Whether an accepted previous-round methodology can be revised.
      */
     suspend fun planGeneration(
         generation: Int,
-        scoringDimensions: List<ScoringDimension>
+        scoringDimensions: List<ScoringDimension>,
+        refineFromBaseline: Boolean = false
     ): GraderGenerationPlan {
         db.wipTaskDao().releaseClaimsFromGeneration(runId, graderGroupId, generation)
         val priorEntries = db.stagingDao().getAll(runId, graderGroupId)
@@ -45,8 +50,9 @@ class GraderCivilizationController(
         val rejectionPressure = priorEntries.count { it.status == "rejected" } >
             priorEntries.count { it.status == "promoted" }
         val failurePressure = priorEntries.any { it.type == "FAILURE_TELEMETRY" }
+        val stableRefinement = refineFromBaseline && !rejectionPressure && !failurePressure
         val roles = buildList {
-            add(Role.GraderResearcher)
+            if (!stableRefinement) add(Role.GraderResearcher)
             add(Role.GraderBuilder)
             if (rejectionPressure) add(Role.GraderResearcher)
             if (failurePressure) add(Role.GraderBuilder)
@@ -56,10 +62,16 @@ class GraderCivilizationController(
             val task = GraderAgentAssignment(
                 role = role,
                 taskId = "grader-wip-g${generation}-${role.name.lowercase()}-$index",
-                taskDescription = when (role) {
-                    Role.GraderResearcher ->
+                taskDescription = when {
+                    refineFromBaseline && role == Role.GraderResearcher ->
+                        "Revise the accepted generation-${generation - 1} criteria for generation $generation " +
+                            "where rejections or failure telemetry show gaps, across: $dimensionSummary."
+                    refineFromBaseline && role == Role.GraderBuilder ->
+                        "Improve the accepted generation-${generation - 1} rubric tests and typed methodology " +
+                            "for generation $generation across: $dimensionSummary."
+                    role == Role.GraderResearcher ->
                         "Research adversarial evidence thresholds for generation $generation across: $dimensionSummary."
-                    Role.GraderBuilder ->
+                    role == Role.GraderBuilder ->
                         "Build executable or mechanically checkable rubric tests for generation $generation across: $dimensionSummary."
                     else -> error("Unsupported grader selection role: $role")
                 }
@@ -86,7 +98,8 @@ class GraderCivilizationController(
                 generation = generation,
                 payloadJson = """{"civilization":"grader","roles":[${
                     roles.joinToString(",") { "\"${it.name}\"" }
-                }],"rejectionPressure":$rejectionPressure,"failurePressure":$failurePressure}"""
+                }],"rejectionPressure":$rejectionPressure,"failurePressure":$failurePressure,""" +
+                    """"refineFromBaseline":$refineFromBaseline}"""
             )
         )
         return GraderGenerationPlan(generation, assignments)

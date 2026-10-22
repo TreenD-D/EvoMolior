@@ -385,6 +385,154 @@ data class GraderMethodologyBindingCatalog private constructor(
         }
     }
 
+    /**
+     * Reconstructs a handle-bound repair draft from persisted exact methodology authority.
+     *
+     * The projection succeeds only when every exact binding belongs to this catalog and resolving
+     * the initial wire value reproduces the persisted draft at the data level. Exact authority
+     * tokens are then removed from every model-authored semantic string before returning it.
+     *
+     * @param draft Persisted exact methodology rejected by Critic review.
+     * @return Redacted handle-bound repair input, or `null` when this catalog cannot prove it.
+     */
+    fun projectForRepair(draft: GraderMethodologyDraft): GraderMethodologyWireDraft? {
+        if (!hasValidHash()) return null
+        val rowsByNodeId = nodeBindings.associateBy(GraderMethodologyNodeBinding::graderNodeId)
+        val wireRequirements = mutableListOf<GraderRequirementWireDraft>()
+        draft.requirements.forEach { requirement ->
+            val row = rowsByNodeId[requirement.graderAtlasNodeId] ?: return null
+            val workerHandlesByNodeId = row.workerBindings.associate {
+                it.workerNodeId to it.workerNodeHandle
+            }
+            val workerHandles = linkedSetOf<String>()
+            requirement.mappedWorkerNodeIds.forEach { workerNodeId ->
+                workerHandles += workerHandlesByNodeId[workerNodeId] ?: return null
+            }
+            wireRequirements += GraderRequirementWireDraft(
+                requirementId = requirement.requirementId,
+                graderNodeHandle = row.graderNodeHandle,
+                mappedWorkerNodeHandles = workerHandles,
+                mappedReceiverObligationRefs = requirement.mappedReceiverObligationRefs,
+                criterion = requirement.criterion,
+                observableEvidence = requirement.observableEvidence,
+                passThreshold = requirement.passThreshold,
+                failureLevels = requirement.failureLevels,
+                adversarialCases = requirement.adversarialCases,
+                executableTestIds = requirement.executableTestIds,
+                disclosureSensitivity = requirement.disclosureSensitivity,
+                rationale = requirement.rationale,
+                noveltyFingerprint = requirement.noveltyFingerprint,
+                maximumEvaluationCost = requirement.maximumEvaluationCost
+            )
+        }
+        val projected = GraderMethodologyWireDraft(
+            rubricDimensions = draft.rubricDimensions,
+            automatedTests = draft.automatedTests,
+            failureModes = draft.failureModes,
+            requirements = wireRequirements
+        )
+        val roundTrip = resolve(projected) as? GraderMethodologyBindingResolution.Resolved
+            ?: return null
+        if (roundTrip.draft != draft) return null
+        val redacted = projected.redactExactAuthority()
+        return redacted.takeIf {
+            resolve(it) is GraderMethodologyBindingResolution.Resolved
+        }
+    }
+
+    /**
+     * Removes exact catalog authority values from model-facing repair feedback.
+     *
+     * @param text Critic-authored feedback over the persisted exact methodology.
+     * @return Feedback with Atlas, lease, and catalog authority tokens redacted.
+     */
+    fun redactExactAuthority(text: String): String {
+        val replacements = linkedMapOf<String, String>()
+        nodeBindings.forEach { row ->
+            replacements[row.graderNodeId.value] = row.graderNodeHandle
+            row.workerBindings.forEach { worker ->
+                replacements[worker.workerNodeId.value] = worker.workerNodeHandle
+            }
+        }
+        val opaqueAuthorities = buildSet {
+            add(graderAtlasHash)
+            add(workerAtlasHash)
+            add(catalogHash)
+            nodeBindings.forEach { row ->
+                add(row.graderNodeId.value)
+            }
+            activeLeases.forEach { lease ->
+                add(lease.graderNodeId.value)
+                add(lease.leaseId)
+                add(lease.leaseHash)
+            }
+        }.filter(String::isNotBlank).filterNot(replacements::containsKey).sorted()
+        opaqueAuthorities.forEachIndexed { index, authority ->
+            replacements[authority] = "redacted-authority-${index + 1}"
+        }
+        return replacements.entries
+            .filter { it.key.isNotBlank() }
+            .sortedByDescending { it.key.length }
+            .fold(text) { redacted, (authority, replacement) ->
+                redacted.replace(authority, replacement)
+            }
+    }
+
+    private fun GraderMethodologyWireDraft.redactExactAuthority(): GraderMethodologyWireDraft =
+        copy(
+            rubricDimensions = rubricDimensions.map { rubric ->
+                rubric.copy(
+                    dimensionId = redactExactAuthority(rubric.dimensionId),
+                    scoringGuidance = redactExactAuthority(rubric.scoringGuidance)
+                )
+            },
+            automatedTests = automatedTests.map { test ->
+                test.copy(
+                    testId = redactExactAuthority(test.testId),
+                    description = redactExactAuthority(test.description),
+                    expectedOutputPattern = redactExactAuthority(test.expectedOutputPattern),
+                    mappedRequirementIds = test.mappedRequirementIds.mapTo(linkedSetOf()) {
+                        redactExactAuthority(it)
+                    },
+                    inputSchemaHash = redactExactAuthority(test.inputSchemaHash),
+                    expectedOutcomeHash = redactExactAuthority(test.expectedOutcomeHash)
+                )
+            },
+            failureModes = failureModes.map { mode ->
+                mode.copy(
+                    modeId = redactExactAuthority(mode.modeId),
+                    description = redactExactAuthority(mode.description)
+                )
+            },
+            requirements = requirements.map { requirement ->
+                requirement.copy(
+                    requirementId = redactExactAuthority(requirement.requirementId),
+                    mappedReceiverObligationRefs =
+                        requirement.mappedReceiverObligationRefs.mapTo(linkedSetOf()) {
+                            redactExactAuthority(it)
+                        },
+                    criterion = redactExactAuthority(requirement.criterion),
+                    observableEvidence = redactExactAuthority(requirement.observableEvidence),
+                    passThreshold = redactExactAuthority(requirement.passThreshold),
+                    failureLevels = requirement.failureLevels.map { level ->
+                        level.copy(description = redactExactAuthority(level.description))
+                    },
+                    adversarialCases = requirement.adversarialCases.map { case ->
+                        case.copy(
+                            caseId = redactExactAuthority(case.caseId),
+                            setup = redactExactAuthority(case.setup),
+                            expectedDetection = redactExactAuthority(case.expectedDetection)
+                        )
+                    },
+                    executableTestIds = requirement.executableTestIds.map {
+                        redactExactAuthority(it)
+                    },
+                    rationale = redactExactAuthority(requirement.rationale),
+                    noveltyFingerprint = redactExactAuthority(requirement.noveltyFingerprint)
+                )
+            }
+        )
+
     /** Returns whether [catalogHash] still commits this catalog's exact content. */
     fun hasValidHash(): Boolean =
         AtlasHashing.constantTimeEquals(catalogHash, computeCatalogHash(this))

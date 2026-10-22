@@ -1,0 +1,1031 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Open-weight model, runtime and architecture engineering supplement for EvoMolior's ARC Prize 2026 research programme.">
+<title>EvoMolior × ARC Prize 2026 — Open-Weight & Runtime Engineering Supplement</title>
+<style>
+:root{--bg:#07101f;--panel:#0d182b;--panel2:#111f36;--text:#e8eef9;--muted:#9fb0c9;--line:#253753;--accent:#71e2c0;--accent2:#8aa8ff;--warn:#ffcc7a;--bad:#ff8a9a;--good:#80e6a5;--shadow:0 18px 50px rgba(0,0,0,.25);--radius:18px;--code:#050b16;--top:68px}
+[data-theme="light"]{--bg:#f5f7fb;--panel:#fff;--panel2:#eef3fa;--text:#122036;--muted:#52647e;--line:#d4deea;--accent:#087d68;--accent2:#405fd2;--warn:#9b5d00;--bad:#b52c45;--good:#18763b;--shadow:0 14px 40px rgba(27,42,70,.12);--code:#edf1f7}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:90px}body{margin:0;background:radial-gradient(circle at 15% -10%,rgba(113,226,192,.13),transparent 32%),radial-gradient(circle at 90% 4%,rgba(138,168,255,.14),transparent 32%),var(--bg);color:var(--text);font:16px/1.62 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}code,kbd,pre{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace}.topbar{position:sticky;top:0;z-index:100;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(18px);border-bottom:1px solid var(--line);height:var(--top);display:flex;align-items:center;justify-content:space-between;padding:0 max(18px,calc((100vw - 1500px)/2));gap:14px}.brand{font-weight:800;letter-spacing:.02em}.top-actions{display:flex;gap:8px;align-items:center}.btn{border:1px solid var(--line);background:var(--panel);color:var(--text);padding:9px 13px;border-radius:11px;cursor:pointer;font:inherit;display:inline-flex;align-items:center;gap:7px}.btn:hover{border-color:var(--accent);text-decoration:none}.layout{max-width:1500px;margin:auto;display:grid;grid-template-columns:280px minmax(0,1fr);gap:34px;padding:34px 24px 90px}.sidebar{position:sticky;top:calc(var(--top) + 24px);height:calc(100vh - var(--top) - 48px);overflow:auto;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 92%,transparent);border-radius:16px;padding:18px}.sidebar h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.16em;color:var(--muted);margin:0 0 10px}.sidebar a{display:block;color:var(--muted);padding:6px 8px;border-left:2px solid transparent;font-size:.9rem}.sidebar a:hover,.sidebar a.active{color:var(--text);border-left-color:var(--accent);text-decoration:none;background:color-mix(in srgb,var(--accent) 7%,transparent)}main{min-width:0}.hero{padding:56px 44px;background:linear-gradient(135deg,color-mix(in srgb,var(--panel) 92%,transparent),color-mix(in srgb,var(--panel2) 90%,transparent));border:1px solid var(--line);border-radius:28px;box-shadow:var(--shadow);overflow:hidden;position:relative}.hero:after{content:"";position:absolute;width:380px;height:380px;border-radius:50%;right:-160px;top:-180px;background:radial-gradient(circle,rgba(113,226,192,.25),transparent 70%);pointer-events:none}.eyebrow{font-size:.82rem;text-transform:uppercase;letter-spacing:.18em;color:var(--accent);font-weight:800}.hero h1{font-size:clamp(2.35rem,5vw,5.2rem);line-height:1.02;max-width:1100px;margin:.25em 0}.hero .lede{font-size:1.22rem;color:var(--muted);max-width:930px}.hero-links{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px}.meta-row{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 0}.badge{display:inline-flex;align-items:center;border:1px solid var(--line);padding:4px 8px;border-radius:999px;font-size:.72rem;letter-spacing:.04em;color:var(--muted);background:var(--panel2)}.badge.source{white-space:nowrap}.section{margin-top:56px}.section>h2{font-size:clamp(1.75rem,3vw,2.8rem);line-height:1.15;margin:0 0 10px}.section>p.section-lede{font-size:1.08rem;color:var(--muted);max-width:1000px}.section-number{color:var(--accent);font-size:.8em}.callout{border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:14px;padding:18px 20px;background:var(--panel);margin:22px 0}.callout.warn{border-left-color:var(--warn)}.callout.bad{border-left-color:var(--bad)}.callout.good{border-left-color:var(--good)}.callout h3{margin:.1em 0 .45em}.grid{display:grid;gap:18px}.grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}.grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}.grid.four{grid-template-columns:repeat(4,minmax(0,1fr))}.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.09);min-width:0}.grid>*{min-width:0}.panel h3{margin-top:0}.decision{position:relative;overflow:hidden}.decision .kicker{font-size:.75rem;text-transform:uppercase;letter-spacing:.13em;color:var(--muted)}.decision strong.big{display:block;font-size:1.25rem;line-height:1.25;margin:8px 0}.decision .do{color:var(--good)}.decision .dont{color:var(--bad)}table{border-collapse:separate;border-spacing:0;width:100%;font-size:.92rem}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:14px;background:var(--panel)}th,td{padding:12px 13px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}thead th{position:sticky;top:0;background:var(--panel2);z-index:2;font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}tbody tr:last-child>*{border-bottom:0}tbody tr:hover{background:color-mix(in srgb,var(--accent) 4%,transparent)}.cite{font-size:.7em;vertical-align:super;margin-left:2px;color:var(--accent)}.metric{font-size:2rem;font-weight:850;line-height:1}.metric-label{color:var(--muted);font-size:.82rem}.hardware-card .metric{margin:8px 0}.hardware-card ul{padding-left:18px}.formula{background:var(--code);border:1px solid var(--line);border-radius:12px;padding:14px;overflow:auto;color:var(--text)}.calculator{display:grid;grid-template-columns:repeat(6,minmax(100px,1fr));gap:12px;align-items:end}.field label{display:block;font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:5px}.field input,.field select,.filter-input{width:100%;padding:10px 11px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;color:var(--text);font:inherit}.calc-result{margin-top:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.calc-result>div{padding:14px;border-radius:12px;background:var(--panel2);border:1px solid var(--line)}.calc-result strong{font-size:1.35rem;display:block}.filters{display:flex;flex-wrap:wrap;gap:9px;margin:18px 0}.filter-btn{border:1px solid var(--line);background:var(--panel);color:var(--muted);padding:8px 11px;border-radius:999px;cursor:pointer}.filter-btn.active{color:var(--bg);background:var(--accent);border-color:var(--accent)}.approach-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.approach-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;display:flex;flex-direction:column;min-height:100%}.approach-card.hidden{display:none}.card-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.challenge,.evidence,.score{font-size:.69rem;text-transform:uppercase;letter-spacing:.07em;padding:4px 7px;border-radius:999px;border:1px solid var(--line)}.challenge.arc3{color:#a8c4ff}.challenge.arc2{color:#8ee8c0}.evidence.public,.evidence.winning{color:var(--good)}.evidence.paper,.evidence.recent{color:var(--accent2)}.evidence.negative{color:var(--bad)}.evidence.proposal,.evidence.inference,.evidence.community{color:var(--warn)}.score{margin-left:auto}.approach-card h3{font-size:1.08rem;margin:12px 0 5px}.verdict{font-weight:800;color:var(--accent);margin:0 0 8px}.approach-card dl{margin-top:auto}.approach-card dt{font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:800;margin-top:10px}.approach-card dd{margin:2px 0}.refs{margin-top:10px}.level{font-weight:900;color:var(--accent)}.pipeline{display:flex;align-items:stretch;gap:8px;overflow:auto;padding:8px 0}.pipe-node{min-width:155px;padding:13px;border-radius:12px;border:1px solid var(--line);background:var(--panel);text-align:center}.pipe-arrow{align-self:center;color:var(--muted);font-size:1.5rem}.codebox{position:relative;min-width:0;max-width:100%}.codebox pre{white-space:pre;overflow:auto;background:var(--code);border:1px solid var(--line);border-radius:13px;padding:18px;color:var(--text)}.copy-btn{position:absolute;right:8px;top:8px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:8px;padding:5px 8px;cursor:pointer;font-size:.75rem}.copy-btn.copied{color:var(--good)}.tabs{display:flex;gap:8px;margin:18px 0 0;flex-wrap:wrap}.tab-btn{border:1px solid var(--line);background:var(--panel);color:var(--muted);padding:9px 12px;border-radius:10px;cursor:pointer}.tab-btn.active{background:var(--accent2);color:white}.tab-panel{display:none}.tab-panel.active{display:block}.stack{display:grid;gap:12px}.step{display:grid;grid-template-columns:42px 1fr;gap:12px;align-items:start}.step-num{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:var(--panel2);border:1px solid var(--line);font-weight:900;color:var(--accent)}.step h4{margin:0}.step p{margin:2px 0;color:var(--muted)}.priority{display:inline-block;padding:3px 7px;border-radius:8px;font-size:.72rem;font-weight:800}.p0{background:rgba(128,230,165,.15);color:var(--good)}.p1{background:rgba(255,204,122,.15);color:var(--warn)}.p2{background:rgba(138,168,255,.15);color:var(--accent2)}.risk-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.risk{border:1px solid var(--line);border-radius:13px;padding:15px;background:var(--panel)}.risk .severity{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--bad)}.source-table td:first-child{white-space:nowrap}.source-table a{font-weight:700}.footnote{font-size:.83rem;color:var(--muted)}.search-row{display:grid;grid-template-columns:minmax(200px,1fr) auto;gap:10px;margin:12px 0}.hidden-row{display:none!important}.print-note{display:none}.mobile-toc{display:none}hr{border:0;border-top:1px solid var(--line);margin:32px 0}.quote{font-size:1.25rem;line-height:1.45;border-left:4px solid var(--accent2);padding-left:18px;margin:25px 0}.matrix-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px}.green{background:var(--good)}.amber{background:var(--warn)}.red{background:var(--bad)}.muted{color:var(--muted)}
+@media(max-width:1180px){.layout{grid-template-columns:1fr}.sidebar{display:none}.mobile-toc{display:block;margin:15px 0}.approach-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.grid.four{grid-template-columns:repeat(2,1fr)}.calculator{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:760px){body{font-size:15px;overflow-x:hidden}.topbar{padding:0 12px}.brand{font-size:.84rem}.layout{padding:18px 12px 60px}.hero{padding:34px 22px}.hero h1{font-size:2.35rem}.grid.two,.grid.three,.grid.four,.approach-grid,.risk-grid{grid-template-columns:minmax(0,1fr)}.calculator{grid-template-columns:repeat(2,1fr)}.calc-result{grid-template-columns:repeat(2,1fr)}.top-actions .label{display:none}.section{margin-top:44px}.pipeline{flex-direction:column}.pipe-arrow{transform:rotate(90deg)}}
+@media print{.topbar,.sidebar,.filters,.copy-btn,.mobile-toc{display:none!important}body{background:white;color:#111;font-size:11pt}.layout{display:block;max-width:none;padding:0}.hero,.panel,.approach-card,.callout,.table-wrap{box-shadow:none;background:white;color:#111;border-color:#bbb}.section{break-inside:auto}.approach-card,.panel,.risk{break-inside:avoid}.print-note{display:block}.cite{color:#333}a{color:#111;text-decoration:underline}.hero h1{font-size:30pt}.source-table{font-size:8.5pt}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">EvoMolior × ARC Prize 2026 · Engineering Supplement</div>
+  <div class="top-actions">
+    <a class="btn" href="evomolior_arc_prize_2026_dossier.html"><span class="label">Initial dossier</span> ↗</a>
+    <button class="btn" id="themeToggle" type="button" aria-label="Toggle theme">◐ <span class="label">Theme</span></button>
+    <button class="btn" type="button" onclick="window.print()">⎙ <span class="label">Print</span></button>
+  </div>
+</header>
+<div class="layout">
+<aside class="sidebar">
+  <nav aria-label="Table of contents">
+  <h2>Contents</h2>
+  <a href="#scope">0 · Scope boundary</a>
+  <a href="#decisions">1 · Decisions</a>
+  <a href="#hardware">2 · Hardware as algorithm</a>
+  <a href="#atlas">3 · Approach atlas</a>
+  <a href="#models">4 · Open-weight portfolio</a>
+  <a href="#interventions">5 · Weight intervention ladder</a>
+  <a href="#arc3">6 · ARC‑AGI‑3 engineering</a>
+  <a href="#arc2">7 · ARC‑AGI‑2 engineering</a>
+  <a href="#data">8 · Data and curriculum</a>
+  <a href="#evomolior">9 · EvoMolior model laboratory</a>
+  <a href="#programs">10 · Build programmes</a>
+  <a href="#packaging">11 · Kaggle packaging</a>
+  <a href="#risks">12 · Risk register</a>
+  <a href="#verdict">13 · Final recommendation</a>
+  <a href="#sources">14 · Sources</a>
+  </nav>
+</aside>
+<main>
+<header class="hero">
+  <div class="eyebrow">Independent technical addendum · 24 July 2026</div>
+  <h1>Open weights are not the strategy. The adaptation loop is.</h1>
+  <p class="lede">A hardware-aware, evidence-graded evaluation of model families, test-time adaptation, quantization, tokenizer and architecture surgery, offline model evolution, and deterministic Kaggle deployment for ARC‑AGI‑2 and ARC‑AGI‑3.</p>
+  <div class="hero-links">
+    <a class="btn" href="#decisions">See the decisions ↓</a>
+    <a class="btn" href="#atlas">Filter all approaches</a>
+    <a class="btn" href="#evomolior">Copy EvoMolior prompts</a>
+  </div>
+  <div class="meta-row"><span class="badge">Separate from the initial dossier</span><span class="badge">Evidence vs inference explicitly marked</span><span class="badge">Self-contained HTML5</span><span class="badge">No external assets</span></div>
+</header>
+
+<section id="scope" class="section">
+  <h2><span class="section-number">0.</span> Scope boundary</h2>
+  <p class="section-lede">This document assumes the first dossier has already established the challenge definitions, scoring, public submission landscape, original holdouts, starter agents, EvoMolior role packs and competition roadmap. It adds only the model/runtime engineering layer.</p>
+  <div class="callout good"><h3>Read this as a decision and experiment manual</h3><p>The <a href="evomolior_arc_prize_2026_dossier.html">initial dossier</a> remains the source for challenge framing and the two original evaluation tasks. This supplement answers a narrower question: <strong>which open weights should be deployed, how should they be changed, and which alternative architectures deserve compute before the Kaggle deadline?</strong> <a class="cite" href="#src-s01" title="See source S01">[S01]</a><a class="cite" href="#src-s39" title="See source S39">[S39]</a></p></div>
+  <div class="grid three">
+    <article class="panel"><h3>Source-supported</h3><p>Current competition requirements, hardware specifications, model cards, public winner designs and reported paper results carry explicit citations.</p></article>
+    <article class="panel"><h3>Inference</h3><p>Hardware-to-architecture conclusions—such as preferring four independent L4 workers—are marked as engineering inferences rather than organizer guarantees.</p></article>
+    <article class="panel"><h3>Proposal</h3><p>World-model heads, adapter evolution, task routers and new curricula are research proposals with falsifiable kill gates, not implied leaderboard gains.</p></article>
+  </div>
+</section>
+
+<section id="decisions" class="section">
+  <h2><span class="section-number">1.</span> Decisions before details</h2>
+  <p class="section-lede">The two competitions should share an experiment platform, not a runtime architecture. Their bottlenecks are different enough that forcing one model family or one agent abstraction across both would be a strategic error.</p>
+  <div class="grid four">
+    <article class="panel decision"><div class="kicker">ARC‑AGI‑3 primary</div><strong class="big do">Qwen3.6‑27B‑FP8 + bounded Python REPL</strong><p>Use image, raw grid and component/delta views; external causal memory; one strict action gateway. This is the strongest public starting point, not a claim that it is the final optimum. <a class="cite" href="#src-s08" title="See source S08">[S08]</a><a class="cite" href="#src-s12" title="See source S12">[S12]</a></p></article>
+    <article class="panel decision"><div class="kicker">ARC‑AGI‑3 control</div><strong class="big">Gemma 4 31B guarded JSON policy</strong><p>Maintain a simpler direct-policy implementation as the benchmark and operational fallback. Two milestone winners validate the pattern. <a class="cite" href="#src-s08" title="See source S08">[S08]</a><a class="cite" href="#src-s13" title="See source S13">[S13]</a></p></article>
+    <article class="panel decision"><div class="kicker">ARC‑AGI‑2 primary</div><strong class="big do">Four-family pass@2 portfolio</strong><p>Qwen3‑4B TTT, URM/TRM recurrence, executable program synthesis, and 2D refinement—joined by an exact verifier and diversity-aware selector. <a class="cite" href="#src-s21" title="See source S21">[S21]</a><a class="cite" href="#src-s22" title="See source S22">[S22]</a><a class="cite" href="#src-s24" title="See source S24">[S24]</a></p></article>
+    <article class="panel decision"><div class="kicker">EvoMolior role</div><strong class="big">Offline research OS, then compiler</strong><p>Evolve datasets, adapters, harnesses and selectors outside the notebook. Freeze a compact deterministic runtime for Kaggle. Durable evidence and dead-end memory are the useful project primitives. <a class="cite" href="#src-s38" title="See source S38">[S38]</a></p></article>
+  </div>
+  <div class="table-wrap" style="margin-top:18px"><table><thead><tr><th>Decision</th><th>Do now</th><th>Do not do now</th><th>Reconsider only when…</th></tr></thead><tbody>
+    <tr><th>ARC‑3 model size</th><td>27B–31B multimodal primary; 9B–15B router/scout.</td><td>Per-action committee of several 27B models.</td><td>Ablations show decisive completion gains per wall-clock minute.</td></tr>
+    <tr><th>ARC‑2 GPU use</th><td>One independent solver process per L4, dynamic task queue.</td><td>Shard one huge dense model across all four cards by default.</td><td>A sharded branch beats the portfolio on exact pass@2 under the same 12-hour cap.</td></tr>
+    <tr><th>Weight edits</th><td>Harness → quantization → adapters → synthetic SFT.</td><td>Full 27B fine-tune before diagnosing base-model failures.</td><td>Adapter capacity demonstrably saturates on clean holdouts.</td></tr>
+    <tr><th>Model merging</th><td>Keep adapters and solver families separate.</td><td>Merge away error diversity for convenience.</td><td>A TIES/DARE merge improves both pass@1 and marginal pass@2 coverage. <a class="cite" href="#src-s36" title="See source S36">[S36]</a><a class="cite" href="#src-s37" title="See source S37">[S37]</a></td></tr>
+    <tr><th>Long context</th><td>External structured memory and measured working context.</td><td>Treating a 100K+ transcript as a world model.</td><td>Controlled tests show old raw turns improve hidden-game completion enough to pay their latency/cache cost.</td></tr>
+  </tbody></table></div>
+  <div class="quote">Opinionated thesis: <strong>ARC‑AGI‑3 wants one competent model with a small, honest memory system. ARC‑AGI‑2 wants many incompatible hypotheses and an unforgiving executor.</strong></div>
+</section>
+
+<section id="hardware" class="section">
+  <h2><span class="section-number">2.</span> Hardware is part of the algorithm</h2>
+  <p class="section-lede">Memory capacity determines what can load; memory bandwidth, interconnect and wall-clock determine what can actually reason enough times to score. Treat the accelerator as a changing deployment target, not a stable local workstation.</p>
+  <div class="grid three">
+    <article class="panel hardware-card"><div class="kicker">ARC‑AGI‑2 target</div><div class="metric">4 × 24GB</div><div class="metric-label">NVIDIA L4 workers</div><ul><li>300GB/s per card.</li><li>PCIe Gen4 x16, 64GB/s listed interconnect.</li><li>12-hour code-run cap and no internet in the current competition setting.</li></ul><p class="footnote">The four cards provide 96GB aggregate capacity, not a single 96GB address space. Independent workers usually dominate tensor parallelism for small, per-task adaptation workloads. <a class="cite" href="#src-s07" title="See source S07">[S07]</a><a class="cite" href="#src-s09" title="See source S09">[S09]</a></p></article>
+    <article class="panel hardware-card"><div class="kicker">ARC‑AGI‑3 current heavy target</div><div class="metric">96GB</div><div class="metric-label">RTX PRO 6000 Blackwell</div><ul><li>1597GB/s GDDR7 bandwidth.</li><li>FP8 and Blackwell FP4 capability.</li><li>Current starter exposes <code>rtx6000</code> / <code>g4-standard-48</code>; nine-hour competition runtime.</li></ul><p class="footnote">Use portable FP8 as the default and treat NVFP4 as an optional device-specific branch. <a class="cite" href="#src-s05" title="See source S05">[S05]</a><a class="cite" href="#src-s06" title="See source S06">[S06]</a><a class="cite" href="#src-s10" title="See source S10">[S10]</a></p></article>
+    <article class="panel hardware-card"><div class="kicker">Portability reference</div><div class="metric">80–94GB</div><div class="metric-label">H100 variants</div><ul><li>3.35–3.9TB/s bandwidth.</li><li>Excellent FP8 support.</li><li>Substantially more bandwidth than RTX PRO 6000 despite similar or lower capacity.</li></ul><p class="footnote">Do not assume the evaluation pool will never change again. Device-introspective configuration should alter cache and batch settings, not silently switch to an unrelated model. <a class="cite" href="#src-s11" title="See source S11">[S11]</a></p></article>
+  </div>
+  <div class="callout warn"><h3>The 96GB trap</h3><p>A model may fit on the RTX PRO 6000 and still decode too slowly. The RTX card has roughly half the memory bandwidth of H100 SXM, so large dense autoregressive decoding can remain bandwidth-bound. Benchmark <strong>actions completed per wall-clock minute</strong>, not only tokens per second or peak VRAM. <a class="cite" href="#src-s10" title="See source S10">[S10]</a><a class="cite" href="#src-s11" title="See source S11">[S11]</a></p></div>
+
+  <h3>Weight-memory calculator</h3>
+  <p class="muted">This is a planning approximation: weight memory = parameters × bits ÷ 8, converted to GiB. Add runtime overhead, vision towers, temporary buffers and KV/state cache. Quantization metadata and MoE routing can change actual peaks.</p>
+  <div class="panel">
+    <div class="calculator">
+      <div class="field"><label for="params">Parameters (B)</label><input id="params" type="number" value="27" min="0" step="0.1"></div>
+      <div class="field"><label for="bits">Weight bits</label><select id="bits"><option value="16">16 (BF16/FP16)</option><option value="8" selected>8 (FP8/INT8)</option><option value="4">4</option></select></div>
+      <div class="field"><label for="overhead">Overhead %</label><input id="overhead" type="number" value="20" min="0" step="1"></div>
+      <div class="field"><label for="kv">KV / state GiB</label><input id="kv" type="number" value="12" min="0" step="1"></div>
+      <div class="field"><label for="gpus">GPU count</label><input id="gpus" type="number" value="1" min="1" step="1"></div>
+      <div class="field"><label for="vram">VRAM per GPU</label><input id="vram" type="number" value="96" min="1" step="1"></div>
+    </div>
+    <div class="calc-result"><div><span class="metric-label">Weight-only</span><strong id="weightOut"></strong></div><div><span class="metric-label">Estimated total</span><strong id="totalOut"></strong></div><div><span class="metric-label">Naïve per-GPU share</span><strong id="perOut"></strong></div><div><span class="metric-label">Capacity check</span><strong id="fitOut"></strong></div></div>
+  </div>
+
+  <h3 style="margin-top:28px">Practical memory snapshots</h3>
+  <div class="table-wrap"><table><thead><tr><th>Weights</th><th>Approx. weight-only memory</th><th>L4 24GB</th><th>RTX PRO 6000 96GB</th><th>Engineering implication</th></tr></thead><tbody>
+    <tr><th>4B BF16</th><td>7.45 GiB</td><td><span class="matrix-dot green"></span>Comfortable</td><td><span class="matrix-dot green"></span>Trivial</td><td>Allows QLoRA optimizer state, batches and multiple candidates on one L4.</td></tr>
+    <tr><th>9B BF16</th><td>16.76 GiB</td><td><span class="matrix-dot amber"></span>Tight after runtime overhead</td><td><span class="matrix-dot green"></span>Comfortable</td><td>Use 8/4-bit or careful cache limits on L4.</td></tr>
+    <tr><th>15B BF16</th><td>27.94 GiB</td><td><span class="matrix-dot red"></span>Does not fit weight-only</td><td><span class="matrix-dot green"></span>Comfortable</td><td>4-bit or multi-GPU required on L4; single-card ARC‑3 candidate.</td></tr>
+    <tr><th>27B FP8</th><td>25.15 GiB</td><td><span class="matrix-dot red"></span>Over capacity before overhead</td><td><span class="matrix-dot green"></span>Strong fit</td><td>Explains why Qwen3.6-27B is natural for the single 96GB ARC‑3 target, not an ARC‑2 L4 worker.</td></tr>
+    <tr><th>31B BF16</th><td>57.74 GiB</td><td><span class="matrix-dot red"></span>Requires sharding</td><td><span class="matrix-dot amber"></span>Fits with finite cache headroom</td><td>Measure multimodal/KV peaks; quantization may improve throughput and safety margin.</td></tr>
+    <tr><th>35B FP8</th><td>32.60 GiB</td><td><span class="matrix-dot red"></span>No</td><td><span class="matrix-dot green"></span>Fits</td><td>MoE active compute can be low, but all expert weights still occupy memory.</td></tr>
+    <tr><th>gpt-oss-120b MXFP4</th><td>Official guidance: ≥60GB VRAM</td><td><span class="matrix-dot red"></span>No practical single worker</td><td><span class="matrix-dot amber"></span>Fits, limited headroom</td><td>Text-only teacher or symbolic planner, not the default visual ARC‑3 policy. <a class="cite" href="#src-s20" title="See source S20">[S20]</a></td></tr>
+  </tbody></table></div>
+
+  <h3 style="margin-top:28px">Wall-clock budgets that force architectural choices</h3>
+  <div class="grid two">
+    <article class="panel"><h3>ARC‑AGI‑3 · nine hours</h3><ul><li>Reserve 10–15% for import, model load, engine warm-up and final file writing.</li><li>Cap per-step generation and Python execution; a single runaway REPL call must not poison the notebook.</li><li>Use large-model calls on novelty/strategy, deterministic replay on known plans.</li><li>Track milliseconds per environment action, not only model tokens.</li></ul></article>
+    <article class="panel"><h3>ARC‑AGI‑2 · twelve hours</h3><ul><li>Use a dynamic queue: cheap solvers first, then allocate leftover GPU-minutes to unresolved tasks.</li><li>Enforce per-task and per-branch deadlines; never let one pathological task starve the submission.</li><li>Write provisional candidates continuously so a late worker crash does not zero completed work.</li><li>Prefer independent workers because exact verification combines their outputs cheaply on CPU.</li></ul></article>
+  </div>
+</section>
+
+<section id="atlas" class="section">
+  <h2><span class="section-number">3.</span> Approach atlas: every serious branch, with a kill gate</h2>
+  <p class="section-lede">The priority score is an engineering allocation score—evidence × task fit × hardware fit × marginal diversity—not a predicted Kaggle accuracy. Filter the cards to expose why some fashionable ideas should remain offline research rather than notebook runtime.</p>
+  <div class="filters" aria-label="Approach filters">
+    <button class="filter-btn active" data-filter-kind="challenge" data-filter-value="all">Both challenges</button><button class="filter-btn" data-filter-kind="challenge" data-filter-value="arc3">ARC‑AGI‑3</button><button class="filter-btn" data-filter-kind="challenge" data-filter-value="arc2">ARC‑AGI‑2</button>
+    <button class="filter-btn active" data-filter-kind="evidence" data-filter-value="all">All evidence</button><button class="filter-btn" data-filter-kind="evidence" data-filter-value="winning">Winning</button><button class="filter-btn" data-filter-kind="evidence" data-filter-value="public">Public result</button><button class="filter-btn" data-filter-kind="evidence" data-filter-value="paper">Paper</button><button class="filter-btn" data-filter-kind="evidence" data-filter-value="proposal">Proposal</button>
+  </div>
+  <div class="search-row"><input class="filter-input" id="approachSearch" placeholder="Search approaches, risks or mechanisms…"><div class="badge"><span id="visibleCount">0</span>&nbsp;visible</div></div>
+  <div class="approach-grid"><article class="approach-card" data-challenge="arc3" data-evidence="public" data-maturity="deploy" data-search="multimodal code-writing repl agent a vlm interprets rendered frames, raw grids and compact object summaries, writes bounded python analyses, then emits one legal environment action. directly competition-proven with qwen3.6-27b-fp8; flexible enough to invent game-specific analysis without a huge handcrafted tool ontology. generated code can hang, mutate unintended state, or consume tokens. requires a sandbox, strict action gateway and context eviction.">
+          <div class="card-top"><span class="challenge arc3">ARC‑AGI‑3</span><span class="evidence public">public</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">96/100</span></div>
+          <h3>Multimodal code-writing REPL agent</h3>
+          <p class="verdict">Primary</p>
+          <p>A VLM interprets rendered frames, raw grids and compact object summaries, writes bounded Python analyses, then emits one legal environment action.</p>
+          <dl><dt>Why it can work</dt><dd>Directly competition-proven with Qwen3.6-27B-FP8; flexible enough to invent game-specific analysis without a huge handcrafted tool ontology.</dd><dt>Failure mode</dt><dd>Generated code can hang, mutate unintended state, or consume tokens. Requires a sandbox, strict action gateway and context eviction.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s08">[S08]</a><a class="cite" href="#src-s12">[S12]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc3" data-evidence="public" data-maturity="deploy" data-search="guarded vlm-as-policy feed recent frames and structured memory to a multimodal model and require a schema-valid action or short action queue. two top-three milestone systems used this pattern with gemma-4-31b, legal-action guards, repair and reflection memory. less flexible than a repl when a game demands custom counting, path search or state reconstruction.">
+          <div class="card-top"><span class="challenge arc3">ARC‑AGI‑3</span><span class="evidence public">public</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">91/100</span></div>
+          <h3>Guarded VLM-as-policy</h3>
+          <p class="verdict">Baseline / fallback</p>
+          <p>Feed recent frames and structured memory to a multimodal model and require a schema-valid action or short action queue.</p>
+          <dl><dt>Why it can work</dt><dd>Two top-three milestone systems used this pattern with Gemma-4-31B, legal-action guards, repair and reflection memory.</dd><dt>Failure mode</dt><dd>Less flexible than a REPL when a game demands custom counting, path search or state reconstruction.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s08">[S08]</a><a class="cite" href="#src-s13">[S13]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc3" data-evidence="inference" data-maturity="build" data-search="neuro-symbolic causal controller classical perception and transition logging maintain objects, state deltas, inventory and hypotheses; the vlm chooses experiments and plans over that substrate. reduces repeated no-ops and makes each environment action falsifiable while keeping the model in charge of novel abstractions. over-engineered object schemas can erase important visual cues—the milestone winner reported handcrafted tools could hurt.">
+          <div class="card-top"><span class="challenge arc3">ARC‑AGI‑3</span><span class="evidence inference">inference</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">89/100</span></div>
+          <h3>Neuro-symbolic causal controller</h3>
+          <p class="verdict">High-value addition</p>
+          <p>Classical perception and transition logging maintain objects, state deltas, inventory and hypotheses; the VLM chooses experiments and plans over that substrate.</p>
+          <dl><dt>Why it can work</dt><dd>Reduces repeated no-ops and makes each environment action falsifiable while keeping the model in charge of novel abstractions.</dd><dt>Failure mode</dt><dd>Over-engineered object schemas can erase important visual cues—the milestone winner reported handcrafted tools could hurt.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s08">[S08]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc3" data-evidence="proposal" data-maturity="research" data-search="model-predictive action search generate a few candidate actions, predict next-state deltas with a learned head or simulator, and execute the candidate with the best expected progress/information gain. can trade cheap internal computation for fewer costly environment actions. a biased learned world model can confidently reject the only useful experiment; tree width also burns the nine-hour runtime.">
+          <div class="card-top"><span class="challenge arc3">ARC‑AGI‑3</span><span class="evidence proposal">proposal</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">78/100</span></div>
+          <h3>Model-predictive action search</h3>
+          <p class="verdict">Moonshot after baseline</p>
+          <p>Generate a few candidate actions, predict next-state deltas with a learned head or simulator, and execute the candidate with the best expected progress/information gain.</p>
+          <dl><dt>Why it can work</dt><dd>Can trade cheap internal computation for fewer costly environment actions.</dd><dt>Failure mode</dt><dd>A biased learned world model can confidently reject the only useful experiment; tree width also burns the nine-hour runtime.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s03">[S03]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc3" data-evidence="inference" data-maturity="build" data-search="split perception and planning a 4b–15b grounding model extracts components and changes; a 27b–31b planner is invoked only for uncertain or strategic decisions. could lower prefill cost and permit richer perception without calling the large model on every trivial step. interface errors between perception and planning can be worse than a single end-to-end vlm; two model loads consume memory and startup time.">
+          <div class="card-top"><span class="challenge arc3">ARC‑AGI‑3</span><span class="evidence inference">inference</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">82/100</span></div>
+          <h3>Split perception and planning</h3>
+          <p class="verdict">Benchmark branch</p>
+          <p>A 4B–15B grounding model extracts components and changes; a 27B–31B planner is invoked only for uncertain or strategic decisions.</p>
+          <dl><dt>Why it can work</dt><dd>Could lower prefill cost and permit richer perception without calling the large model on every trivial step.</dd><dt>Failure mode</dt><dd>Interface errors between perception and planning can be worse than a single end-to-end VLM; two model loads consume memory and startup time.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s17">[S17]</a><a class="cite" href="#src-s18">[S18]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc3" data-evidence="proposal" data-maturity="build" data-search="adaptive cheap/expensive model router use a compact policy for deterministic follow-through and call the large vlm only on novelty, contradiction, low confidence or level transition. targets wall-clock efficiency without sacrificing strategic intelligence. poor confidence calibration causes either expensive overuse or silent failure on states the cheap model misunderstands.">
+          <div class="card-top"><span class="challenge arc3">ARC‑AGI‑3</span><span class="evidence proposal">proposal</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">84/100</span></div>
+          <h3>Adaptive cheap/expensive model router</h3>
+          <p class="verdict">Promising</p>
+          <p>Use a compact policy for deterministic follow-through and call the large VLM only on novelty, contradiction, low confidence or level transition.</p>
+          <dl><dt>Why it can work</dt><dd>Targets wall-clock efficiency without sacrificing strategic intelligence.</dd><dt>Failure mode</dt><dd>Poor confidence calibration causes either expensive overuse or silent failure on states the cheap model misunderstands.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s15">[S15]</a><a class="cite" href="#src-s17">[S17]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc3" data-evidence="proposal" data-maturity="research" data-search="offline trajectory distillation use a strong local teacher to label state changes, efficient actions and plans, then distil into a smaller multimodal policy. a compact student can afford more decisions and larger rollouts within nine hours. public/synthetic teacher trajectories may not cover the hidden mechanics; imitation can preserve the teacher’s blind spots.">
+          <div class="card-top"><span class="challenge arc3">ARC‑AGI‑3</span><span class="evidence proposal">proposal</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">73/100</span></div>
+          <h3>Offline trajectory distillation</h3>
+          <p class="verdict">Later-stage</p>
+          <p>Use a strong local teacher to label state changes, efficient actions and plans, then distil into a smaller multimodal policy.</p>
+          <dl><dt>Why it can work</dt><dd>A compact student can afford more decisions and larger rollouts within nine hours.</dd><dt>Failure mode</dt><dd>Public/synthetic teacher trajectories may not cover the hidden mechanics; imitation can preserve the teacher’s blind spots.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s08">[S08]</a><a class="cite" href="#src-s34">[S34]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc3" data-evidence="proposal" data-maturity="research" data-search="online gradient adaptation during play update adapters from self-supervised transition prediction while the agent explores a hidden game. in principle the model can internalize game-specific dynamics. sparse, nonstationary labels and a nine-hour cap make catastrophic drift likely. external causal memory is safer and instantly reversible.">
+          <div class="card-top"><span class="challenge arc3">ARC‑AGI‑3</span><span class="evidence proposal">proposal</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">43/100</span></div>
+          <h3>Online gradient adaptation during play</h3>
+          <p class="verdict">Usually reject</p>
+          <p>Update adapters from self-supervised transition prediction while the agent explores a hidden game.</p>
+          <dl><dt>Why it can work</dt><dd>In principle the model can internalize game-specific dynamics.</dd><dt>Failure mode</dt><dd>Sparse, nonstationary labels and a nine-hour cap make catastrophic drift likely. External causal memory is safer and instantly reversible.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s31">[S31]</a><a class="cite" href="#src-s32">[S32]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc3" data-evidence="negative" data-maturity="avoid" data-search="multi-agent debate every action several large agents independently analyze each frame, debate and vote before every environment step. diversity may help on a handful of pivotal decisions. the public third-place profile performed best with extra generator/arbiter machinery disabled; debate multiplies latency and correlated speculation.">
+          <div class="card-top"><span class="challenge arc3">ARC‑AGI‑3</span><span class="evidence negative">negative</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">28/100</span></div>
+          <h3>Multi-agent debate every action</h3>
+          <p class="verdict">Reject</p>
+          <p>Several large agents independently analyze each frame, debate and vote before every environment step.</p>
+          <dl><dt>Why it can work</dt><dd>Diversity may help on a handful of pivotal decisions.</dd><dt>Failure mode</dt><dd>The public third-place profile performed best with extra generator/arbiter machinery disabled; debate multiplies latency and correlated speculation.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s08">[S08]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc3" data-evidence="baseline" data-maturity="deploy" data-search="classical salience/exploration policy connected components, rare-color clicks, flood fill, pathfinding, state hashing and reset logic without an llm. fast, deterministic, and useful when model serving fails or the game is mechanically simple. cannot infer open-ended goals or unfamiliar causal systems reliably.">
+          <div class="card-top"><span class="challenge arc3">ARC‑AGI‑3</span><span class="evidence baseline">baseline</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">55/100</span></div>
+          <h3>Classical salience/exploration policy</h3>
+          <p class="verdict">Mandatory fallback</p>
+          <p>Connected components, rare-color clicks, flood fill, pathfinding, state hashing and reset logic without an LLM.</p>
+          <dl><dt>Why it can work</dt><dd>Fast, deterministic, and useful when model serving fails or the game is mechanically simple.</dd><dt>Failure mode</dt><dd>Cannot infer open-ended goals or unfamiliar causal systems reliably.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s08">[S08]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="winning" data-maturity="deploy" data-search="arc-specialized 4b llm + test-time training globally fine-tune qwen3-4b on executable synthetic tasks, then perform tightly budgeted per-task lora/qlora adaptation on augmented demonstrations. direct 2025 winning-solution lineage; small enough for one l4, leaving three gpus for uncorrelated branches. fits demonstrations easily but may learn the wrong abstraction; must use leave-one-out, equivariance and stability checks.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence winning">winning</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">97/100</span></div>
+          <h3>ARC-specialized 4B LLM + test-time training</h3>
+          <p class="verdict">Primary neural branch</p>
+          <p>Globally fine-tune Qwen3-4B on executable synthetic tasks, then perform tightly budgeted per-task LoRA/QLoRA adaptation on augmented demonstrations.</p>
+          <dl><dt>Why it can work</dt><dd>Direct 2025 winning-solution lineage; small enough for one L4, leaving three GPUs for uncorrelated branches.</dd><dt>Failure mode</dt><dd>Fits demonstrations easily but may learn the wrong abstraction; must use leave-one-out, equivariance and stability checks.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s21">[S21]</a><a class="cite" href="#src-s22">[S22]</a><a class="cite" href="#src-s19">[S19]</a><a class="cite" href="#src-s26">[S26]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="winning" data-maturity="build" data-search="2d masked refinement / diffusion predict a draft output grid, mask uncertain cells and iteratively repair them using 2d positional structure and perspective-based scoring. the architects lineage placed second in 2025 and addresses the mismatch between flat token generation and spatial grids. training and inference code are more specialized; confidence maps can converge to visually plausible but exact-wrong outputs.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence winning">winning</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">94/100</span></div>
+          <h3>2D masked refinement / diffusion</h3>
+          <p class="verdict">Primary diversity branch</p>
+          <p>Predict a draft output grid, mask uncertain cells and iteratively repair them using 2D positional structure and perspective-based scoring.</p>
+          <dl><dt>Why it can work</dt><dd>The ARChitects lineage placed second in 2025 and addresses the mismatch between flat token generation and spatial grids.</dd><dt>Failure mode</dt><dd>Training and inference code are more specialized; confidence maps can converge to visually plausible but exact-wrong outputs.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s21">[S21]</a><a class="cite" href="#src-s22">[S22]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="paper" data-maturity="research" data-search="urm/trm recurrent refinement a tiny or small universal/recurrent transformer repeatedly updates latent and answer states, often with full task-time adaptation. tiny models support many seeds and refinements; urm reports 16% arc-agi-2 pass@1, while nvarc used trm components. reported scores are sensitive to augmentation and outer-loop training; official analysis warns architecture headlines can hide the real drivers.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence paper">paper</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">92/100</span></div>
+          <h3>URM/TRM recurrent refinement</h3>
+          <p class="verdict">High-upside branch</p>
+          <p>A tiny or small universal/recurrent transformer repeatedly updates latent and answer states, often with full task-time adaptation.</p>
+          <dl><dt>Why it can work</dt><dd>Tiny models support many seeds and refinements; URM reports 16% ARC-AGI-2 pass@1, while NVARC used TRM components.</dd><dt>Failure mode</dt><dd>Reported scores are sensitive to augmentation and outer-loop training; official analysis warns architecture headlines can hide the real drivers.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s23">[S23]</a><a class="cite" href="#src-s24">[S24]</a><a class="cite" href="#src-s25">[S25]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="established" data-maturity="deploy" data-search="typed dsl / enumerative program synthesis search composable operations over colors, components, masks, geometry, topology and object relations; execute every candidate exactly. gives perfect verification, interpretable failures and strong coverage on structured task families. a fixed dsl has a hard coverage ceiling and search can explode without neural guidance and structural pruning.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence established">established</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">91/100</span></div>
+          <h3>Typed DSL / enumerative program synthesis</h3>
+          <p class="verdict">Mandatory branch</p>
+          <p>Search composable operations over colors, components, masks, geometry, topology and object relations; execute every candidate exactly.</p>
+          <dl><dt>Why it can work</dt><dd>Gives perfect verification, interpretable failures and strong coverage on structured task families.</dd><dt>Failure mode</dt><dd>A fixed DSL has a hard coverage ceiling and search can explode without neural guidance and structural pruning.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s04">[S04]</a><a class="cite" href="#src-s27">[S27]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="paper" data-maturity="build" data-search="llm-proposed python programs generate transformation functions, execute them against all demonstrations, repair from counterexamples and retain only exact programs. a general language can express transformations outside a handcrafted dsl; evolutionary/hindsight approaches have strong arc-agi-1 evidence. many spurious programs interpolate demonstrations; sandboxing and aggressive generalization tests are essential.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence paper">paper</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">90/100</span></div>
+          <h3>LLM-proposed Python programs</h3>
+          <p class="verdict">Competitive branch</p>
+          <p>Generate transformation functions, execute them against all demonstrations, repair from counterexamples and retain only exact programs.</p>
+          <dl><dt>Why it can work</dt><dd>A general language can express transformations outside a handcrafted DSL; evolutionary/hindsight approaches have strong ARC-AGI-1 evidence.</dd><dt>Failure mode</dt><dd>Many spurious programs interpolate demonstrations; sandboxing and aggressive generalization tests are essential.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s27">[S27]</a><a class="cite" href="#src-s30">[S30]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="paper" data-maturity="build" data-search="product of experts across perspectives solve each task through transformed views—rotations, reflections, color permutations, crops and object orderings—and combine independent scores. perspective diversity improves candidate discovery and estimates invariance; naturally complements pass@2. augmentation count can dominate runtime and correlated views can create false confidence.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence paper">paper</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">88/100</span></div>
+          <h3>Product of experts across perspectives</h3>
+          <p class="verdict">Strong selector</p>
+          <p>Solve each task through transformed views—rotations, reflections, color permutations, crops and object orderings—and combine independent scores.</p>
+          <dl><dt>Why it can work</dt><dd>Perspective diversity improves candidate discovery and estimates invariance; naturally complements pass@2.</dd><dt>Failure mode</dt><dd>Augmentation count can dominate runtime and correlated views can create false confidence.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s28">[S28]</a><a class="cite" href="#src-s25">[S25]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="paper" data-maturity="research" data-search="mdl / inference-time compression optimize a compact per-puzzle model or program whose description length explains the visible pairs and predicts missing outputs. no pretraining dependency and errors differ from llm/dsl solvers; useful as a second-attempt source on selected tasks. arc-agi-2 coverage is currently limited and per-task optimization can be expensive.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence paper">paper</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">77/100</span></div>
+          <h3>MDL / inference-time compression</h3>
+          <p class="verdict">Low-correlation portfolio bet</p>
+          <p>Optimize a compact per-puzzle model or program whose description length explains the visible pairs and predicts missing outputs.</p>
+          <dl><dt>Why it can work</dt><dd>No pretraining dependency and errors differ from LLM/DSL solvers; useful as a second-attempt source on selected tasks.</dd><dt>Failure mode</dt><dd>ARC-AGI-2 coverage is currently limited and per-task optimization can be expensive.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s29">[S29]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="inference" data-maturity="build" data-search="object graph + relational search convert grids into candidate object decompositions and search relations such as containment, alignment, correspondence, motion and counting. many arc tasks are easier at the object/relation level than as raw pixels; supports dsl, ranking and synthetic generation. there is no unique object decomposition. a single segmentation policy creates brittle blind spots; preserve multiple decompositions.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence inference">inference</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">86/100</span></div>
+          <h3>Object graph + relational search</h3>
+          <p class="verdict">Core representation</p>
+          <p>Convert grids into candidate object decompositions and search relations such as containment, alignment, correspondence, motion and counting.</p>
+          <dl><dt>Why it can work</dt><dd>Many ARC tasks are easier at the object/relation level than as raw pixels; supports DSL, ranking and synthetic generation.</dd><dt>Failure mode</dt><dd>There is no unique object decomposition. A single segmentation policy creates brittle blind spots; preserve multiple decompositions.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s04">[S04]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="inference" data-maturity="build" data-search="sat/smt/ilp constraint solving encode unknown mappings, object correspondences, symmetries or counts as constraints and solve exactly. excellent for permutation, matching and consistency-heavy families; produces proofs or clear infeasibility. poor fit for generative shape construction unless paired with a rich template library.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence inference">inference</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">74/100</span></div>
+          <h3>SAT/SMT/ILP constraint solving</h3>
+          <p class="verdict">Niche branch</p>
+          <p>Encode unknown mappings, object correspondences, symmetries or counts as constraints and solve exactly.</p>
+          <dl><dt>Why it can work</dt><dd>Excellent for permutation, matching and consistency-heavy families; produces proofs or clear infeasibility.</dd><dt>Failure mode</dt><dd>Poor fit for generative shape construction unless paired with a rich template library.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s04">[S04]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="proposal" data-maturity="research" data-search="task embedding / meta-learned adapter generator infer a task vector from demonstrations and generate adapter weights, prompts or dsl priors without running many gradient steps. could deliver ttt-like adaptation with far lower per-task wall time. requires a broad synthetic meta-training distribution and can collapse to dataset-specific shortcuts.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence proposal">proposal</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">72/100</span></div>
+          <h3>Task embedding / meta-learned adapter generator</h3>
+          <p class="verdict">Moonshot</p>
+          <p>Infer a task vector from demonstrations and generate adapter weights, prompts or DSL priors without running many gradient steps.</p>
+          <dl><dt>Why it can work</dt><dd>Could deliver TTT-like adaptation with far lower per-task wall time.</dd><dt>Failure mode</dt><dd>Requires a broad synthetic meta-training distribution and can collapse to dataset-specific shortcuts.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s26">[S26]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="community" data-maturity="build" data-search="large vlm natural-language solver render demonstrations as images and ask a vlm to explain the rule or emit code/candidate grids. can surface semantic hypotheses and unusual compositions that small specialized models miss. unverified direct grid output is exactness-hostile and a large model consumes multiple l4s; keep it outside the critical path or quantize heavily.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence community">community</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">62/100</span></div>
+          <h3>Large VLM natural-language solver</h3>
+          <p class="verdict">Use only as proposer</p>
+          <p>Render demonstrations as images and ask a VLM to explain the rule or emit code/candidate grids.</p>
+          <dl><dt>Why it can work</dt><dd>Can surface semantic hypotheses and unusual compositions that small specialized models miss.</dd><dt>Failure mode</dt><dd>Unverified direct grid output is exactness-hostile and a large model consumes multiple L4s; keep it outside the critical path or quantize heavily.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s13">[S13]</a><a class="cite" href="#src-s12">[S12]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="recent" data-maturity="research" data-search="reflective multi-agent program synthesis agents propose perceptions, latent programs, executions and critiques, with a meta-controller deciding which branch to pursue. good match for offline discovery and solver evolution; arcana is a current example of this direction. the july 2026 paper is too recent for robust competition evidence, and runtime societies duplicate compute under a 12-hour cap.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence recent">recent</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">71/100</span></div>
+          <h3>Reflective multi-agent program synthesis</h3>
+          <p class="verdict">EvoMolior research method, not default runtime</p>
+          <p>Agents propose perceptions, latent programs, executions and critiques, with a meta-controller deciding which branch to pursue.</p>
+          <dl><dt>Why it can work</dt><dd>Good match for offline discovery and solver evolution; ARCANA is a current example of this direction.</dd><dt>Failure mode</dt><dd>The July 2026 paper is too recent for robust competition evidence, and runtime societies duplicate compute under a 12-hour cap.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s30">[S30]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="baseline" data-maturity="deploy" data-search="brute-force geometric/color transforms enumerate identity, crop, palette mappings, flips, rotations, translations, tiling, overlays and simple component rules. solves easy tasks in milliseconds, creates reliable candidates and frees gpu time for hard tasks. limited compositional depth; naive enumeration produces redundant candidates.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence baseline">baseline</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">68/100</span></div>
+          <h3>Brute-force geometric/color transforms</h3>
+          <p class="verdict">Mandatory cheap baseline</p>
+          <p>Enumerate identity, crop, palette mappings, flips, rotations, translations, tiling, overlays and simple component rules.</p>
+          <dl><dt>Why it can work</dt><dd>Solves easy tasks in milliseconds, creates reliable candidates and frees GPU time for hard tasks.</dd><dt>Failure mode</dt><dd>Limited compositional depth; naive enumeration produces redundant candidates.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s04">[S04]</a></div>
+        </article>
+<article class="approach-card" data-challenge="arc2" data-evidence="inference" data-maturity="build" data-search="learned verifier / candidate ranker rank exactly fitting programs and neural outputs using leave-one-out reconstruction, equivariance, perturbation stability, mdl and cross-family consensus. the core problem is not only generation: many hypotheses fit demonstrations. better selection converts solver diversity into pass@2 gains. a ranker trained on synthetic distributions may confidently prefer synthetic-style rules over hidden-task abstractions.">
+          <div class="card-top"><span class="challenge arc2">ARC‑AGI‑2</span><span class="evidence inference">inference</span><span class="score" title="Strategic priority score, not a predicted leaderboard score">87/100</span></div>
+          <h3>Learned verifier / candidate ranker</h3>
+          <p class="verdict">Critical glue</p>
+          <p>Rank exactly fitting programs and neural outputs using leave-one-out reconstruction, equivariance, perturbation stability, MDL and cross-family consensus.</p>
+          <dl><dt>Why it can work</dt><dd>The core problem is not only generation: many hypotheses fit demonstrations. Better selection converts solver diversity into pass@2 gains.</dd><dt>Failure mode</dt><dd>A ranker trained on synthetic distributions may confidently prefer synthetic-style rules over hidden-task abstractions.</dd></dl>
+          <div class="refs"><a class="cite" href="#src-s21">[S21]</a><a class="cite" href="#src-s28">[S28]</a></div>
+        </article></div>
+  <div class="callout"><h3>Portfolio logic</h3><p>ARC‑AGI‑2 branches are valuable when their errors are <em>different</em>. ARC‑AGI‑3 branches are valuable when they reduce real environment actions or wall-clock. This is why model merging is lower priority for ARC‑2 and per-action multi-agent debate is lower priority for ARC‑3.</p></div>
+</section>
+
+<section id="models" class="section">
+  <h2><span class="section-number">4.</span> Open-weight portfolio</h2>
+  <p class="section-lede">Model choice should be treated as a controlled portfolio with explicit roles and exit criteria. General benchmark strength is a weak proxy; retain a candidate only when it wins on ARC-specific mechanics under the actual runtime.</p>
+  <div class="search-row"><input class="filter-input" id="modelSearch" placeholder="Filter model table…"><span class="badge">Weight memory is approximate</span></div>
+  <div class="table-wrap"><table id="modelTable"><thead><tr><th>Model / family</th><th>Target</th><th>Size</th><th>Modality</th><th>License</th><th>Weight memory</th><th>ARC evidence</th><th>Best role</th><th>Verdict</th></tr></thead><tbody><tr data-search="qwen3.6-27b-fp8 arc-3 27b dense image + text apache-2.0 ~25.1 gib weights 1st-place milestone #1 primary repl planner/policy start here s08 s12"><th scope="row">Qwen3.6-27B-FP8</th><td>ARC-3</td><td>27B dense</td><td>Image + text</td><td>Apache-2.0</td><td>~25.1 GiB weights</td><td>1st-place Milestone #1</td><td>Primary REPL planner/policy</td><td><strong>Start here</strong> <a class="cite" href="#src-s08">[S08]</a><a class="cite" href="#src-s12">[S12]</a></td></tr>
+<tr data-search="gemma 4 31b arc-3 31b dense image + text apache-2.0 ~57.7 gib bf16; ~28.9 gib at 8-bit 2nd/3rd milestone #1 guarded direct policy baseline must benchmark s08 s13"><th scope="row">Gemma 4 31B</th><td>ARC-3</td><td>31B dense</td><td>Image + text</td><td>Apache-2.0</td><td>~57.7 GiB BF16; ~28.9 GiB at 8-bit</td><td>2nd/3rd Milestone #1</td><td>Guarded direct policy baseline</td><td><strong>Must benchmark</strong> <a class="cite" href="#src-s08">[S08]</a><a class="cite" href="#src-s13">[S13]</a></td></tr>
+<tr data-search="qwen3.6-35b-a3b-fp8 arc-3 35b stored / ~3b active image + text apache-2.0 ~32.6 gib weights no direct arc-3 result latency/quality challenger a/b after baseline s14"><th scope="row">Qwen3.6-35B-A3B-FP8</th><td>ARC-3</td><td>35B stored / ~3B active</td><td>Image + text</td><td>Apache-2.0</td><td>~32.6 GiB weights</td><td>No direct ARC-3 result</td><td>Latency/quality challenger</td><td><strong>A/B after baseline</strong> <a class="cite" href="#src-s14">[S14]</a></td></tr>
+<tr data-search="phi-4 reasoning vision 15b arc-3 15b image + text mit ~27.9 gib bf16; ~7.0 gib 4-bit no direct arc-3 result compact policy / router promising scout s17"><th scope="row">Phi-4 Reasoning Vision 15B</th><td>ARC-3</td><td>15B</td><td>Image + text</td><td>MIT</td><td>~27.9 GiB BF16; ~7.0 GiB 4-bit</td><td>No direct ARC-3 result</td><td>Compact policy / router</td><td><strong>Promising scout</strong> <a class="cite" href="#src-s17">[S17]</a></td></tr>
+<tr data-search="glm-4.6v-flash arc-3 ~9b image + text mit ~16.8 gib bf16; ~4.2 gib 4-bit no direct arc-3 result cheap perception, arbitration, fallback benchmark cheaply s15"><th scope="row">GLM-4.6V-Flash</th><td>ARC-3</td><td>~9B</td><td>Image + text</td><td>MIT</td><td>~16.8 GiB BF16; ~4.2 GiB 4-bit</td><td>No direct ARC-3 result</td><td>Cheap perception, arbitration, fallback</td><td><strong>Benchmark cheaply</strong> <a class="cite" href="#src-s15">[S15]</a></td></tr>
+<tr data-search="internvl3.5-30b-a3b arc-3 30.8b stored / ~3b active image + text apache-2.0 ~28.7 gib at 8-bit no direct arc-3 result embodied/visual agent research branch conditional; runtime risk s16"><th scope="row">InternVL3.5-30B-A3B</th><td>ARC-3</td><td>30.8B stored / ~3B active</td><td>Image + text</td><td>Apache-2.0</td><td>~28.7 GiB at 8-bit</td><td>No direct ARC-3 result</td><td>Embodied/visual agent research branch</td><td><strong>Conditional; runtime risk</strong> <a class="cite" href="#src-s16">[S16]</a></td></tr>
+<tr data-search="molmo2-er arc-3 4b image + text verify pinned card ~7.5 gib bf16 embodied-perception specialization pointing/component/delta extractor perception specialist only s18"><th scope="row">Molmo2-ER</th><td>ARC-3</td><td>4B</td><td>Image + text</td><td>Verify pinned card</td><td>~7.5 GiB BF16</td><td>Embodied-perception specialization</td><td>Pointing/component/delta extractor</td><td><strong>Perception specialist only</strong> <a class="cite" href="#src-s18">[S18]</a></td></tr>
+<tr data-search="gpt-oss-120b arc-3 117b moe / ~5b active text verify pinned card ≥60gb official guidance official template lineage, not top-3 model symbolic planner / offline teacher not default runtime s20 s08"><th scope="row">gpt-oss-120b</th><td>ARC-3</td><td>117B MoE / ~5B active</td><td>Text</td><td>Verify pinned card</td><td>≥60GB official guidance</td><td>Official template lineage, not top-3 model</td><td>Symbolic planner / offline teacher</td><td><strong>Not default runtime</strong> <a class="cite" href="#src-s20">[S20]</a><a class="cite" href="#src-s08">[S08]</a></td></tr>
+<tr data-search="gpt-oss-20b arc-3 / arc-2 ~20b moe text verify pinned card ~16gb official guidance no direct 2026 result code proposer, critic, cheap teacher useful secondary s20"><th scope="row">gpt-oss-20b</th><td>ARC-3 / ARC-2</td><td>~20B MoE</td><td>Text</td><td>Verify pinned card</td><td>~16GB official guidance</td><td>No direct 2026 result</td><td>Code proposer, critic, cheap teacher</td><td><strong>Useful secondary</strong> <a class="cite" href="#src-s20">[S20]</a></td></tr>
+<tr data-search="qwen3-4b arc-2 4b dense text apache-2.0 ~7.5 gib bf16; ~1.9 gib 4-bit nvarc winning lineage specialized ttt/program branch primary llm branch s19 s22"><th scope="row">Qwen3-4B</th><td>ARC-2</td><td>4B dense</td><td>Text</td><td>Apache-2.0</td><td>~7.5 GiB BF16; ~1.9 GiB 4-bit</td><td>NVARC winning lineage</td><td>Specialized TTT/program branch</td><td><strong>Primary LLM branch</strong> <a class="cite" href="#src-s19">[S19]</a><a class="cite" href="#src-s22">[S22]</a></td></tr>
+<tr data-search="trm family arc-2 ~7m reference grid tensors mit code; verify assets tiny; training state dominates nvarc component; paper reports 8% arc-2 low-correlation recursive solver reproduce, then retain only if stable s23 s22"><th scope="row">TRM family</th><td>ARC-2</td><td>~7M reference</td><td>Grid tensors</td><td>MIT code; verify assets</td><td>Tiny; training state dominates</td><td>NVARC component; paper reports 8% ARC-2</td><td>Low-correlation recursive solver</td><td><strong>Reproduce, then retain only if stable</strong> <a class="cite" href="#src-s23">[S23]</a><a class="cite" href="#src-s22">[S22]</a></td></tr>
+<tr data-search="urm family arc-2 research-dependent grid tensors verify code/checkpoints typically l4-friendly paper reports 16% arc-2 pass@1 next-generation recurrent branch highest-upside new branch s24 s25"><th scope="row">URM family</th><td>ARC-2</td><td>Research-dependent</td><td>Grid tensors</td><td>Verify code/checkpoints</td><td>Typically L4-friendly</td><td>Paper reports 16% ARC-2 pass@1</td><td>Next-generation recurrent branch</td><td><strong>Highest-upside new branch</strong> <a class="cite" href="#src-s24">[S24]</a><a class="cite" href="#src-s25">[S25]</a></td></tr>
+<tr data-search="compressarc-style tiny model arc-2 ~76k reference per-puzzle tensors verify implementation negligible paper; limited arc-2 coverage mdl-based second-attempt source niche but valuable diversity s29"><th scope="row">CompressARC-style tiny model</th><td>ARC-2</td><td>~76K reference</td><td>Per-puzzle tensors</td><td>Verify implementation</td><td>Negligible</td><td>Paper; limited ARC-2 coverage</td><td>MDL-based second-attempt source</td><td><strong>Niche but valuable diversity</strong> <a class="cite" href="#src-s29">[S29]</a></td></tr></tbody></table></div>
+  <div class="grid two" style="margin-top:18px">
+    <article class="panel"><h3>License policy</h3><p>Prefer Apache-2.0 or MIT checkpoints and pin the exact repository revision. ARC Prize requires submitter-authored code/methods under a permissive public-domain-style license such as CC0 or MIT-0, while third-party components must at least permit public sharing. Keep a machine-readable bill of materials and preserve notices. <a class="cite" href="#src-s02" title="See source S02">[S02]</a></p><p class="footnote">Model weights, tokenizer, custom kernels, datasets and code may carry different licenses. “Open weight” is not automatically “competition-compatible.”</p></article>
+    <article class="panel"><h3>Model admission test</h3><ol><li>Cold-load succeeds offline twice.</li><li>Peak VRAM leaves ≥15% safety margin.</li><li>Structured action / exact grid format succeeds ≥99.5% after deterministic repair.</li><li>ARC-specific holdout gain survives three seeds.</li><li>Gain remains positive per wall-clock minute.</li><li>License and redistribution path are documented.</li></ol></article>
+  </div>
+
+  <h3 style="margin-top:28px">ARC‑AGI‑3 model tournament</h3>
+  <div class="table-wrap"><table><thead><tr><th>Metric</th><th>Why it matters</th><th>Minimum useful reporting</th><th>Kill gate</th></tr></thead><tbody>
+    <tr><th>Legal-action rate</th><td>Invalid actions waste steps or crash the agent.</td><td>All proposals, repaired proposals and final actions.</td><td>&lt;99.5% after guard.</td></tr>
+    <tr><th>Coordinate grounding</th><td>Visual competence must become correct clicks/targets.</td><td>Pixel/object target accuracy on transformed frames.</td><td>Worse than the simple salience baseline.</td></tr>
+    <tr><th>State-delta accuracy</th><td>Measures causal observation rather than fluent narration.</td><td>Changed component, color, inventory and terminal predictions.</td><td>No gain after adapter training.</td></tr>
+    <tr><th>Useful actions/minute</th><td>Combines latency and action quality.</td><td>Novel state transitions + goal-progress actions per minute.</td><td>Large model loses to compact router on the same games.</td></tr>
+    <tr><th>Completion / RHAE proxy</th><td>True objective is long-horizon completion with efficient actions.</td><td>Completion, action count, resets, repeated no-ops.</td><td>No statistically credible gain over Gemma/Qwen public baselines.</td></tr>
+  </tbody></table></div>
+
+  <h3 style="margin-top:28px">ARC‑AGI‑2 model tournament</h3>
+  <div class="table-wrap"><table><thead><tr><th>Metric</th><th>Why it matters</th><th>Report by family</th><th>Kill gate</th></tr></thead><tbody>
+    <tr><th>Exact pass@1 / pass@2</th><td>Near-correct grids receive no credit.</td><td>Global and by transformation family.</td><td>Branch adds no marginal pass@2 tasks.</td></tr>
+    <tr><th>Demonstration fit</th><td>Necessary but not sufficient.</td><td>Exact fit rate before and after repair.</td><td>Cannot fit easy synthetic families it was trained for.</td></tr>
+    <tr><th>LOO generalization</th><td>Detects spurious interpolation.</td><td>Leave one pair out, solve it from the rest.</td><td>High train fit with low LOO stability.</td></tr>
+    <tr><th>Equivariance</th><td>Correct abstractions should survive color/geometry transformations.</td><td>Prediction agreement after de-augmentation.</td><td>Unstable across equivalent views.</td></tr>
+    <tr><th>Marginal coverage</th><td>Second guess must solve tasks the first misses.</td><td>Unique solves and error correlation.</td><td>Correlation so high that a simpler duplicate is equivalent.</td></tr>
+    <tr><th>GPU-min/task</th><td>120-ish tasks under 12 hours create a hard budget.</td><td>P50/P95 and timeout count.</td><td>Consumes budget without proportional unique solves.</td></tr>
+  </tbody></table></div>
+</section>
+
+<section id="interventions" class="section">
+  <h2><span class="section-number">5.</span> Weight intervention ladder</h2>
+  <p class="section-lede">Escalate only when the cheaper intervention has a measured ceiling. The most common mistake is training weights to compensate for a bad observation format, verifier or runtime.</p>
+  <div class="table-wrap"><table><thead><tr><th>Level</th><th>Intervention</th><th>When</th><th>Concrete ARC use</th><th>Pros</th><th>Cons</th></tr></thead><tbody><tr><td><span class="level">L0</span></td><th scope="row">Harness and representation</th><td>Do before any weight work</td><td>ARC-3: frame deltas, legal-action gateway, rolling causal memory, REPL sandbox. ARC-2: multi-view grids, object graphs, exact executor, candidate deduplication.</td><td>Highest expected return; reversible; exposes whether the base model is really the bottleneck.</td><td>Can become over-engineered and suppress useful raw information.</td></tr>
+<tr><td><span class="level">L1</span></td><th scope="row">Serving, precision and cache</th><td>Immediate</td><td>FP8/BF16/4-bit comparisons, context caps, batch/queue policy, prefill caching, deterministic parser, offline wheel pinning.</td><td>Often yields 2–4× resource changes without retraining.</td><td>Quantization can selectively damage coordinates, colors and structured actions despite acceptable generic benchmarks.</td></tr>
+<tr><td><span class="level">L2</span></td><th scope="row">Constrained output and token interface</th><td>Immediate</td><td>ARC-3 grammar-constrained actions and optional special state tokens. ARC-2 compact color/grid vocabulary, row/column/role embeddings and exact decoder.</td><td>Improves exactness and reduces token waste.</td><td>Tokenizer surgery makes checkpoints nonstandard and complicates vLLM support.</td></tr>
+<tr><td><span class="level">L3</span></td><th scope="row">LoRA / DoRA / QLoRA</th><td>Primary weight-editing step</td><td>Train state-delta, action-legality and planning adapters for ARC-3; global ARC adapter plus per-task QLoRA for ARC-2.</td><td>Cheap, versionable, separable by skill and easy to ablate.</td><td>Adapters can overfit demonstrations or conflict with multimodal projection layers.</td></tr>
+<tr><td><span class="level">L4</span></td><th scope="row">Synthetic-data SFT</th><td>High priority, especially ARC-2</td><td>Generate executable puzzle programs or procedural interactive worlds; supervise outputs, state deltas, plans, confidence and failure labels.</td><td>Scales coverage and creates controlled holdouts.</td><td>Generator bias can become the model’s hidden ontology; ambiguity filtering is mandatory.</td></tr>
+<tr><td><span class="level">L5</span></td><th scope="row">Preference optimization</th><td>After a strong SFT baseline</td><td>DPO/related objectives on efficient vs wasteful ARC-3 trajectories; pair correct generalizing programs against spurious interpolants for ARC-2.</td><td>Directly optimizes action economy, legality and abstention.</td><td>Preference labels can reward style or brevity rather than actual causal competence.</td></tr>
+<tr><td><span class="level">L6</span></td><th scope="row">Test-time parameter updates</th><td>Core ARC-2; experimental ARC-3</td><td>Per-task LoRA/full tiny-model adaptation with held-out augmentations, strict wall-time and rollback.</td><td>Directly learns from the task demonstrations and has strong ARC evidence.</td><td>Can memorize examples, consume the full runtime and destroy calibration.</td></tr>
+<tr><td><span class="level">L7</span></td><th scope="row">Architecture surgery</th><td>Moonshot</td><td>ARC-3 action/value/world-model heads; ARC-2 2D recurrent core, masked output head, object-set encoder and adaptive compute.</td><td>Creates inductive biases that text decoding cannot provide.</td><td>Custom serving, training and packaging risk rises sharply; every claimed gain needs an equal-compute baseline.</td></tr>
+<tr><td><span class="level">L8</span></td><th scope="row">Full-model fine-tuning / pretraining</th><td>Offline only</td><td>Full 4B ARC-2 fine-tune or train a small recurrent model from scratch. Avoid full 27B ARC-3 tuning until adapters saturate.</td><td>Maximum capacity to reshape representation.</td><td>Costly, difficult to reproduce, high contamination risk and usually inferior return per engineering day.</td></tr></tbody></table></div>
+
+  <h3 style="margin-top:30px">Quantization matrix</h3>
+  <div class="table-wrap"><table><thead><tr><th>Format</th><th>Use it when</th><th>ARC‑3 view</th><th>ARC‑2 view</th><th>Main validation</th></tr></thead><tbody>
+    <tr><th>BF16</th><td>Model and cache comfortably fit.</td><td>Best reference for Gemma/Phi quality; 31B BF16 fits 96GB but must be profiled.</td><td>Excellent for 4B and tiny recurrent models on L4.</td><td>Grounding, exact colors, structured action, wall-clock.</td></tr>
+    <tr><th>Official FP8</th><td>Vendor checkpoint/runtime support exists.</td><td>Default for Qwen3.6; portable across Hopper/Blackwell. <a class="cite" href="#src-s12" title="See source S12">[S12]</a></td><td>Good inference format, but training may remain BF16/QLoRA.</td><td>Compare to BF16 on ARC-specific holdouts, not language perplexity.</td></tr>
+    <tr><th>AWQ/GPTQ INT4</th><td>Capacity or throughput pressure dominates.</td><td>Useful for a 31B fallback or dual-model router; check coordinate degradation. <a class="cite" href="#src-s33" title="See source S33">[S33]</a></td><td>Allows 14B-ish proposers on one L4, but a 4B specialized model may still be better.</td><td>Exact output and action parser reliability.</td></tr>
+    <tr><th>NF4 QLoRA</th><td>Training adapters with limited VRAM.</td><td>Offline adapter experiments; not necessarily the final serving format.</td><td>Primary way to run many task-time adapters on one L4. <a class="cite" href="#src-s32" title="See source S32">[S32]</a></td><td>Optimizer memory, update time, rollback and LOO score.</td></tr>
+    <tr><th>NVFP4 / Blackwell-specific</th><td>Current RTX hardware is confirmed and kernel package is frozen.</td><td>Optional speed branch only; retain an FP8 fallback.</td><td>Not applicable to L4.</td><td>Cold-start, kernel compatibility and identical predictions across reruns.</td></tr>
+  </tbody></table></div>
+
+  <h3 style="margin-top:30px">Adapter design</h3>
+  <div class="grid two">
+    <article class="panel"><h3>ARC‑AGI‑3 adapters</h3><p><span class="priority p0">P0</span> Train consequence prediction and legal action before “better reasoning.”</p><ul><li>Targets: attention Q/K/V/O, MLP projections; separate experiment for multimodal projector.</li><li>Labels: changed components/cells, inventory delta, terminal/reset, action legality, predicted information gain.</li><li>Starting ranks: 16/32/64; DoRA as an equal-compute comparison, not an assumption. <a class="cite" href="#src-s31" title="See source S31">[S31]</a><a class="cite" href="#src-s35" title="See source S35">[S35]</a></li><li>Losses: action CE + delta prediction + legality + calibrated confidence.</li><li>Preference stage: efficient successful trajectory &gt; successful but wasteful &gt; repeated no-op/illegal trajectory. <a class="cite" href="#src-s34" title="See source S34">[S34]</a></li></ul></article>
+    <article class="panel"><h3>ARC‑AGI‑2 adapters</h3><p><span class="priority p0">P0</span> Separate the global abstraction adapter from task-time adapters.</p><ul><li>Global SFT on executable synthetic tasks with provenance and ambiguity scores.</li><li>Task-time QLoRA on geometric/color augmentations of only the visible demonstrations.</li><li>Hold out one pair or augmentation family for early stopping.</li><li>Retain multiple task adapters/seeds only when they add distinct candidates.</li><li>Do not merge adapters until marginal pass@2 has been measured.</li></ul></article>
+  </div>
+
+  <h3 style="margin-top:30px">Tokenizer and embedding surgery</h3>
+  <div class="grid two">
+    <article class="panel"><h3>ARC‑AGI‑2: aggressively specialize</h3><div class="codebox"><button class="copy-btn" data-copy="arc2tokens">Copy</button><pre id="arc2tokens">TOKENS = {
+  &quot;0&quot;..&quot;9&quot;, ROW_END, GRID_END,
+  TRAIN_INPUT, TRAIN_OUTPUT, TEST_INPUT,
+  HEIGHT_1..HEIGHT_30, WIDTH_1..WIDTH_30,
+  MASK, UNKNOWN, PAD
+}
+
+cell_embedding =
+    color_embedding[color]
+  + row_embedding[row]
+  + column_embedding[col]
+  + pair_embedding[pair_id]
+  + role_embedding[input_or_output]</pre></div><p>Keep the pretrained transformer body, replace/resize the embedding and output heads, train structural tokens first, then unfreeze adapters. A compact vocabulary reduces token length and makes exact constrained decoding natural.</p></article>
+    <article class="panel"><h3>ARC‑AGI‑3: preserve language and code</h3><div class="codebox"><button class="copy-btn" data-copy="arc3tokens">Copy</button><pre id="arc3tokens">&lt;FRAME&gt; &lt;DELTA&gt; &lt;OBJECTS&gt;
+&lt;HYPOTHESIS&gt; &lt;PREDICTION&gt; &lt;PLAN&gt;
+&lt;LEGAL_ACTIONS&gt; &lt;ACTION&gt;
+&lt;INVENTORY&gt; &lt;DEAD_SIGNATURE&gt;
+&lt;LEVEL_SUMMARY&gt; &lt;CONFIDENCE&gt;</pre></div><p>Add a small state vocabulary but do not replace the general tokenizer: Python, natural-language hypothesis generation and unfamiliar game concepts are part of the advantage of the 27B model.</p></article>
+  </div>
+
+  <h3 style="margin-top:30px">Architecture surgery: only after the baselines are strong</h3>
+  <div class="table-wrap"><table><thead><tr><th>Modification</th><th>Challenge</th><th>What it predicts</th><th>Expected benefit</th><th>Why it may fail</th></tr></thead><tbody>
+    <tr><th>Action-type + coordinate heads</th><td>ARC‑3</td><td>Typed action and target, masked by legality.</td><td>Removes JSON/parser failures and cuts decode length.</td><td>Custom server path; rigid action head may overfit public interfaces.</td></tr>
+    <tr><th>One-step world-model head</th><td>ARC‑3</td><td>State change, affected object/cells, reward/terminal, reversibility.</td><td>Rank candidate experiments before spending a real action.</td><td>Prediction bias can suppress novel but necessary actions.</td></tr>
+    <tr><th>Value / information-gain head</th><td>ARC‑3</td><td>Expected goal progress and novelty.</td><td>Balances exploration against exploitation.</td><td>Goals are latent; synthetic rewards may encode the wrong notion of progress.</td></tr>
+    <tr><th>2D recurrent transformer</th><td>ARC‑2</td><td>Iteratively improved output grid and halt score.</td><td>Spatial inductive bias and adaptive refinement.</td><td>Official HRM analysis suggests outer-loop training may matter more than exotic hierarchy. <a class="cite" href="#src-s25" title="See source S25">[S25]</a></td></tr>
+    <tr><th>Object-set encoder</th><td>ARC‑2</td><td>Object attributes/relations plus pixel fallback.</td><td>Translation/size invariance and compact relational reasoning.</td><td>Wrong segmentation destroys information; require multiple decompositions.</td></tr>
+    <tr><th>Masked grid decoder</th><td>ARC‑2</td><td>Per-cell color logits and uncertainty mask.</td><td>Targeted repair and 2D consistency.</td><td>Can refine toward a plausible local optimum rather than the correct rule.</td></tr>
+  </tbody></table></div>
+</section>
+
+<section id="arc3" class="section">
+  <h2><span class="section-number">6.</span> ARC‑AGI‑3: from public winner to a defensible next system</h2>
+  <p class="section-lede">The best default is not “more agents.” It is a better experimental loop around one model: observe precisely, state a falsifiable prediction, execute one legal action, compare the delta, and update compact memory.</p>
+
+  <h3>Recommended runtime: Duck+ causal agent</h3>
+  <div class="pipeline" aria-label="ARC-AGI-3 pipeline"><div class="pipe-node">Rendered frame<br><small>raw visual evidence</small></div><div class="pipe-arrow">→</div><div class="pipe-node">Grid + components<br><small>multiple views</small></div><div class="pipe-arrow">→</div><div class="pipe-node">Qwen REPL<br><small>bounded analysis</small></div><div class="pipe-arrow">→</div><div class="pipe-node">Prediction + action<br><small>strict schema</small></div><div class="pipe-arrow">→</div><div class="pipe-node">Delta verifier<br><small>support / falsify</small></div><div class="pipe-arrow">→</div><div class="pipe-node">Causal ledger<br><small>evicted history</small></div></div>
+  <div class="callout good"><h3>What to preserve from the winner</h3><p>Multimodality, raw ASCII/grid access, optional segmentation, a live Python workspace and rolling eviction. The official milestone analysis reports that better models and multimodality drove gains while more handcrafted tools could hurt. <a class="cite" href="#src-s08" title="See source S08">[S08]</a></p></div>
+  <div class="callout warn"><h3>What to add without violating that lesson</h3><p>Add <em>verification infrastructure</em>, not a prescriptive ontology: immutable observations, bounded helper functions, action legality, transition diffs, hypothesis confidence and no-op memory. The model may invent abstractions; the harness only records whether predictions survived contact with the environment.</p></div>
+
+  <h3>State packet</h3>
+  <div class="codebox"><button class="copy-btn" data-copy="arc3packet">Copy</button><pre id="arc3packet">{
+  &quot;frame_id&quot;: 37,
+  &quot;image&quot;: &quot;&lt;current rendered frame&gt;&quot;,
+  &quot;grid&quot;: [[0,0,2,...], ...],
+  &quot;components&quot;: [
+    {&quot;id&quot;:&quot;o7&quot;,&quot;colors&quot;:[2],&quot;bbox&quot;:[1,1,3,3],
+      &quot;shape_hash&quot;:&quot;hollow-square&quot;,&quot;changed_since_last&quot;:true}
+  ],
+  &quot;last_transition&quot;: {
+    &quot;action&quot;: {&quot;type&quot;:&quot;ACTION3&quot;,&quot;x&quot;:2,&quot;y&quot;:2},
+    &quot;changed_cells&quot;: [[2,2]],
+    &quot;created_colors&quot;: [5],
+    &quot;score_delta&quot;: 0,
+    &quot;terminal&quot;: false
+  },
+  &quot;stable_hypotheses&quot;: [
+    {&quot;id&quot;:&quot;H17&quot;,&quot;claim&quot;:&quot;color 5 means active&quot;,
+      &quot;support&quot;:3,&quot;contradictions&quot;:0,&quot;confidence&quot;:0.86}
+  ],
+  &quot;dead_signatures&quot;: [
+    {&quot;signature&quot;:&quot;click(background)&quot;,&quot;trials&quot;:5}
+  ],
+  &quot;legal_actions&quot;: ["ACTION1","ACTION2","ACTION3(x,y)"],
+  &quot;plan&quot;: {&quot;goal&quot;:&quot;test whether o7 controls gate o9&quot;,
+             &quot;next_test&quot;:&quot;ACTION2&quot;}
+}</pre></div>
+
+  <h3>Action contract</h3>
+  <div class="codebox"><button class="copy-btn" data-copy="arc3action">Copy</button><pre id="arc3action">{
+  &quot;hypothesis_tested&quot;: &quot;H17&quot;,
+  &quot;predicted_delta&quot;: {
+    &quot;affected_objects&quot;: ["o9"],
+    &quot;expected_change&quot;: &quot;gate opens&quot;,
+    &quot;information_gain&quot;: 0.72
+  },
+  &quot;action&quot;: {&quot;type&quot;: &quot;ACTION2&quot;},
+  &quot;reversibility&quot;: &quot;unknown&quot;,
+  &quot;confidence&quot;: 0.68,
+  &quot;fallback_if_rejected&quot;: {&quot;type&quot;:&quot;ACTION3&quot;,&quot;x&quot;:2,&quot;y&quot;:2}
+}</pre></div>
+
+  <h3>Four runtime profiles to benchmark</h3>
+  <div class="tabs" data-group="arc3profiles">
+    <button class="tab-btn active" data-group="arc3profiles" data-target="p-duck">A · REPL</button><button class="tab-btn" data-group="arc3profiles" data-target="p-gemma">B · Direct policy</button><button class="tab-btn" data-group="arc3profiles" data-target="p-router">C · Router</button><button class="tab-btn" data-group="arc3profiles" data-target="p-mpc">D · World-model</button>
+  </div>
+  <div id="p-duck" class="tab-panel active panel" data-group="arc3profiles"><h3>A · Qwen3.6‑27B‑FP8 REPL</h3><p><strong>Best initial ceiling.</strong> Permit read-only Python over frame/grid/state objects, bounded NumPy operations and path/search helpers. The only environment mutation is <code>submit_action()</code>, which validates legality and executes exactly once.</p><p><strong>Kill gate:</strong> if Python failures, latency and long outputs cause lower useful-actions/minute than direct Gemma on three clean game families.</p></div>
+  <div id="p-gemma" class="tab-panel panel" data-group="arc3profiles"><h3>B · Gemma 4 31B direct policy</h3><p><strong>Best operational control.</strong> One structured response with state-change summary, plan and one action; deterministic repair and salience fallback. Keep this implementation simple because the public profile with extra candidate/arbiter machinery performed best when those features were disabled. <a class="cite" href="#src-s08" title="See source S08">[S08]</a></p><p><strong>Kill gate:</strong> retain even if it loses overall, provided it wins on enough game families to serve as a router branch or fallback.</p></div>
+  <div id="p-router" class="tab-panel panel" data-group="arc3profiles"><h3>C · Compact model router</h3><p>Run GLM‑4.6V‑Flash or Phi‑4 Reasoning Vision on routine follow-through. Invoke Qwen only when novelty, contradiction, no known plan, unseen object signature or low confidence fires.</p><p><strong>Kill gate:</strong> no reduction in wall-clock per completed level, or more than a small completion regression at matched action budget.</p></div>
+  <div id="p-mpc" class="tab-panel panel" data-group="arc3profiles"><h3>D · One-step model-predictive controller</h3><p>Generate 2–4 candidate actions only at high-uncertainty states. A learned delta/value head ranks them; execute one. This is not deep tree search—hidden goals and model error make long imagined rollouts unreliable.</p><p><strong>Kill gate:</strong> predicted-delta calibration below the simple empirical transition table, or candidate generation consumes more time than the action savings justify.</p></div>
+
+  <h3 style="margin-top:28px">Context and memory policy</h3>
+  <div class="grid three">
+    <article class="panel"><h3>Working context</h3><p>Start with 32K–64K plus external structured memory, then compare 128K. Qwen’s model card recommends large context for general thinking, but the ARC winner explicitly used eviction. The contest-specific optimum must be measured. <a class="cite" href="#src-s12" title="See source S12">[S12]</a><a class="cite" href="#src-s08" title="See source S08">[S08]</a></p></article>
+    <article class="panel"><h3>Persistent memory</h3><p>Keep hypotheses with support/contradiction counts, action signatures, object transitions, inventory/state variables, solved-level summaries and current plan. Never summarize away raw evidence for the most recent transitions.</p></article>
+    <article class="panel"><h3>Eviction</h3><p>Evict raw turns after extracting immutable transitions. Preserve the system prompt, legal actions, last 3–8 transitions, stable hypotheses and unresolved contradictions. Summaries must cite transition IDs.</p></article>
+  </div>
+
+  <h3 style="margin-top:28px">Offline training curriculum</h3>
+  <div class="table-wrap"><table><thead><tr><th>Family</th><th>Randomize</th><th>Labels</th><th>Generalization test</th></tr></thead><tbody>
+    <tr><th>Hidden controls</th><td>Action names, button locations, coordinate conventions.</td><td>Legal action, causal mapping, confidence.</td><td>Unseen permutation and mirrored controls.</td></tr>
+    <tr><th>Switch / lock / inventory</th><td>Colors, shapes, ordering, consumable state.</td><td>State delta, inventory, dependency graph.</td><td>Novel composition and distractor keys.</td></tr>
+    <tr><th>Navigation / Sokoban-like</th><td>Map topology, sprite identity, reversible traps.</td><td>Path, dead state, reversibility, value.</td><td>Longer horizon and changed visual vocabulary.</td></tr>
+    <tr><th>Converters / multi-stage tools</th><td>Conversion graph and required sequence.</td><td>World-model edge, plan, terminal condition.</td><td>Unseen chain length and deceptive shortcut.</td></tr>
+    <tr><th>Resource management</th><td>Action costs, limited lives, delayed rewards.</td><td>Budget-aware value and stop/reset.</td><td>Changed cost scale and sparse feedback.</td></tr>
+    <tr><th>No-op / decoy objects</th><td>Rare colors, salience, visually plausible buttons.</td><td>Dead signature and information gain.</td><td>Decoys that sometimes become useful after state change.</td></tr>
+  </tbody></table></div>
+
+  <h3 style="margin-top:28px">ARC‑3 ablation ladder</h3>
+  <div class="stack">
+    <div class="step"><div class="step-num">1</div><div><h4>Reproduce Qwen REPL and Gemma direct policy</h4><p>Same observations, same games, same maximum actions. Establish score, latency, failures and peak memory.</p></div></div>
+    <div class="step"><div class="step-num">2</div><div><h4>Add legal action and deterministic parser only</h4><p>Measure crash/invalid-action reduction without changing the prompt or model.</p></div></div>
+    <div class="step"><div class="step-num">3</div><div><h4>Add transition ledger and dead signatures</h4><p>Measure repeated no-ops, action economy and recovery after false hypotheses.</p></div></div>
+    <div class="step"><div class="step-num">4</div><div><h4>Add explicit predicted delta</h4><p>Score prediction calibration and whether it improves subsequent actions.</p></div></div>
+    <div class="step"><div class="step-num">5</div><div><h4>Train LoRA/DoRA consequence adapter</h4><p>Hold model/harness fixed; compare equal-compute adapters across unseen procedural families.</p></div></div>
+    <div class="step"><div class="step-num">6</div><div><h4>Only then test router or world-model head</h4><p>Promote only when the improvement survives hardware-aware wall-clock evaluation.</p></div></div>
+  </div>
+</section>
+
+<section id="arc2" class="section">
+  <h2><span class="section-number">7.</span> ARC‑AGI‑2: a portfolio compiler, not a monolithic model</h2>
+  <p class="section-lede">The high-value design question is how to allocate four L4s among solver families and how to select two outputs that maximize marginal exact coverage. Model size is secondary.</p>
+
+  <h3>Recommended four-worker architecture</h3>
+  <div class="pipeline"><div class="pipe-node">CPU presolve<br><small>cheap transforms + routing</small></div><div class="pipe-arrow">→</div><div class="pipe-node">L4 #0<br><small>Qwen3‑4B TTT seed A</small></div><div class="pipe-node">L4 #1<br><small>Qwen/2D refinement seed B</small></div><div class="pipe-node">L4 #2<br><small>URM/TRM recurrent</small></div><div class="pipe-node">L4 #3<br><small>program synthesis / ranker</small></div><div class="pipe-arrow">→</div><div class="pipe-node">CPU exact verifier<br><small>portfolio pass@2</small></div></div>
+  <div class="callout good"><h3>Why independent workers beat default tensor parallelism</h3><p>A 4B model fits comfortably on one 24GB L4, while exact candidate execution and pass@2 selection are cheap on CPU. Four independent hypotheses create more value than pooling PCIe-connected memory for one generic model—unless a measured large-model branch proves otherwise. L4 specifications list PCIe Gen4 rather than a high-bandwidth scale-up interconnect. <a class="cite" href="#src-s09" title="See source S09">[S09]</a><a class="cite" href="#src-s22" title="See source S22">[S22]</a></p></div>
+
+  <h3>Branch A · Qwen3‑4B global specialization + task-time adaptation</h3>
+  <div class="grid two">
+    <article class="panel"><h3>Offline global checkpoint</h3><ul><li>Train on executable programs, not model-written answer grids.</li><li>Balance primitive, compositional and adversarial ambiguous families.</li><li>Use compact grid tokens and 2D/role embeddings.</li><li>Supervise rule/program sketches as auxiliary targets only when executable.</li><li>Publish base revision, tokenizer surgery, adapter and data generator hashes.</li></ul></article>
+    <article class="panel"><h3>Per-task QLoRA</h3><ul><li>Generate spatial/color/object-order augmentations from visible pairs.</li><li>Reserve a leave-one-pair-out or augmentation-family validation slice.</li><li>Run several short schedules rather than one long overfit.</li><li>Rollback to the global checkpoint when validation consistency falls.</li><li>De-augment, deduplicate and score candidates exactly.</li></ul></article>
+  </div>
+  <div class="codebox"><button class="copy-btn" data-copy="tttpseudo">Copy</button><pre id="tttpseudo">for task in dynamic_queue:
+    cheap_candidates = cpu_presolve(task)
+    if confidence(cheap_candidates) &gt;= SOLVED_THRESHOLD:
+        publish_provisional(task, cheap_candidates)
+        continue
+
+    views = make_equivariant_views(task, budget=VIEW_BUDGET)
+    for seed, schedule in short_adaptation_schedules:
+        adapter = reset_global_adapter()
+        for step in range(schedule.max_steps):
+            train_on_visible_pairs(adapter, views.train)
+            if step % schedule.eval_every == 0:
+                score = leave_one_out_and_equivariance(adapter, views)
+                checkpoint_if_best(adapter, score)
+                if should_stop(score): break
+        candidates += decode_and_deaugment(best_adapter)
+
+    publish_provisional(task, exact_deduplicate(candidates))</pre></div>
+
+  <h3>Branch B · URM/TRM recurrent solver</h3>
+  <p>The strongest research signal is not “brain-like hierarchy”; it is repeated refinement trained into a small model. ARC Prize’s HRM analysis found that outer-loop refinement and augmentation dominated the exotic hierarchy, while the URM paper explicitly emphasizes recurrent inductive bias and nonlinear components. Build an equal-parameter recurrent-transformer baseline before accepting any more complex architecture. <a class="cite" href="#src-s24" title="See source S24">[S24]</a><a class="cite" href="#src-s25" title="See source S25">[S25]</a></p>
+  <div class="table-wrap"><table><thead><tr><th>Experiment</th><th>Constant</th><th>Variable</th><th>Promotion criterion</th></tr></thead><tbody>
+    <tr><th>Architecture</th><td>Parameter count, training data, augmentation, steps.</td><td>Plain transformer vs universal recurrence vs URM short convolution.</td><td>Unique ARC‑2 exact solves, not only training loss.</td></tr>
+    <tr><th>Refinement</th><td>Architecture and total FLOPs.</td><td>1/2/4/8/16 outer loops; fixed vs learned halt.</td><td>Best pass@2 per GPU-minute.</td></tr>
+    <tr><th>Task-time update</th><td>Initialization and views.</td><td>Full tiny-model FT vs adapters vs task embedding.</td><td>LOO/equivariance improvement without timeout inflation.</td></tr>
+    <tr><th>Augmentation</th><td>Model and training steps.</td><td>Spatial/color/object permutations and count.</td><td>Diminishing-return curve; stop before correlated vote inflation.</td></tr>
+  </tbody></table></div>
+
+  <h3 style="margin-top:28px">Branch C · executable program portfolio</h3>
+  <div class="grid three">
+    <article class="panel"><h3>Typed DSL</h3><p>Fast enumerative search over masks, components, geometry, topology, counting, rays, overlays, correspondences and sequence composition. Use type/shape constraints and learned priors.</p></article>
+    <article class="panel"><h3>Python synthesis</h3><p>Qwen/gpt-oss proposes code; every program runs in a resource-limited subprocess, receives counterexamples and may mutate through SOAR-like evolution. <a class="cite" href="#src-s27" title="See source S27">[S27]</a></p></article>
+    <article class="panel"><h3>Constraint solver</h3><p>Use SAT/SMT/ILP for palette permutations, object matching, line/axis constraints and discrete assignments. It is a specialist branch, not a universal representation.</p></article>
+  </div>
+  <div class="codebox"><button class="copy-btn" data-copy="programcontract">Copy</button><pre id="programcontract">def transform(grid: Grid) -&gt; Grid:
+    &quot;&quot;&quot;Pure, deterministic, no I/O, bounded runtime.&quot;&quot;&quot;
+    ...
+
+ACCEPT only if:
+  exact_fit(all_training_pairs)
+  and leave_one_out_score &gt;= threshold
+  and equivariance_score &gt;= threshold
+  and perturbation_stability &gt;= threshold
+  and output_shape_is_justified
+
+RANK with:
+  demonstration_fit
+  + leave_one_out
+  + equivariance
+  + cross_family_consensus
+  - description_length
+  - brittleness_penalty</pre></div>
+
+  <h3 style="margin-top:28px">Branch D · 2D masked refinement</h3>
+  <p>Use a grid-native decoder rather than forcing every cell through a one-dimensional language stream. A practical hybrid predicts output shape and a first candidate from Qwen/programs, then a 2D network repairs uncertain regions. The 2025 ARChitects lineage provides direct evidence that 2D masked refinement deserves a primary branch. <a class="cite" href="#src-s21" title="See source S21">[S21]</a><a class="cite" href="#src-s22" title="See source S22">[S22]</a></p>
+  <div class="pipeline"><div class="pipe-node">Task encoder<br><small>pixels + objects</small></div><div class="pipe-arrow">→</div><div class="pipe-node">Shape head</div><div class="pipe-arrow">→</div><div class="pipe-node">Draft grid</div><div class="pipe-arrow">→</div><div class="pipe-node">Uncertainty mask</div><div class="pipe-arrow">→</div><div class="pipe-node">Iterative 2D repair</div><div class="pipe-arrow">→</div><div class="pipe-node">Exact verifier</div></div>
+
+  <h3 style="margin-top:28px">Task router</h3>
+  <div class="table-wrap"><table><thead><tr><th>Detected signal</th><th>Spend compute on</th><th>Deprioritize</th><th>Reason</th></tr></thead><tbody>
+    <tr><th>Simple palette/geometry invariant</th><td>CPU DSL + program search</td><td>Long TTT</td><td>Cheap exact solver likely sufficient.</td></tr>
+    <tr><th>Output same shape, local cellular changes</th><td>2D refinement + recurrent model</td><td>Large code proposer</td><td>Grid-native uncertainty repair is natural.</td></tr>
+    <tr><th>Object correspondence / movement</th><td>Object graph + DSL + Python</td><td>Raw token-only prediction</td><td>Relational representation reduces combinatorics.</td></tr>
+    <tr><th>Highly compositional, no DSL fit</th><td>Qwen TTT + Python evolution</td><td>Brute force</td><td>Needs flexible program language.</td></tr>
+    <tr><th>Ambiguous demonstrations</th><td>Perspective ensemble + MDL + diverse pass@2</td><td>Overconfident single ranker</td><td>Preserve competing abstractions.</td></tr>
+    <tr><th>All branches unstable</th><td>Spend reserved hard-task budget</td><td>Infinite per-task search</td><td>Timeout discipline still dominates expected score.</td></tr>
+  </tbody></table></div>
+
+  <h3 style="margin-top:28px">Pass@2 selector: maximize marginal coverage</h3>
+  <div class="codebox"><button class="copy-btn" data-copy="pass2score">Copy</button><pre id="pass2score">score(candidate c) =
+    4.0 * exact_demo_fit(c)
+  + 2.0 * leave_one_out(c)
+  + 1.5 * equivariance(c)
+  + 1.0 * perturbation_stability(c)
+  + 0.8 * cross_family_consensus(c)
+  - 0.5 * normalized_description_length(c)
+  - 1.0 * brittleness(c)
+
+choose attempt_1 = argmax score(c)
+choose attempt_2 = argmax [
+    score(c)
+  + lambda * family_diversity(c, attempt_1)
+  + mu * prediction_distance(c, attempt_1)
+  - nu * shared_failure_signature(c, attempt_1)
+]</pre></div>
+  <p class="footnote">Weights are starting hypotheses for EvoMolior to tune on clean held-out tasks. Do not optimize them on the Kaggle public leaderboard alone.</p>
+
+  <h3 style="margin-top:28px">Why model merging is usually the wrong ARC‑2 optimization</h3>
+  <p>TIES and DARE are valuable general techniques for combining fine-tuned deltas, but ARC‑AGI‑2 scoring explicitly rewards a two-output portfolio. A merge that produces one “average” solver may reduce the error diversity that gives the second attempt value. Test merged models only against the stronger standard: <strong>does the merge increase unique pass@2 solves at equal compute?</strong> <a class="cite" href="#src-s36" title="See source S36">[S36]</a><a class="cite" href="#src-s37" title="See source S37">[S37]</a><a class="cite" href="#src-s04" title="See source S04">[S04]</a></p>
+</section>
+
+<section id="data" class="section">
+  <h2><span class="section-number">8.</span> Data, curriculum and contamination controls</h2>
+  <p class="section-lede">The decisive asset will likely be the task generator and evaluation discipline, not the base checkpoint. Synthetic data must be executable, identifiable and separated from the holdouts that choose interventions.</p>
+
+  <h3>ARC‑AGI‑2 executable generator</h3>
+  <div class="pipeline"><div class="pipe-node">Typed program</div><div class="pipe-arrow">→</div><div class="pipe-node">Sample inputs</div><div class="pipe-arrow">→</div><div class="pipe-node">Execute outputs</div><div class="pipe-arrow">→</div><div class="pipe-node">Alternative-rule search</div><div class="pipe-arrow">→</div><div class="pipe-node">Ambiguity filter</div><div class="pipe-arrow">→</div><div class="pipe-node">Train / blind holdout</div></div>
+  <div class="table-wrap"><table><thead><tr><th>Generator family</th><th>Examples</th><th>Adversarial variants</th><th>Reject when</th></tr></thead><tbody>
+    <tr><th>Selection</th><td>Largest/smallest, unique count, topology, position.</td><td>Ties, distractors, alternate segmentations.</td><td>Selection can be explained by an accidental color/position shortcut.</td></tr>
+    <tr><th>Geometry</th><td>Rotate, reflect, translate, project, complete symmetry.</td><td>Asymmetric distractors, non-square crops, variable offsets.</td><td>Demonstrations fail to distinguish direction or anchor.</td></tr>
+    <tr><th>Topology</th><td>Fill enclosure, holes, boundaries, connectivity.</td><td>Diagonal ambiguity, nested regions, touching components.</td><td>Multiple connectivity conventions remain consistent.</td></tr>
+    <tr><th>Relational</th><td>Match objects, align, connect, copy attributes.</td><td>Duplicate candidates, crossed relations, missing partner.</td><td>Object iteration order determines the answer.</td></tr>
+    <tr><th>Counting/encoding</th><td>Spatially encode counts, repeat/trim, build histograms.</td><td>Counts beyond training range, irrelevant repeated colors.</td><td>A constant-size shortcut fits all demonstrations.</td></tr>
+    <tr><th>Composition</th><td>Select → transform → place → recolor.</td><td>Change operation order; insert no-op-looking distractor.</td><td>A shorter unrelated program has equal evidence.</td></tr>
+  </tbody></table></div>
+  <p>NVARC’s public pipeline—103K synthetic puzzles and 3.2M augmentations—shows the scale of a competitive data programme, but scale without identifiability can simply train a synthetic-task classifier. <a class="cite" href="#src-s22" title="See source S22">[S22]</a></p>
+
+  <h3 style="margin-top:28px">ARC‑AGI‑3 procedural world generator</h3>
+  <div class="grid three">
+    <article class="panel"><h3>Randomize semantics</h3><p>Colors, sprites, action labels, coordinates, reward displays, control mappings and apparent affordances.</p></article>
+    <article class="panel"><h3>Randomize causality</h3><p>Switch graphs, inventory rules, delayed effects, conversion chains, reversible/irreversible actions and decoys.</p></article>
+    <article class="panel"><h3>Label experiments</h3><p>Predicted vs actual delta, information gain, legal action, no-op signature, plan quality, completion and action economy.</p></article>
+  </div>
+
+  <h3 style="margin-top:28px">Data partitions</h3>
+  <div class="table-wrap"><table><thead><tr><th>Partition</th><th>Purpose</th><th>Who may see it</th><th>Promotion use</th></tr></thead><tbody>
+    <tr><th>Generator development</th><td>Debug primitives and ambiguity filters.</td><td>Generator agents and engineers.</td><td>Never used for final model ranking.</td></tr>
+    <tr><th>Training</th><td>Global SFT / recurrent training.</td><td>Training pipeline.</td><td>Optimization only.</td></tr>
+    <tr><th>Adapter validation</th><td>Rank/early-stop adapters and schedules.</td><td>Adapter agents.</td><td>Intermediate selection.</td></tr>
+    <tr><th>Architecture blind holdout</th><td>Choose model/harness families.</td><td>Grader only; IDs hidden from builders.</td><td>Required for promotion to Kaggle candidate.</td></tr>
+    <tr><th>Red-team mutations</th><td>Detect shortcuts and memorization.</td><td>Independent adversary society.</td><td>Any major regression blocks promotion.</td></tr>
+    <tr><th>Kaggle public score</th><td>External sanity signal.</td><td>Submission compiler.</td><td>Never the sole objective or hyperparameter oracle.</td></tr>
+  </tbody></table></div>
+
+  <div class="callout bad"><h3>Contamination rule</h3><p>Every source task, synthetic program, generated frame and checkpoint must carry provenance. Hash public ARC files; prevent evaluation-task derivatives from entering global training; preserve a ledger of prompt-generated tasks and the model that generated them. A surprisingly high local result without this audit is a liability, not evidence.</p></div>
+</section>
+
+<section id="evomolior" class="section">
+  <h2><span class="section-number">9.</span> EvoMolior as a model laboratory</h2>
+  <p class="section-lede">Use the project’s durable substrate, specialized agents, critic-gated writes, dead-end memory and resource accounting to evolve the experiments. Compile the winner into a much smaller Kaggle artifact. <a class="cite" href="#src-s38" title="See source S38">[S38]</a></p>
+
+  <h3>Society topology</h3>
+  <div class="grid three">
+    <article class="panel"><h3>Hardware Auditor</h3><p>Owns cold-start, peak VRAM, bandwidth-sensitive latency, engine compatibility and offline dependency tests.</p></article>
+    <article class="panel"><h3>Model Scout</h3><p>Runs identical ARC-specific micro-evals across Qwen, Gemma, Phi, GLM, InternVL, Molmo and text-only planners.</p></article>
+    <article class="panel"><h3>Adaptation Scientist</h3><p>Owns LoRA/DoRA/QLoRA targets, task-time schedules, loss ablations and rollback criteria.</p></article>
+    <article class="panel"><h3>Curriculum Engineer</h3><p>Generates executable tasks/worlds, ambiguity reports, difficulty strata and provenance manifests.</p></article>
+    <article class="panel"><h3>Solver Architect</h3><p>Builds REPL, direct policy, recurrent, 2D, DSL, Python and MDL branches behind stable interfaces.</p></article>
+    <article class="panel"><h3>Skeptical Grader</h3><p>Scores blind holdouts, unique coverage, uncertainty calibration, action economy and equal-compute baselines.</p></article>
+    <article class="panel"><h3>Red Team</h3><p>Mutates color, orientation, sprites, controls, distractors and decomposition assumptions to expose shortcuts.</p></article>
+    <article class="panel"><h3>Reproducibility Officer</h3><p>Rejects results lacking hashes, seeds, exact revisions, hardware, runtime, per-task traces or license inventory.</p></article>
+    <article class="panel"><h3>Submission Compiler</h3><p>Freezes the promoted model/harness, builds offline wheel/model datasets, runs two clean notebook reruns and writes the final artifact.</p></article>
+  </div>
+
+  <h3 style="margin-top:28px">Promotion protocol</h3>
+  <div class="pipeline"><div class="pipe-node">Proposal</div><div class="pipe-arrow">→</div><div class="pipe-node">Cheap micro-eval</div><div class="pipe-arrow">→</div><div class="pipe-node">Equal-compute ablation</div><div class="pipe-arrow">→</div><div class="pipe-node">Blind holdout</div><div class="pipe-arrow">→</div><div class="pipe-node">Red-team mutations</div><div class="pipe-arrow">→</div><div class="pipe-node">Kaggle dry run</div></div>
+  <div class="callout"><h3>Multi-fidelity principle</h3><p>Most mutations should die cheaply. Run small task subsets and short budgets first; promote only the Pareto frontier of quality, wall-clock, VRAM and marginal coverage. Save expensive full evaluations for interventions that survived blind tests.</p></div>
+
+  <h3>Experiment manifest</h3>
+  <div class="codebox"><button class="copy-btn" data-copy="manifest">Copy</button><pre id="manifest">{
+  &quot;experiment_id&quot;: &quot;arc3-qwen36-fp8-delta-lora-r32-v4&quot;,
+  &quot;hypothesis&quot;: &quot;Explicit consequence supervision reduces repeated no-op actions&quot;,
+  &quot;challenge&quot;: &quot;arc-agi-3&quot;,
+  &quot;base_model&quot;: {
+    &quot;repo&quot;: &quot;Qwen/Qwen3.6-27B-FP8&quot;,
+    &quot;revision&quot;: &quot;&lt;pinned commit&gt;&quot;,
+    &quot;license&quot;: &quot;apache-2.0&quot;,
+    &quot;sha256_manifest&quot;: &quot;models.sha256&quot;
+  },
+  &quot;adapter&quot;: {
+    &quot;method&quot;: &quot;lora&quot;,
+    &quot;rank&quot;: 32,
+    &quot;alpha&quot;: 64,
+    &quot;targets&quot;: [&quot;q_proj&quot;,&quot;k_proj&quot;,&quot;v_proj&quot;,&quot;o_proj&quot;],
+    &quot;dataset_hash&quot;: &quot;&lt;hash&gt;&quot;
+  },
+  &quot;runtime&quot;: {
+    &quot;engine&quot;: &quot;vllm&quot;,
+    &quot;version&quot;: &quot;&lt;pinned&gt;&quot;,
+    &quot;context&quot;: 65536,
+    &quot;hardware&quot;: &quot;RTX-PRO-6000-96GB&quot;
+  },
+  &quot;controller&quot;: {
+    &quot;mode&quot;: &quot;bounded_repl&quot;,
+    &quot;recent_transitions&quot;: 6,
+    &quot;dead_signature_threshold&quot;: 3,
+    &quot;max_python_seconds&quot;: 2.0
+  },
+  &quot;evaluation&quot;: {
+    &quot;holdout_pack&quot;: &quot;procedural-worlds-v7-blind&quot;,
+    &quot;seeds&quot;: [1103,1181,1229],
+    &quot;metrics&quot;: [
+      &quot;completion&quot;,&quot;actions&quot;,&quot;useful_actions_per_minute&quot;,
+      &quot;delta_accuracy&quot;,&quot;legal_action_rate&quot;,&quot;peak_vram&quot;
+    ]
+  },
+  &quot;baseline_ids&quot;: [&quot;arc3-qwen36-fp8-base&quot;],
+  &quot;promotion_rule&quot;: &quot;blind completion improves and no metric regresses past tolerance&quot;
+}</pre></div>
+
+  <h3 style="margin-top:28px">Copy-ready EvoMolior prompts</h3>
+  <div class="tabs" data-group="prompts">
+    <button class="tab-btn active" data-group="prompts" data-target="prompt-system">System</button><button class="tab-btn" data-group="prompts" data-target="prompt-arc3">ARC‑3 scout</button><button class="tab-btn" data-group="prompts" data-target="prompt-arc2">ARC‑2 scientist</button><button class="tab-btn" data-group="prompts" data-target="prompt-red">Red team</button><button class="tab-btn" data-group="prompts" data-target="prompt-compiler">Compiler</button>
+  </div>
+  <div id="prompt-system" class="tab-panel active panel" data-group="prompts"><div class="codebox"><button class="copy-btn" data-copy="psystem">Copy</button><pre id="psystem">You are an EvoMolior ARC model-engineering society.
+
+Your objective is not to produce persuasive prose. Your objective is to
+increase blind exact ARC-AGI-2 pass@2 or blind ARC-AGI-3 completion/action
+efficiency under the current Kaggle hardware and wall-clock limits.
+
+Every claim must be one of:
+- SOURCE: directly supported by a cited primary source or public submission;
+- OBSERVATION: measured in a reproducible experiment;
+- INFERENCE: engineering conclusion from stated evidence;
+- PROPOSAL: untested design with a falsifiable prediction.
+
+No experiment is promotable without:
+1. exact model/data/code revisions and hashes;
+2. hardware, engine, peak VRAM and wall-clock;
+3. per-task/per-game outputs and failure taxonomy;
+4. equal-compute baseline;
+5. untouched blind holdout;
+6. explicit kill gate;
+7. license and offline-packaging review.
+
+Prefer a small number of decisive ablations over broad narrative exploration.
+Record dead ends so later generations do not repeat them.</pre></div></div>
+  <div id="prompt-arc3" class="tab-panel panel" data-group="prompts"><div class="codebox"><button class="copy-btn" data-copy="parc3">Copy</button><pre id="parc3">Role: ARC-AGI-3 Model Scout and Causal-Agent Engineer.
+
+Compare these runtime profiles under identical games, seeds and action caps:
+A. Qwen3.6-27B-FP8 bounded Python REPL;
+B. Gemma-4-31B one-action JSON policy;
+C. compact-model router + Qwen escalation;
+D. one-step learned world-model ranking.
+
+Measure: cold load, peak VRAM, prefill/decode latency, legal-action rate,
+coordinate grounding, state-delta accuracy, repeated no-ops, resets,
+completion, actions per completion and useful actions/minute.
+
+For each failure, decide whether the bottleneck is perception, memory,
+causal inference, planning, execution, parser, serving or time budget.
+Do not recommend weight training until a harness-only fix has been tested.
+Return: experiment manifests, commands, result table, traces, kill decisions,
+and the smallest next experiment that distinguishes remaining hypotheses.</pre></div></div>
+  <div id="prompt-arc2" class="tab-panel panel" data-group="prompts"><div class="codebox"><button class="copy-btn" data-copy="parc2">Copy</button><pre id="parc2">Role: ARC-AGI-2 Portfolio and Test-Time-Adaptation Scientist.
+
+Maintain four independent solver families:
+1. Qwen3-4B global ARC adapter + per-task QLoRA;
+2. URM/TRM recurrent grid model;
+3. typed DSL + evolutionary Python synthesis;
+4. 2D masked refinement / MDL specialist.
+
+For every task, preserve all candidate provenance. A candidate fitting the
+training pairs is not considered validated. Score leave-one-out,
+equivariance, perturbation stability, description length, solver-family
+consensus and runtime.
+
+Optimize the pair of final attempts for marginal exact coverage, not average
+confidence. Report unique solves, error correlation, GPU-min/task, timeout
+count and the counterfactual score if each branch is removed.
+
+Reject any branch that does not add blind pass@2 tasks at equal total compute.</pre></div></div>
+  <div id="prompt-red" class="tab-panel panel" data-group="prompts"><div class="codebox"><button class="copy-btn" data-copy="pred">Copy</button><pre id="pred">Role: Independent ARC Red Team.
+
+Your job is to make apparent gains disappear.
+
+ARC-AGI-3 mutations:
+- permute colors, sprites, action labels and coordinate systems;
+- mirror controls and swap affordances;
+- add rare-color decoys and delayed effects;
+- make previously dead actions useful after a state transition;
+- vary horizon and resource costs.
+
+ARC-AGI-2 mutations:
+- permute palette, orientation, padding and object order;
+- construct alternate rules that fit the same demonstrations;
+- create tied selections and multiple valid segmentations;
+- change the composition order of primitives;
+- test leave-one-pair-out and unseen operation compositions.
+
+Do not propose fixes. Return minimal counterexamples, the shortcut they expose,
+and which claimed improvement is invalidated.</pre></div></div>
+  <div id="prompt-compiler" class="tab-panel panel" data-group="prompts"><div class="codebox"><button class="copy-btn" data-copy="pcompiler">Copy</button><pre id="pcompiler">Role: Kaggle Submission Compiler and Reproducibility Officer.
+
+Input: one promoted ARC-AGI-2 or ARC-AGI-3 experiment manifest.
+Output: a deterministic offline submission package.
+
+Required checks:
+- all model/tokenizer/adapter files present under /kaggle/input paths;
+- SHA-256 manifest verifies before model load;
+- no network calls or remote from_pretrained references;
+- exact Python, PyTorch, CUDA, Transformers and engine versions recorded;
+- model/license/notice bill of materials included;
+- hardware introspection selects only safe cache/batch settings;
+- model load and full notebook run succeed twice from clean state;
+- provisional outputs survive worker failure and timeout;
+- final submission schema validates independently;
+- logs contain per-task/game timing, fallback and error counts.
+
+Refuse compilation when any dependency or license is unresolved.</pre></div></div>
+</section>
+
+<section id="programs" class="section">
+  <h2><span class="section-number">10.</span> Build programmes: conservative, competitive and moonshot</h2>
+  <p class="section-lede">Run the conservative track first because it supplies the controls needed to judge the competitive and moonshot work. Dates below assume work begins on 24 July 2026 and preserve time before the 30 September ARC‑AGI‑3 second milestone and 2 November final deadline. <a class="cite" href="#src-s02" title="See source S02">[S02]</a><a class="cite" href="#src-s08" title="See source S08">[S08]</a></p>
+
+  <h3>ARC‑AGI‑3 programme</h3>
+  <div class="table-wrap"><table><thead><tr><th>Track</th><th>Build</th><th>Expected value</th><th>Engineering cost</th><th>Kill gate</th></tr></thead><tbody>
+    <tr><th><span class="priority p0">Conservative</span></th><td>Reproduce Qwen REPL and Gemma policy; add legality, transition ledger, dead signatures and offline packaging.</td><td>Highest confidence; creates valid baseline and robust submission.</td><td>Moderate.</td><td>Cannot reproduce public behavior or fit safely in runtime.</td></tr>
+    <tr><th><span class="priority p1">Competitive</span></th><td>Consequence-prediction LoRA/DoRA, compact-model router, calibrated uncertainty and procedural-world curriculum.</td><td>Best chance of a real action-efficiency improvement beyond public solutions.</td><td>High.</td><td>No blind completion gain after equal-compute ablation.</td></tr>
+    <tr><th><span class="priority p2">Moonshot</span></th><td>One-step world-model/action-value heads, trajectory DPO and offline distillation.</td><td>Could convert internal inference into fewer real actions.</td><td>Very high.</td><td>World-model calibration below empirical transition baseline or custom serving jeopardizes packaging.</td></tr>
+  </tbody></table></div>
+
+  <h3 style="margin-top:28px">ARC‑AGI‑2 programme</h3>
+  <div class="table-wrap"><table><thead><tr><th>Track</th><th>Build</th><th>Expected value</th><th>Engineering cost</th><th>Kill gate</th></tr></thead><tbody>
+    <tr><th><span class="priority p0">Conservative</span></th><td>Reproduce NVARC components; CPU DSL; exact verifier; four-worker queue; diversity-aware pass@2.</td><td>Competition-proven foundation and reliable submission.</td><td>High but bounded.</td><td>Reproduction does not run under 12 hours or fails clean exact-output checks.</td></tr>
+    <tr><th><span class="priority p1">Competitive</span></th><td>New executable synthetic curriculum, Qwen3‑4B tokenizer/2D embeddings, URM equal-compute branch, learned ranker.</td><td>Most plausible path to marginal private-set coverage.</td><td>Very high.</td><td>No unique blind solves beyond reproduced portfolio.</td></tr>
+    <tr><th><span class="priority p2">Moonshot</span></th><td>Meta-learned adapter generator, object-set recurrent model, MDL specialist and EvoMolior-evolved Python DSL.</td><td>Potentially high diversity and new abstraction coverage.</td><td>Research programme.</td><td>Does not beat simpler branch on unique solves per GPU-minute.</td></tr>
+  </tbody></table></div>
+
+  <h3 style="margin-top:28px">Calendar</h3>
+  <div class="stack">
+    <div class="step"><div class="step-num">1</div><div><h4>24 July–7 August · Reproducible baselines</h4><p>Pin environments; load all shortlisted models offline; reproduce public Qwen/Gemma and NVARC/TRM paths; establish blind local packs and metrics.</p></div></div>
+    <div class="step"><div class="step-num">2</div><div><h4>8–28 August · Harness and data</h4><p>ARC‑3 causal ledger + procedural worlds; ARC‑2 exact portfolio, object/DSL views and executable synthetic generator.</p></div></div>
+    <div class="step"><div class="step-num">3</div><div><h4>29 August–18 September · Weight adaptation</h4><p>ARC‑3 delta/legality adapters and router; ARC‑2 global Qwen adapter, short QLoRA schedules and URM equal-compute experiments.</p></div></div>
+    <div class="step"><div class="step-num">4</div><div><h4>19–29 September · ARC‑3 milestone freeze</h4><p>Blind evaluation, hardware-profile run, fallback and two clean Kaggle executions; open-source the exact milestone candidate by 30 September.</p></div></div>
+    <div class="step"><div class="step-num">5</div><div><h4>1–20 October · Portfolio optimization</h4><p>Focus compute on unique ARC‑2 coverage, pass@2 ranking and hard-task scheduling; only bounded ARC‑3 changes.</p></div></div>
+    <div class="step"><div class="step-num">6</div><div><h4>21 October–1 November · Final freeze</h4><p>No architecture churn. License audit, hashes, notebook reruns, timeout simulation, output validation and public repository/write-up.</p></div></div>
+  </div>
+</section>
+
+<section id="packaging" class="section">
+  <h2><span class="section-number">11.</span> Kaggle deployment is a separate engineering product</h2>
+  <p class="section-lede">Internet is unavailable during evaluation, and the ARC‑AGI‑3 starter currently expects Python 3.12 and a generated notebook flow. A model that wins locally but cannot cold-load from Kaggle datasets twice is not a candidate. <a class="cite" href="#src-s02" title="See source S02">[S02]</a><a class="cite" href="#src-s05" title="See source S05">[S05]</a></p>
+  <div class="grid two">
+    <article class="panel"><h3>Offline artifact tree</h3><div class="codebox"><button class="copy-btn" data-copy="tree">Copy</button><pre id="tree">/kaggle/input/arc-models/
+  base_model/
+  tokenizer/
+  adapters/
+  model_manifest.json
+  SHA256SUMS
+  LICENSES/
+
+/kaggle/input/arc-runtime/
+  wheels/
+  controller/
+  solvers/
+  configs/
+  NOTICE
+
+submission.ipynb
+  00 hardware introspection
+  01 checksum verification
+  02 offline imports
+  03 model/worker startup
+  04 solve/play with deadlines
+  05 validate output
+  06 write submission artifact</pre></div></article>
+    <article class="panel"><h3>Runtime engine decision</h3><table><tbody><tr><th>vLLM</th><td>Strong serving/tool ecosystem; package the exact supported wheel and parser. Good default for Qwen/Gemma/gpt-oss.</td></tr><tr><th>SGLang</th><td>Strong multimodal/structured generation path; benchmark startup and wheel complexity.</td></tr><tr><th>Transformers</th><td>Slower but simpler fallback and useful for custom heads/architectures.</td></tr><tr><th>Direct PyTorch</th><td>Best for URM/TRM/2D models and full task-time updates.</td></tr></tbody></table></article>
+  </div>
+
+  <h3 style="margin-top:28px">Hardware introspection, not hardware dependence</h3>
+  <div class="codebox"><button class="copy-btn" data-copy="hardwarecode">Copy</button><pre id="hardwarecode">import torch
+
+props = torch.cuda.get_device_properties(0)
+profile = {
+    &quot;name&quot;: torch.cuda.get_device_name(0),
+    &quot;capability&quot;: torch.cuda.get_device_capability(0),
+    &quot;vram_gib&quot;: props.total_memory / 2**30,
+}
+
+# Permitted adaptation: cache, batch, precision kernel, concurrency.
+# Do not silently swap the scientific model or controller.
+if profile[&quot;vram_gib&quot;] &gt;= 90:
+    max_model_len = SAFE_RTX_CONTEXT
+    gpu_memory_utilization = 0.86
+else:
+    max_model_len = SAFE_FALLBACK_CONTEXT
+    gpu_memory_utilization = 0.82</pre></div>
+
+  <h3 style="margin-top:28px">Failure containment</h3>
+  <div class="table-wrap"><table><thead><tr><th>Failure</th><th>ARC‑3 fallback</th><th>ARC‑2 fallback</th><th>Required test</th></tr></thead><tbody>
+    <tr><th>Model server fails to start</th><td>Classical salience/path policy or compact Transformers fallback.</td><td>CPU DSL + already packaged tiny recurrent model.</td><td>Rename/remove primary checkpoint and run end-to-end.</td></tr>
+    <tr><th>One worker OOMs</th><td>Reduce cache/context and restart once; no endless retry.</td><td>Other workers continue; provisional outputs remain.</td><td>Artificially lower memory limit.</td></tr>
+    <tr><th>Malformed model output</th><td>Schema repair once, legality mask, deterministic safe action.</td><td>Discard candidate; never corrupt submission JSON.</td><td>Fuzz parser with truncated/invalid output.</td></tr>
+    <tr><th>Per-task timeout</th><td>Execute known plan or safe exploration; stop cleanly.</td><td>Return best provisional pair and move queue.</td><td>Inject slow task/program.</td></tr>
+    <tr><th>Late notebook deadline</th><td>Stop new model calls and flush replay/submission.</td><td>Terminate workers, collect provisional outputs, validate.</td><td>Run with shortened global deadline.</td></tr>
+  </tbody></table></div>
+
+  <h3 style="margin-top:28px">Pre-submit reproducibility gate</h3>
+  <div class="grid three">
+    <article class="panel"><h3>Identity</h3><ul><li>Git commit</li><li>Model/tokenizer revisions</li><li>Adapter and data hashes</li><li>License bill of materials</li></ul></article>
+    <article class="panel"><h3>Execution</h3><ul><li>Two clean offline reruns</li><li>Peak VRAM and time logs</li><li>No dynamic downloads</li><li>Timeout/fallback simulation</li></ul></article>
+    <article class="panel"><h3>Output</h3><ul><li>Independent schema validator</li><li>Exactly two ARC‑2 attempts</li><li>ARC‑3 parquet present</li><li>Nonempty and deterministic metadata</li></ul></article>
+  </div>
+</section>
+
+<section id="risks" class="section">
+  <h2><span class="section-number">12.</span> Risk register and stop conditions</h2>
+  <p class="section-lede">The fastest way to lose the competition is to mistake an attractive mechanism for a measured improvement. These risks should exist as executable tests in EvoMolior, not as final-report caveats.</p>
+  <div class="risk-grid">
+    <article class="risk"><div class="severity">Critical</div><h3>Public-task overfitting</h3><p><strong>Signal:</strong> large gain on known games/tasks, collapse under palette/control/object mutations.</p><p><strong>Control:</strong> blind procedural packs, provenance hashes, adversarial transformations.</p></article>
+    <article class="risk"><div class="severity">Critical</div><h3>Spurious ARC‑2 interpolation</h3><p><strong>Signal:</strong> exact demonstration fit, low leave-one-out and equivariance.</p><p><strong>Control:</strong> rank generalization evidence above model confidence; preserve a diverse second attempt.</p></article>
+    <article class="risk"><div class="severity">Critical</div><h3>Hardware drift</h3><p><strong>Signal:</strong> model fits only a Blackwell-specific format or wheel.</p><p><strong>Control:</strong> FP8/BF16 portable path, device introspection and a tested fallback engine.</p></article>
+    <article class="risk"><div class="severity">High</div><h3>Large context as false memory</h3><p><strong>Signal:</strong> tokens and latency grow while contradictions/repeated actions do not fall.</p><p><strong>Control:</strong> transition IDs, structured causal ledger, raw-history eviction ablation.</p></article>
+    <article class="risk"><div class="severity">High</div><h3>Quantization damage</h3><p><strong>Signal:</strong> generic benchmarks stable but coordinates/colors/JSON regress.</p><p><strong>Control:</strong> task-specific quantization suite and BF16/FP8 reference outputs.</p></article>
+    <article class="risk"><div class="severity">High</div><h3>Society overhead inside Kaggle</h3><p><strong>Signal:</strong> more agents produce more tokens but no unique solves or action savings.</p><p><strong>Control:</strong> use EvoMolior offline; compile one lean runtime; require marginal coverage per compute.</p></article>
+    <article class="risk"><div class="severity">High</div><h3>Outer-loop confound</h3><p><strong>Signal:</strong> new architecture credited for gains actually caused by more refinement/augmentation.</p><p><strong>Control:</strong> equal-parameter, equal-data, equal-FLOP baseline as urged by HRM analysis. <a class="cite" href="#src-s25" title="See source S25">[S25]</a></p></article>
+    <article class="risk"><div class="severity">High</div><h3>License incompatibility</h3><p><strong>Signal:</strong> model is downloadable but redistribution/derivative terms are unclear.</p><p><strong>Control:</strong> pin revision, preserve notices, prefer Apache/MIT, block compiler on unresolved assets. <a class="cite" href="#src-s02" title="See source S02">[S02]</a></p></article>
+    <article class="risk"><div class="severity">Medium</div><h3>Model merge destroys diversity</h3><p><strong>Signal:</strong> pass@1 rises slightly, unique second-attempt solves fall.</p><p><strong>Control:</strong> retain separate adapters/families unless merged pass@2 wins at equal compute.</p></article>
+    <article class="risk"><div class="severity">Medium</div><h3>World-model overconfidence</h3><p><strong>Signal:</strong> predicted deltas are calibrated on synthetic worlds but wrong on novel mechanics.</p><p><strong>Control:</strong> uncertainty, empirical transition fallback and occasional exploration outside model preference.</p></article>
+    <article class="risk"><div class="severity">Medium</div><h3>Runtime starvation</h3><p><strong>Signal:</strong> a few ARC‑2 tasks consume most GPU-minutes.</p><p><strong>Control:</strong> global and per-branch deadlines, dynamic queue, provisional output writes.</p></article>
+    <article class="risk"><div class="severity">Medium</div><h3>Leaderboard proxy failure</h3><p><strong>Signal:</strong> public score changes dominate research decisions despite noisy/small samples.</p><p><strong>Control:</strong> internal blind family-stratified evaluation and only occasional Kaggle confirmation.</p></article>
+  </div>
+</section>
+
+<section id="verdict" class="section">
+  <h2><span class="section-number">13.</span> Final recommendation</h2>
+  <p class="section-lede">Build one conservative system that can submit today, then spend research compute only on interventions that add blind, hardware-normalized value.</p>
+  <div class="callout good"><h3>ARC‑AGI‑3 final target</h3><p><strong>Qwen3.6‑27B‑FP8 bounded REPL</strong> with raw image/grid/component views, strict legal-action gateway, transition-delta verification, hypothesis ledger, dead signatures and rolling eviction. Benchmark against a deliberately simple <strong>Gemma 4 31B direct policy</strong>. The highest-value next weight change is a consequence/legality adapter; the highest-value architecture bet is a one-step world-model head, but only after the baseline is stable. <a class="cite" href="#src-s08" title="See source S08">[S08]</a><a class="cite" href="#src-s12" title="See source S12">[S12]</a><a class="cite" href="#src-s13" title="See source S13">[S13]</a></p></div>
+  <div class="callout good"><h3>ARC‑AGI‑2 final target</h3><p><strong>Four independent L4 workers</strong>: Qwen3‑4B global+task-time adaptation, 2D masked refinement, URM/TRM recurrence and executable DSL/Python synthesis. A CPU verifier/ranker chooses two outputs for marginal coverage. The highest-value new research branch is an equal-compute URM-style recurrent model plus better synthetic task identifiability—not a larger sharded LLM. <a class="cite" href="#src-s09" title="See source S09">[S09]</a><a class="cite" href="#src-s21" title="See source S21">[S21]</a><a class="cite" href="#src-s22" title="See source S22">[S22]</a><a class="cite" href="#src-s24" title="See source S24">[S24]</a></p></div>
+  <div class="callout"><h3>EvoMolior final target</h3><p>Operate as the durable model-development society: source ledger, hypothesis queue, dead-end memory, multi-fidelity experiments, skeptical blind grading, red-team mutations and submission compiler. The Kaggle notebook should be the compact compiled product of that society, not the society itself. <a class="cite" href="#src-s38" title="See source S38">[S38]</a></p></div>
+  <div class="table-wrap"><table><thead><tr><th>Next experiment</th><th>Why first</th><th>Success condition</th><th>Stop condition</th></tr></thead><tbody>
+    <tr><th>ARC‑3 Qwen vs Gemma exact reproduction</th><td>Creates the control for every later claim.</td><td>Both run offline with complete metric/failure traces.</td><td>None—required infrastructure.</td></tr>
+    <tr><th>ARC‑3 transition ledger ablation</th><td>Cheap, likely action-efficiency gain, no weight risk.</td><td>Fewer repeated no-ops and better completion/action ratio.</td><td>No blind gain across three seeds.</td></tr>
+    <tr><th>ARC‑2 NVARC portfolio reproduction</th><td>Anchors against the strongest open contest lineage.</td><td>Runs within 12h and reproduces expected qualitative coverage.</td><td>Replace non-reproducible component, preserve exact verifier.</td></tr>
+    <tr><th>ARC‑2 URM equal-compute branch</th><td>Highest reported new ARC‑2 research signal.</td><td>Adds unique blind pass@2 tasks per L4-hour.</td><td>No marginal coverage after controlled augmentation/refinement tests.</td></tr>
+  </tbody></table></div>
+</section>
+
+<section id="sources" class="section">
+  <h2><span class="section-number">14.</span> Sources and evidence ledger</h2>
+  <p class="section-lede">Current hardware allocations and model ecosystems can change. Re-open the official Kaggle pages, ARC documentation and pinned model cards immediately before every milestone/final freeze.</p>
+  <div class="table-wrap"><table class="source-table"><thead><tr><th>ID</th><th>Source</th><th>Evidence class</th><th>How it is used</th></tr></thead><tbody><tr id="src-s01"><td><strong>S01</strong></td><td><a href="evomolior_arc_prize_2026_dossier.html" target="_blank" rel="noopener">Initial EvoMolior × ARC Prize 2026 dossier</a></td><td><span class="badge source">Local prior report</span></td><td>Challenge definitions, public-solution synthesis, original holdouts, starter prompts and roadmap. This supplement deliberately does not repeat those sections.</td></tr>
+<tr id="src-s02"><td><strong>S02</strong></td><td><a href="https://arcprize.org/competitions/2026" target="_blank" rel="noopener">ARC Prize 2026 overview</a></td><td><span class="badge source">Official</span></td><td>Dates, open-source requirements and no-internet evaluation rule.</td></tr>
+<tr id="src-s03"><td><strong>S03</strong></td><td><a href="https://arcprize.org/competitions/2026/arc-agi-3" target="_blank" rel="noopener">ARC-AGI-3 competition page</a></td><td><span class="badge source">Official</span></td><td>ARC-AGI-3 capabilities and submission requirements.</td></tr>
+<tr id="src-s04"><td><strong>S04</strong></td><td><a href="https://arcprize.org/competitions/2026/arc-agi-2" target="_blank" rel="noopener">ARC-AGI-2 competition page</a></td><td><span class="badge source">Official</span></td><td>85% target, exact two-output scoring, open-source and no-internet requirements.</td></tr>
+<tr id="src-s05"><td><strong>S05</strong></td><td><a href="https://docs.arcprize.org/arc-prize-2026" target="_blank" rel="noopener">ARC-AGI-3 Kaggle starter documentation</a></td><td><span class="badge source">Official</span></td><td>Python 3.12, one-file agent interface, notebook rerun flow and current accelerator selector including rtx6000/g4-standard-48.</td></tr>
+<tr id="src-s06"><td><strong>S06</strong></td><td><a href="https://www.kaggle.com/competitions/arc-prize-2026-arc-agi-3" target="_blank" rel="noopener">ARC Prize 2026 — ARC-AGI-3 on Kaggle</a></td><td><span class="badge source">Official platform</span></td><td>Current competition runtime metadata; recheck immediately before final packaging.</td></tr>
+<tr id="src-s07"><td><strong>S07</strong></td><td><a href="https://www.kaggle.com/competitions/arc-prize-2026-arc-agi-2" target="_blank" rel="noopener">ARC Prize 2026 — ARC-AGI-2 on Kaggle</a></td><td><span class="badge source">Official platform</span></td><td>Current competition runtime metadata; recheck immediately before final packaging.</td></tr>
+<tr id="src-s08"><td><strong>S08</strong></td><td><a href="https://arcprize.org/blog/arc-prize-2026-milestone-1" target="_blank" rel="noopener">ARC-AGI-3 Milestone Prize #1</a></td><td><span class="badge source">Official public-result analysis</span></td><td>Top three public systems: Qwen3.6-27B-FP8 REPL agent and two Gemma-4-31B guarded visual policies; lightweight harness evidence.</td></tr>
+<tr id="src-s09"><td><strong>S09</strong></td><td><a href="https://www.nvidia.com/en-us/data-center/l4/" target="_blank" rel="noopener">NVIDIA L4 specifications</a></td><td><span class="badge source">Official hardware</span></td><td>24GB memory, 300GB/s bandwidth, PCIe Gen4 x16 64GB/s and supported low-precision arithmetic.</td></tr>
+<tr id="src-s10"><td><strong>S10</strong></td><td><a href="https://www.nvidia.com/en-us/data-center/rtx-pro-6000-blackwell-server-edition/" target="_blank" rel="noopener">NVIDIA RTX PRO 6000 Blackwell Server Edition</a></td><td><span class="badge source">Official hardware</span></td><td>96GB GDDR7, 1597GB/s bandwidth, FP4/FP8/BF16 capability.</td></tr>
+<tr id="src-s11"><td><strong>S11</strong></td><td><a href="https://www.nvidia.com/en-us/data-center/h100/" target="_blank" rel="noopener">NVIDIA H100 specifications</a></td><td><span class="badge source">Official hardware</span></td><td>80GB/94GB variants and 3.35/3.9TB/s memory bandwidth; portability reference rather than a guarantee of current Kaggle allocation.</td></tr>
+<tr id="src-s12"><td><strong>S12</strong></td><td><a href="https://huggingface.co/Qwen/Qwen3.6-27B-FP8" target="_blank" rel="noopener">Qwen3.6-27B-FP8 model card</a></td><td><span class="badge source">Primary model card</span></td><td>Apache-2.0; 27B multimodal model; official block-FP8 checkpoint; Transformers, vLLM and SGLang support.</td></tr>
+<tr id="src-s13"><td><strong>S13</strong></td><td><a href="https://huggingface.co/google/gemma-4-31B" target="_blank" rel="noopener">Gemma 4 31B model card</a></td><td><span class="badge source">Primary model card</span></td><td>Apache-2.0; 31B multimodal checkpoint with vLLM/SGLang support.</td></tr>
+<tr id="src-s14"><td><strong>S14</strong></td><td><a href="https://huggingface.co/Qwen/Qwen3.6-35B-A3B-FP8" target="_blank" rel="noopener">Qwen3.6-35B-A3B-FP8 model card</a></td><td><span class="badge source">Primary model card</span></td><td>Apache-2.0; multimodal MoE candidate; experimental ARC-AGI-3 challenger.</td></tr>
+<tr id="src-s15"><td><strong>S15</strong></td><td><a href="https://huggingface.co/zai-org/GLM-4.6V-Flash" target="_blank" rel="noopener">GLM-4.6V-Flash model card</a></td><td><span class="badge source">Primary model card</span></td><td>MIT; compact multimodal candidate for scouting, arbitration or fallback.</td></tr>
+<tr id="src-s16"><td><strong>S16</strong></td><td><a href="https://huggingface.co/OpenGVLab/InternVL3_5-30B-A3B" target="_blank" rel="noopener">InternVL3.5-30B-A3B model card</a></td><td><span class="badge source">Primary model card</span></td><td>Apache-2.0; multimodal MoE candidate; custom-code/runtime risk must be tested offline.</td></tr>
+<tr id="src-s17"><td><strong>S17</strong></td><td><a href="https://huggingface.co/microsoft/Phi-4-reasoning-vision-15B" target="_blank" rel="noopener">Phi-4 Reasoning Vision 15B model card</a></td><td><span class="badge source">Primary model card</span></td><td>MIT; compact multimodal reasoning candidate with strong grounding/computer-use orientation.</td></tr>
+<tr id="src-s18"><td><strong>S18</strong></td><td><a href="https://huggingface.co/allenai/Molmo2-ER" target="_blank" rel="noopener">Molmo2-ER model card</a></td><td><span class="badge source">Primary model card</span></td><td>4B embodied-reasoning/perception specialist; useful as a perception scout rather than the default policy.</td></tr>
+<tr id="src-s19"><td><strong>S19</strong></td><td><a href="https://huggingface.co/Qwen/Qwen3-4B" target="_blank" rel="noopener">Qwen3-4B model card</a></td><td><span class="badge source">Primary model card</span></td><td>Apache-2.0; small open model with direct ARC-AGI-2 winning-solution lineage.</td></tr>
+<tr id="src-s20"><td><strong>S20</strong></td><td><a href="https://developers.openai.com/cookbook/articles/gpt-oss/run-vllm" target="_blank" rel="noopener">Running gpt-oss with vLLM</a></td><td><span class="badge source">Official implementation guide</span></td><td>gpt-oss-20b needs about 16GB VRAM; gpt-oss-120b is best with at least 60GB; both use MXFP4 and support tool calling.</td></tr>
+<tr id="src-s21"><td><strong>S21</strong></td><td><a href="https://arcprize.org/blog/arc-prize-2025-results-analysis" target="_blank" rel="noopener">ARC Prize 2025 results and analysis</a></td><td><span class="badge source">Official public-result analysis</span></td><td>NVARC 24% private result, 2D masked refinement and the refinement-loop pattern.</td></tr>
+<tr id="src-s22"><td><strong>S22</strong></td><td><a href="https://github.com/1ytic/NVARC" target="_blank" rel="noopener">NVARC open-source solution</a></td><td><span class="badge source">Winning implementation</span></td><td>Multi-stage synthetic data, 103K synthetic puzzles, 3.2M augmentations, Qwen3-4B fine-tuning and TRM components.</td></tr>
+<tr id="src-s23"><td><strong>S23</strong></td><td><a href="https://github.com/SamsungSAILMontreal/TinyRecursiveModels" target="_blank" rel="noopener">Tiny Recursive Models</a></td><td><span class="badge source">Paper + code</span></td><td>7M recursive model; reported 45% ARC-AGI-1 and 8% ARC-AGI-2; reproduction and runtime sensitivity remain material.</td></tr>
+<tr id="src-s24"><td><strong>S24</strong></td><td><a href="https://arxiv.org/abs/2512.14693" target="_blank" rel="noopener">Universal Reasoning Model</a></td><td><span class="badge source">Research paper</span></td><td>Reported 53.8% ARC-AGI-1 and 16.0% ARC-AGI-2 pass@1; recurrent inductive bias, short convolution and truncated backpropagation.</td></tr>
+<tr id="src-s25"><td><strong>S25</strong></td><td><a href="https://arcprize.org/blog/hrm-analysis" target="_blank" rel="noopener">Hidden drivers of HRM performance</a></td><td><span class="badge source">Official independent analysis</span></td><td>Outer refinement and augmentation drove most gains; elaborate hierarchy mattered much less than claimed.</td></tr>
+<tr id="src-s26"><td><strong>S26</strong></td><td><a href="https://proceedings.mlr.press/v267/akyurek25a.html" target="_blank" rel="noopener">Test-Time Training for Few-Shot Learning</a></td><td><span class="badge source">Peer-reviewed paper</span></td><td>ARC test-time parameter updates reached 53% public validation with an 8B model and 61.9% in an ensemble on the reported setting.</td></tr>
+<tr id="src-s27"><td><strong>S27</strong></td><td><a href="https://arxiv.org/abs/2507.14172" target="_blank" rel="noopener">SOAR: self-improving evolutionary program synthesis</a></td><td><span class="badge source">Peer-reviewed paper</span></td><td>Evolutionary Python program synthesis plus hindsight fine-tuning; relevant to EvoMolior-driven solver evolution.</td></tr>
+<tr id="src-s28"><td><strong>S28</strong></td><td><a href="https://arxiv.org/abs/2505.07859" target="_blank" rel="noopener">Product of Experts / perspectives for ARC</a></td><td><span class="badge source">Research paper</span></td><td>Perspective transformations, candidate generation and product-of-experts scoring; supports deliberate view diversity.</td></tr>
+<tr id="src-s29"><td><strong>S29</strong></td><td><a href="https://arxiv.org/abs/2512.06104" target="_blank" rel="noopener">CompressARC: ARC-AGI without pretraining</a></td><td><span class="badge source">Research paper</span></td><td>Per-puzzle inference-time learning under an MDL objective; useful low-correlation portfolio branch.</td></tr>
+<tr id="src-s30"><td><strong>S30</strong></td><td><a href="https://arxiv.org/abs/2607.09059" target="_blank" rel="noopener">ARCANA multi-agent program synthesis</a></td><td><span class="badge source">Recent research paper</span></td><td>Reflective multi-agent program synthesis proposal; promising but too recent to treat as established competition evidence.</td></tr>
+<tr id="src-s31"><td><strong>S31</strong></td><td><a href="https://arxiv.org/abs/2106.09685" target="_blank" rel="noopener">LoRA</a></td><td><span class="badge source">Primary method paper</span></td><td>Low-rank adapters for parameter-efficient specialization.</td></tr>
+<tr id="src-s32"><td><strong>S32</strong></td><td><a href="https://arxiv.org/abs/2305.14314" target="_blank" rel="noopener">QLoRA</a></td><td><span class="badge source">Primary method paper</span></td><td>Adapter training over quantized bases; relevant to L4-constrained test-time adaptation.</td></tr>
+<tr id="src-s33"><td><strong>S33</strong></td><td><a href="https://arxiv.org/abs/2306.00978" target="_blank" rel="noopener">AWQ</a></td><td><span class="badge source">Primary method paper</span></td><td>Activation-aware weight-only quantization; candidate when FP8 is unavailable or memory pressure dominates.</td></tr>
+<tr id="src-s34"><td><strong>S34</strong></td><td><a href="https://arxiv.org/abs/2305.18290" target="_blank" rel="noopener">Direct Preference Optimization</a></td><td><span class="badge source">Primary method paper</span></td><td>Pairwise preference training without a separate reward model; useful for efficient-vs-wasteful ARC-AGI-3 trajectories.</td></tr>
+<tr id="src-s35"><td><strong>S35</strong></td><td><a href="https://arxiv.org/abs/2402.09353" target="_blank" rel="noopener">DoRA</a></td><td><span class="badge source">Primary method paper</span></td><td>Weight-decomposed low-rank adaptation; higher-fidelity adapter branch to test against LoRA.</td></tr>
+<tr id="src-s36"><td><strong>S36</strong></td><td><a href="https://arxiv.org/abs/2306.01708" target="_blank" rel="noopener">TIES-Merging</a></td><td><span class="badge source">Primary method paper</span></td><td>Model-delta merging with interference resolution; lower priority because ARC-AGI-2 benefits from preserving solver diversity.</td></tr>
+<tr id="src-s37"><td><strong>S37</strong></td><td><a href="https://arxiv.org/abs/2311.03099" target="_blank" rel="noopener">DARE model merging</a></td><td><span class="badge source">Primary method paper</span></td><td>Sparse delta merging; research branch, not a default competition move.</td></tr>
+<tr id="src-s38"><td><strong>S38</strong></td><td><a href="Project%20Viability%20and%20Improvement.txt" target="_blank" rel="noopener">Project viability / EvoMolior architecture context</a></td><td><span class="badge source">User-provided project context</span></td><td>Durable substrate, specialized agents, critic-gated knowledge, dead-end memory, model routing and reproducible comparison framing.</td></tr>
+<tr id="src-s39"><td><strong>S39</strong></td><td><a href="evomolior_arc_prize_2026_starter_pack.zip" target="_blank" rel="noopener">EvoMolior ARC 2026 starter pack</a></td><td><span class="badge source">Local implementation artifact</span></td><td>Existing ARC-AGI-2 and ARC-AGI-3 scaffolds referenced rather than reproduced here.</td></tr></tbody></table></div>
+  <div class="callout warn"><h3>Limits</h3><p>Reported paper and public leaderboard results are not directly comparable across datasets, compute, augmentation, scoring and release dates. The document uses them to prioritize experiments, not to predict hidden evaluation accuracy. Memory figures are weight-only approximations unless a source explicitly provides VRAM guidance. ARC‑AGI‑2’s current multi-L4 environment and ARC‑AGI‑3’s current RTX profile should be verified again in Kaggle before packaging.</p></div>
+  <p class="print-note">Printed from the self-contained HTML supplement generated on 24 July 2026.</p>
+</section>
+
+</main></div>
+<script>
+(function(){
+  const root=document.documentElement;
+  let saved=null;
+  try{saved=localStorage.getItem('arc-supplement-theme')}catch(e){}
+  if(saved) root.dataset.theme=saved;
+  document.getElementById('themeToggle').addEventListener('click',()=>{
+    const next=root.dataset.theme==='light'?'dark':'light'; root.dataset.theme=next;
+    try{localStorage.setItem('arc-supplement-theme',next)}catch(e){}
+  });
+  document.querySelectorAll('.copy-btn').forEach(btn=>btn.addEventListener('click',async()=>{
+    const target=document.getElementById(btn.dataset.copy); if(!target) return;
+    try{await navigator.clipboard.writeText(target.innerText);btn.textContent='Copied';btn.classList.add('copied');setTimeout(()=>{btn.textContent='Copy';btn.classList.remove('copied')},1200)}catch(e){btn.textContent='Select manually'}
+  }));
+  const cards=[...document.querySelectorAll('.approach-card')];
+  let state={challenge:'all',evidence:'all'};
+  const search=document.getElementById('approachSearch');
+  function apply(){const q=(search.value||'').toLowerCase().trim();cards.forEach(c=>{const okC=state.challenge==='all'||c.dataset.challenge===state.challenge;const okE=state.evidence==='all'||c.dataset.evidence===state.evidence;const okQ=!q||c.dataset.search.includes(q);c.classList.toggle('hidden',!(okC&&okE&&okQ));});document.getElementById('visibleCount').textContent=cards.filter(c=>!c.classList.contains('hidden')).length}
+  document.querySelectorAll('[data-filter-kind]').forEach(b=>b.addEventListener('click',()=>{const kind=b.dataset.filterKind;document.querySelectorAll(`[data-filter-kind="${kind}"]`).forEach(x=>x.classList.remove('active'));b.classList.add('active');state[kind]=b.dataset.filterValue;apply()}));search.addEventListener('input',apply);apply();
+  const modelSearch=document.getElementById('modelSearch');modelSearch.addEventListener('input',()=>{const q=modelSearch.value.toLowerCase();document.querySelectorAll('#modelTable tbody tr').forEach(r=>r.classList.toggle('hidden-row',q&&!r.dataset.search.includes(q)))});
+  function calc(){const p=Number(document.getElementById('params').value)||0,b=Number(document.getElementById('bits').value)||0,ov=Number(document.getElementById('overhead').value)||0,kv=Number(document.getElementById('kv').value)||0,g=Number(document.getElementById('gpus').value)||1,v=Number(document.getElementById('vram').value)||0;const bytes=p*1e9*b/8;const gib=bytes/Math.pow(1024,3);const total=gib*(1+ov/100)+kv;const per=total/g;const head=v-per;document.getElementById('weightOut').textContent=gib.toFixed(1)+' GiB';document.getElementById('totalOut').textContent=total.toFixed(1)+' GiB';document.getElementById('perOut').textContent=per.toFixed(1)+' GiB/GPU';const fit=document.getElementById('fitOut');fit.textContent=head>=0?'Fits by '+head.toFixed(1)+' GiB':'Over by '+Math.abs(head).toFixed(1)+' GiB';fit.style.color=head>=0?'var(--good)':'var(--bad)'}
+  ['params','bits','overhead','kv','gpus','vram'].forEach(id=>document.getElementById(id).addEventListener('input',calc));calc();
+  document.querySelectorAll('.tab-btn').forEach(btn=>btn.addEventListener('click',()=>{const group=btn.closest('.tabs').dataset.group;document.querySelectorAll(`.tab-btn[data-group="${group}"]`).forEach(x=>x.classList.remove('active'));document.querySelectorAll(`.tab-panel[data-group="${group}"]`).forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.getElementById(btn.dataset.target).classList.add('active')}));
+  const sections=[...document.querySelectorAll('main section[id]')],links=[...document.querySelectorAll('.sidebar a')];const obs=new IntersectionObserver(es=>{es.filter(e=>e.isIntersecting).sort((a,b)=>b.intersectionRatio-a.intersectionRatio).slice(0,1).forEach(e=>links.forEach(l=>l.classList.toggle('active',l.getAttribute('href')==='#'+e.target.id)))},{rootMargin:'-20% 0px -70% 0px',threshold:[0,.2,.5]});sections.forEach(s=>obs.observe(s));
+})();
+</script>
+</body></html>

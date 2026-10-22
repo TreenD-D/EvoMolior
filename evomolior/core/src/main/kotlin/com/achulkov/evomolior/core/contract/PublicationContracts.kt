@@ -3,7 +3,12 @@
 package com.achulkov.evomolior.core.contract
 
 import com.achulkov.evomolior.core.atlas.AtlasHashing
+import java.security.MessageDigest
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlin.time.Instant
 
 /** Exact ordered states required before a run may be archived. */
@@ -127,4 +132,190 @@ object PublicationStatePolicy {
             next.sequence == previous.sequence + 1 &&
             next.previousEventHash == previous.eventHash
     }
+}
+
+/** Strict recovery-only publication states; these never imply accepted publication. */
+@Serializable
+enum class RecoveryPublicationState {
+    WORK_CYCLE_CLOSED_WITHOUT_ACCEPTANCE,
+    RECOVERY_SOURCE_SET_SEALED,
+    PROVISIONAL_PACKAGE_ASSEMBLED,
+    PROVISIONAL_PACKAGE_VALIDATED,
+    RECOVERY_COST_AND_EXIT_RECONCILED,
+    RECOVERY_MANIFEST_HASHED,
+    ARCHIVED_RECOVERED;
+
+    /** Returns the only legal next recovery state, when one exists. */
+    fun next(): RecoveryPublicationState? = entries.getOrNull(ordinal + 1)
+}
+
+/** One immutable, hash-linked transition in the recovery publication state machine. */
+@Serializable
+data class RecoveryPublicationStateEvent(
+    val eventId: String,
+    val runId: String,
+    val state: RecoveryPublicationState,
+    val sequence: Int,
+    val previousEventHash: String?,
+    val authorityReferenceIds: Set<String>,
+    val occurredAt: Instant,
+    val eventHash: String = "",
+) {
+    init {
+        require(eventId.isNotBlank() && runId.isNotBlank()) {
+            "Recovery publication event identity fields must not be blank"
+        }
+        require(sequence >= 0 && authorityReferenceIds.isNotEmpty()) {
+            "Recovery publication event sequence and authority are invalid"
+        }
+        require(authorityReferenceIds.none(String::isBlank)) {
+            "Recovery publication authority references must not be blank"
+        }
+        require(
+            (sequence == 0 &&
+                state == RecoveryPublicationState.WORK_CYCLE_CLOSED_WITHOUT_ACCEPTANCE &&
+                previousEventHash == null) ||
+                (sequence > 0 && previousEventHash?.isNotBlank() == true)
+        ) { "Recovery publication transition sequence and previous hash are inconsistent" }
+    }
+
+    /** Returns this event with its deterministic self-hash attached. */
+    fun withComputedHash(): RecoveryPublicationStateEvent =
+        copy(eventHash = publicationContractHash(serializer(), this, "eventHash"))
+
+    /** Returns whether this event commits its exact transition and authorities. */
+    fun hasValidHash(): Boolean = MessageDigest.isEqual(
+        eventHash.encodeToByteArray(),
+        publicationContractHash(serializer(), this, "eventHash").encodeToByteArray(),
+    )
+}
+
+/** Validates exact adjacency and hash linking for recovery publication. */
+object RecoveryPublicationStatePolicy {
+    /** Returns whether [next] is the first recovery event or exact successor of [previous]. */
+    fun allows(
+        previous: RecoveryPublicationStateEvent?,
+        next: RecoveryPublicationStateEvent,
+    ): Boolean {
+        if (previous == null) {
+            return next.state ==
+                RecoveryPublicationState.WORK_CYCLE_CLOSED_WITHOUT_ACCEPTANCE &&
+                next.sequence == 0 &&
+                next.previousEventHash == null
+        }
+        return previous.runId == next.runId &&
+            previous.state.next() == next.state &&
+            next.sequence == previous.sequence + 1 &&
+            next.previousEventHash == previous.eventHash
+    }
+}
+
+/** Strict pre-runtime diagnostic states, separate from accepted and recovery publication. */
+@Serializable
+enum class StartupDiagnosticState {
+    ADMISSION_OR_COUNCIL_FAILURE,
+    REJECTION_AUTHORITY_FROZEN,
+    STARTUP_DIAGNOSTIC_ASSEMBLED,
+    DIAGNOSTIC_MANIFEST_HASHED,
+    ARCHIVED_REJECTED_PRE_RUNTIME;
+
+    /** Returns the only legal next startup-diagnostic state, when one exists. */
+    fun next(): StartupDiagnosticState? = entries.getOrNull(ordinal + 1)
+}
+
+/** One immutable, hash-linked transition in the startup diagnostic state machine. */
+@Serializable
+data class StartupDiagnosticStateEvent(
+    val eventId: String,
+    val runId: String,
+    val state: StartupDiagnosticState,
+    val sequence: Int,
+    val previousEventHash: String?,
+    val authorityReferenceIds: Set<String>,
+    val occurredAt: Instant,
+    val eventHash: String = "",
+) {
+    init {
+        require(eventId.isNotBlank() && runId.isNotBlank()) {
+            "Startup diagnostic event identity fields must not be blank"
+        }
+        require(sequence >= 0 && authorityReferenceIds.isNotEmpty()) {
+            "Startup diagnostic event sequence and authority are invalid"
+        }
+        require(authorityReferenceIds.none(String::isBlank)) {
+            "Startup diagnostic authority references must not be blank"
+        }
+        require(
+            (sequence == 0 &&
+                state == StartupDiagnosticState.ADMISSION_OR_COUNCIL_FAILURE &&
+                previousEventHash == null) ||
+                (sequence > 0 && previousEventHash?.isNotBlank() == true)
+        ) { "Startup diagnostic transition sequence and previous hash are inconsistent" }
+    }
+
+    /** Returns this event with its deterministic self-hash attached. */
+    fun withComputedHash(): StartupDiagnosticStateEvent =
+        copy(eventHash = publicationContractHash(serializer(), this, "eventHash"))
+
+    /** Returns whether this event commits its exact transition and authorities. */
+    fun hasValidHash(): Boolean = MessageDigest.isEqual(
+        eventHash.encodeToByteArray(),
+        publicationContractHash(serializer(), this, "eventHash").encodeToByteArray(),
+    )
+}
+
+/** Validates exact adjacency and hash linking for startup diagnostic publication. */
+object StartupDiagnosticStatePolicy {
+    /** Returns whether [next] is the first diagnostic event or exact successor of [previous]. */
+    fun allows(
+        previous: StartupDiagnosticStateEvent?,
+        next: StartupDiagnosticStateEvent,
+    ): Boolean {
+        if (previous == null) {
+            return next.state == StartupDiagnosticState.ADMISSION_OR_COUNCIL_FAILURE &&
+                next.sequence == 0 &&
+                next.previousEventHash == null
+        }
+        return previous.runId == next.runId &&
+            previous.state.next() == next.state &&
+            next.sequence == previous.sequence + 1 &&
+            next.previousEventHash == previous.eventHash
+    }
+}
+
+private val PUBLICATION_CONTRACT_JSON = Json {
+    encodeDefaults = true
+    explicitNulls = true
+}
+
+private fun <T> publicationContractHash(
+    serializer: KSerializer<T>,
+    value: T,
+    excludedField: String,
+): String {
+    val element = PUBLICATION_CONTRACT_JSON.encodeToJsonElement(serializer, value)
+    val canonical = canonicalPublicationJson(
+        JsonObject(element.jsonObject.filterKeys { it != excludedField })
+    )
+    return MessageDigest.getInstance("SHA-256")
+        .digest(canonical.encodeToByteArray())
+        .joinToString("") { byte -> "%02x".format(byte) }
+}
+
+private fun canonicalPublicationJson(
+    element: kotlinx.serialization.json.JsonElement,
+): String = when (element) {
+    is JsonObject -> element.entries
+        .sortedBy { it.key }
+        .joinToString(prefix = "{", postfix = "}") { (key, value) ->
+            PUBLICATION_CONTRACT_JSON.encodeToString(
+                kotlinx.serialization.json.JsonPrimitive.serializer(),
+                kotlinx.serialization.json.JsonPrimitive(key),
+            ) + ":" + canonicalPublicationJson(value)
+        }
+    is kotlinx.serialization.json.JsonArray -> element
+        .map(::canonicalPublicationJson)
+        .sorted()
+        .joinToString(prefix = "[", postfix = "]")
+    is kotlinx.serialization.json.JsonPrimitive -> element.toString()
 }

@@ -183,15 +183,43 @@ class NodeYieldSchedulerTest {
         )
     }
 
+    @Test
+    fun `artifact validation reward remains typed and delayed`() {
+        val schedule = scheduler.schedule(
+            NodeYieldSchedulingBatch(
+                judgingValid = true,
+                policy = policy(),
+                candidates = listOf(
+                    candidate(
+                        nodeId = "delivery-node",
+                        groupId = groupA,
+                        amount = 3.0,
+                        nodeKind = NodeKind.DELIVERY,
+                        rewardType = InstrumentalRewardType.ARTIFACT_VALIDATION_CREDITS
+                    )
+                )
+            )
+        ).single()
+
+        assertEquals(1, schedule.activationRound - schedule.judgingRound)
+        assertEquals(
+            InstrumentalRewardType.ARTIFACT_VALIDATION_CREDITS,
+            schedule.rewards.single().rewardType
+        )
+        assertEquals(3.0, schedule.rewards.single().amount)
+    }
+
     private fun candidate(
         nodeId: String,
         groupId: AtlasGroupId,
         amount: Double,
         priorCaptureCount: Int = 0,
         mandatoryFrontier: Boolean = false,
-        independentValidation: Boolean = false
+        independentValidation: Boolean = false,
+        nodeKind: NodeKind = NodeKind.EVIDENCE,
+        rewardType: InstrumentalRewardType = InstrumentalRewardType.SPAWN_CREDITS
     ): NodeYieldCandidate {
-        val node = node(nodeId)
+        val node = node(nodeId, nodeKind)
         val bundleHash = "bundle-$nodeId-${groupId.value}"
         return NodeYieldCandidate(
             decision = decision(node, groupId, bundleHash),
@@ -200,7 +228,7 @@ class NodeYieldSchedulerTest {
             evidencePacketHash = "packet-$nodeId-${groupId.value}",
             scoreBundleHash = bundleHash,
             baseRewards = listOf(
-                ScheduledReward(InstrumentalRewardType.SPAWN_CREDITS, amount)
+                ScheduledReward(rewardType, amount)
             ),
             priorCaptureCount = priorCaptureCount,
             mandatoryFrontier = mandatoryFrontier,
@@ -236,9 +264,12 @@ class NodeYieldSchedulerTest {
         ).withComputedHash()
     }
 
-    private fun node(id: String): LimitationNode = LimitationNode(
+    private fun node(
+        id: String,
+        kind: NodeKind = NodeKind.EVIDENCE
+    ): LimitationNode = LimitationNode(
         id = NodeId(id),
-        kind = NodeKind.EVIDENCE,
+        kind = kind,
         layer = 0,
         parentIds = emptySet(),
         prerequisiteIds = emptySet(),

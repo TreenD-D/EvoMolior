@@ -3,6 +3,7 @@ package com.achulkov.evomolior.api.service
 import com.achulkov.evomolior.api.initializeTestWorkerAtlas
 import com.achulkov.evomolior.api.model.FinalOutputSpec
 import com.achulkov.evomolior.api.model.FinalOutputValidationContract
+import com.achulkov.evomolior.api.model.RunConfig
 import com.achulkov.evomolior.competition.coordinator.GroupCoordinator
 import com.achulkov.evomolior.competition.grader.GraderGroupManager
 import com.achulkov.evomolior.core.atlas.AtlasGroupId
@@ -13,6 +14,9 @@ import com.achulkov.evomolior.core.atlas.NodeCaptureDecisionType
 import com.achulkov.evomolior.core.atlas.NodeCaptureReasonCode
 import com.achulkov.evomolior.core.atlas.NodeId
 import com.achulkov.evomolior.core.contract.FinalDeliverableReferenceRecord
+import com.achulkov.evomolior.core.model.GroupProfileType
+import com.achulkov.evomolior.core.model.Role
+import com.achulkov.evomolior.core.model.ScoringDimension
 import com.achulkov.evomolior.orchestration.metaplanner.MetaPlannerRunner
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
 import com.achulkov.evomolior.substrate.atlas.NodeCaptureRepository
@@ -24,12 +28,72 @@ import kotlin.reflect.full.declaredFunctions
 import kotlin.reflect.jvm.isAccessible
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class EvoMoliorRunServiceFinalComponentLineageTest {
     @Test
-    fun `final output waits for valid same-writer component lineage plan update`() = runTest {
+    fun `headed Markdown candidate retains staging provenance without admitted component authority`() =
+        runTest {
+            val factory = SubstrateDatabaseFactory(
+                createTempDirectory("provisional-component-lineage-").toFile()
+            )
+            val runId = "run-final-component-lineage"
+            val groupId = "group-0"
+            val database = factory.get(runId, groupId)
+            database.stagingDao().insert(
+                staging(
+                    id = "writer-doc",
+                    agentId = "writer",
+                    type = "DOC",
+                    content = "# Answer\n\nA provisional receiver artifact.",
+                    submittedAtMs = 100L,
+                )
+            )
+            val service = EvoMoliorRunService(
+                lifecycleManagerProvider = { _, _, _, _, _ ->
+                    error("This focused extraction test must not spawn agents")
+                },
+                groupCoordinatorProvider = { groupIds, dimensions ->
+                    GroupCoordinator(groupIds, dimensions)
+                },
+                graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+                substrateFactory = factory,
+            )
+            val sources = com.achulkov.evomolior.substrate.worker.ContributionGraphRepository(
+                database = database,
+                atlasDatabase = factory.getAtlas(runId),
+            ).finalDeliverableSources(runId, groupId)
+            assertTrue(sources.isEmpty())
+            val outputSpec = FinalOutputSpec(
+                relativePath = "answer.md",
+                mediaType = "text/markdown",
+                validation = FinalOutputValidationContract(
+                    requiredMarkdownSectionSignals = listOf("Answer"),
+                ),
+            )
+            val read = service::class.declaredFunctions
+                .first { it.name == "readFinalDeliverableFile" }
+                .apply { isAccessible = true }
+            val candidate = assertNotNull(
+                read.callSuspend(service, runId, groupId, 50L, outputSpec, false, null, null)
+                    as GeneratedOutputFile?
+            )
+            assertTrue(FinalOutputContractValidator.validate(candidate, outputSpec).isEmpty())
+            assertEquals("writer-doc", candidate.sourceSubmissionId)
+            assertEquals("writer", candidate.sourceAgentId)
+            assertEquals(groupId, candidate.sourceGroupId)
+            assertEquals(emptyMap(), candidate.componentNodeIds)
+            assertNull(candidate.componentLineageSubmissionId)
+            assertNull(
+                read.callSuspend(service, runId, groupId, 50L, outputSpec, true, null, null),
+                "The same candidate must remain ineligible for accepted-lineage extraction.",
+            )
+        }
+
+    @Test
+    fun `accepted reuse refreshes exact cached DOC after valid same-writer component lineage arrives`() = runTest {
         val factory = SubstrateDatabaseFactory(
             createTempDirectory("final-component-lineage-service-").toFile()
         )
@@ -101,7 +165,10 @@ class EvoMoliorRunServiceFinalComponentLineageTest {
             runId,
             groupId,
             50L,
-            outputSpec
+            outputSpec,
+            true,
+            null,
+            null,
         ) as GeneratedOutputFile?
 
         val fileOnlySpec = FinalOutputSpec(
@@ -113,10 +180,37 @@ class EvoMoliorRunServiceFinalComponentLineageTest {
             runId,
             groupId,
             50L,
-            fileOnlySpec
+            fileOnlySpec,
+            true,
+            null,
+            null,
         ) as GeneratedOutputFile?
         assertEquals(emptyMap(), fileOnlyOutput?.componentNodeIds)
         assertNull(current())
+        val provisional = read.callSuspend(
+            service,
+            runId,
+            groupId,
+            50L,
+            outputSpec,
+            false,
+            null,
+            null,
+        ) as GeneratedOutputFile
+        assertEquals("writer-doc", provisional.sourceSubmissionId)
+        assertEquals("writer", provisional.sourceAgentId)
+        assertEquals(groupId, provisional.sourceGroupId)
+        assertEquals(emptyMap(), provisional.componentNodeIds)
+        assertNull(provisional.componentLineageSubmissionId)
+        database.stagingDao().insert(
+            staging(
+                id = "writer-doc-note",
+                agentId = "writer",
+                type = "DOC",
+                content = "This ordinary note is not a JSON receiver artifact.",
+                submittedAtMs = 101L,
+            )
+        )
         database.stagingDao().insert(
             staging(
                 id = "equal-time-writer-lineage",
@@ -164,6 +258,125 @@ class EvoMoliorRunServiceFinalComponentLineageTest {
         )
         assertEquals("writer-lineage", generated?.componentLineageSubmissionId)
         assertEquals(103L, generated?.componentLineageSubmittedAtMs)
+        // A newer same-writer DOC and its lineage must not replace or relabel the cached DOC.
+        database.stagingDao().insert(
+            staging(
+                id = "newer-writer-doc",
+                agentId = "writer",
+                type = "DOC",
+                content = """{"answer":"different artifact","evidence":[]}""",
+                submittedAtMs = 104L,
+            )
+        )
+        database.stagingDao().insert(
+            staging(
+                id = "newer-writer-lineage",
+                agentId = "writer",
+                type = "PLAN_UPDATE",
+                content = lineage(path = "result.json"),
+                submittedAtMs = 105L,
+            )
+        )
+        val refresh = service::class.declaredFunctions
+            .first { it.name == "refreshAcceptedCandidateLineage" }
+            .apply { isAccessible = true }
+        val refreshed = refresh.callSuspend(
+            service,
+            RunConfig(
+                runId = runId,
+                objective = "Produce a grounded result.",
+                groupCount = 1,
+                groupProfiles = listOf(GroupProfileType.Library),
+                scoringDimensions = listOf(
+                    ScoringDimension("quality", "Quality", "Grounded result quality", 1.0)
+                ),
+                openRouterApiKey = "provider-free",
+                isTestRun = true,
+            ),
+            groupId,
+            outputSpec,
+            provisional,
+        ) as GeneratedOutputFile
+        assertEquals(provisional.content, refreshed.content)
+        assertEquals(provisional.contentHash, refreshed.contentHash)
+        assertEquals(provisional.sourceSubmissionId, refreshed.sourceSubmissionId)
+        assertEquals("writer-lineage", refreshed.componentLineageSubmissionId)
+        assertEquals(103L, refreshed.componentLineageSubmittedAtMs)
+        assertEquals(generated?.componentNodeIds, refreshed.componentNodeIds)
+
+        suspend fun readExact(
+            candidate: GeneratedOutputFile,
+            requestedRunId: String = runId,
+            requestedGroupId: String = groupId,
+        ): GeneratedOutputFile? = read.callSuspend(
+            service,
+            requestedRunId,
+            requestedGroupId,
+            50L,
+            outputSpec,
+            true,
+            candidate,
+            null,
+        ) as GeneratedOutputFile?
+        assertNull(readExact(provisional.copy(sourceSubmissionId = "missing-doc")))
+        assertNull(readExact(provisional.copy(sourceSubmissionId = "writer-lineage")))
+        assertNull(readExact(provisional.copy(sourceSubmissionId = "newer-writer-doc")))
+        assertNull(readExact(provisional.copy(sourceAgentId = "other-writer")))
+        assertNull(readExact(provisional.copy(sourceGroupId = "other-group")))
+        assertNull(readExact(provisional.copy(sourceRole = Role.Critic)))
+        assertNull(readExact(provisional, requestedRunId = "other-run"))
+        assertNull(readExact(provisional, requestedGroupId = "other-group"))
+        assertNull(readExact(provisional.copy(relativePath = "other.json")))
+        assertNull(readExact(provisional.copy(mediaType = "text/plain")))
+        assertNull(
+            readExact(
+                provisional.copy(
+                    content = "tampered",
+                    contentHash = AtlasHashing.hashText("tampered"),
+                )
+            )
+        )
+        assertNull(readExact(provisional.copy(contentHash = AtlasHashing.hashText("tampered"))))
+        val unboundDoc = staging(
+            id = "unbound-doc",
+            agentId = "unbound-writer",
+            type = "DOC",
+            content = provisional.content,
+            submittedAtMs = 200L,
+        )
+        database.stagingDao().insert(unboundDoc)
+        database.stagingDao().insert(
+            unboundDoc.copy(
+                id = "intervening-doc",
+                content = """{"answer":"replacement","evidence":[]}""",
+                submittedAtMs = 201L,
+            )
+        )
+        database.stagingDao().insert(
+            staging(
+                id = "replacement-lineage",
+                agentId = "unbound-writer",
+                type = "PLAN_UPDATE",
+                content = lineage(path = "result.json"),
+                submittedAtMs = 202L,
+            )
+        )
+        assertNull(
+            readExact(
+                provisional.copy(sourceSubmissionId = "unbound-doc", sourceAgentId = "unbound-writer")
+            ),
+            "Lineage following a replacement DOC cannot establish authority for the earlier DOC.",
+        )
+        val filteredRead = service::class.declaredFunctions
+            .first { it.name == "readFinalDeliverableCandidate" }
+            .apply { isAccessible = true }
+        val onlyOriginal: (GeneratedOutputFile) -> Boolean = { it.sourceSubmissionId == "unbound-doc" }
+        assertNull(
+            filteredRead.callSuspend(
+                service, runId, groupId, 50L, outputSpec, true, null, "unbound-writer", onlyOriginal,
+            ),
+            "Contract fallback must not borrow a replacement's accepted component lineage.",
+        )
         val record = service::class.declaredFunctions
             .first { it.name == "recordFinalDeliverableReferences" }
             .apply { isAccessible = true }
@@ -173,7 +386,7 @@ class EvoMoliorRunServiceFinalComponentLineageTest {
             runId,
             groupId,
             0,
-            requireNotNull(generated),
+            refreshed,
             outputSpec
         ) as List<FinalDeliverableReferenceRecord>
 

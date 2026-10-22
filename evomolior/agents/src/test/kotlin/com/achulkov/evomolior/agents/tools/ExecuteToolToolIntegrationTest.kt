@@ -443,7 +443,8 @@ class ExecuteToolToolIntegrationTest {
         )
         assertEquals(CostLedgerEntryKind.FINALIZED, finalizedCost.kind)
         assertEquals(CostSubjectType.SIMULATION, finalizedCost.subjectType)
-        assertEquals(MonetaryAmountStatus.UNKNOWN, finalizedCost.toolCost.status)
+        assertEquals(MonetaryAmountStatus.KNOWN, finalizedCost.toolCost.status)
+        assertEquals(0.0, finalizedCost.toolCost.usd)
         assertEquals(0L, finalizedCost.toolComputeMillis)
     }
 }

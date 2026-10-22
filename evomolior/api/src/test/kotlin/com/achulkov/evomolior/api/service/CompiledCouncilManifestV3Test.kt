@@ -1,15 +1,26 @@
 package com.achulkov.evomolior.api.service
 
 import com.achulkov.evomolior.core.atlas.FinalOutputSpec
+import com.achulkov.evomolior.core.atlas.PhysicalDimension
+import com.achulkov.evomolior.core.atlas.ToolOpportunityType
+import com.achulkov.evomolior.core.config.AcceptanceProfile
+import com.achulkov.evomolior.core.config.CouncilExecutionPurpose
 import com.achulkov.evomolior.core.contract.GroupTopologyKind
 import com.achulkov.evomolior.core.council.CompiledFieldState
 import com.achulkov.evomolior.core.council.ExecutionEnvelope
 import com.achulkov.evomolior.core.council.GenerationCreditPolicy
 import com.achulkov.evomolior.core.council.InclusiveIntRange
 import com.achulkov.evomolior.core.council.ModelCapabilityCard
+import com.achulkov.evomolior.core.council.QuantitativeToolFieldLocation
+import com.achulkov.evomolior.core.council.QuantitativeToolFieldObligation
+import com.achulkov.evomolior.core.council.QuantitativeToolFieldShape
+import com.achulkov.evomolior.core.council.QuantitativeToolObligation
 import com.achulkov.evomolior.core.council.SandboxCapabilitySummary
 import com.achulkov.evomolior.core.council.SourceAccessPolicySummary
 import com.achulkov.evomolior.core.model.GroupProfileType
+import com.achulkov.evomolior.core.repair.AggregationSemantics
+import com.achulkov.evomolior.core.repair.QuantitySpec
+import com.achulkov.evomolior.core.repair.TimeBasis
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -91,6 +102,16 @@ class CompiledCouncilManifestV3Test {
                 graderAtlas = manifest.graderAtlas.copy(workerAtlasHash = "5".repeat(64))
             )
         )
+        val uncommittedBlueprintSeal = requireNotNull(manifest.workerStartingField.seal)
+            .copy(deliverableBlueprintHash = "f".repeat(64))
+        assertInvalid(
+            manifest.copy(
+                workerStartingField =
+                    manifest.workerStartingField.copy(seal = uncommittedBlueprintSeal),
+                graderStartingField =
+                    manifest.graderStartingField.copy(seal = uncommittedBlueprintSeal),
+            )
+        )
         assertFalse(manifest.copy(manifestHash = "6".repeat(64)).hasValidHash())
     }
 
@@ -122,6 +143,50 @@ class CompiledCouncilManifestV3Test {
                 )
             )
         }
+    }
+
+    @Test
+    fun `resume intent rejects quantitative obligation absent from sealed manifest`() {
+        val candidate = candidate()
+        val obligation = QuantitativeToolObligation(
+            horizonTimeBasis = TimeBasis.HOUR,
+            horizonIntervalCount = 72,
+            allowedOpportunityTypes = setOf(ToolOpportunityType.CALCULATION),
+            requiredFields = listOf(
+                QuantitativeToolFieldObligation(
+                    roleId = "hourly_power",
+                    fieldName = "hourly_power_kw",
+                    location = QuantitativeToolFieldLocation.OUTPUT,
+                    shape = QuantitativeToolFieldShape.HORIZON_SERIES,
+                    quantitySpec = QuantitySpec(
+                        dimension = PhysicalDimension(mapOf("power" to 1)),
+                        unitId = "kW",
+                        scaleToSi = 1_000.0,
+                        aggregation = AggregationSemantics.AVERAGE_OVER_INTERVALS,
+                        timeBasis = TimeBasis.HOUR
+                    )
+                )
+            )
+        )
+
+        requireCompiledCouncilRecoveryIntent(
+            candidate = candidate,
+            expectedCouncilExecutionPurpose = CouncilExecutionPurpose.STANDARD,
+            expectedAcceptanceProfile = AcceptanceProfile.NORMAL,
+            expectedQuantitativeToolObligation = null
+        )
+        val failure = assertFailsWith<IllegalArgumentException> {
+            requireCompiledCouncilRecoveryIntent(
+                candidate = candidate,
+                expectedCouncilExecutionPurpose = CouncilExecutionPurpose.STANDARD,
+                expectedAcceptanceProfile = AcceptanceProfile.NORMAL,
+                expectedQuantitativeToolObligation = obligation
+            )
+        }
+
+        assertTrue(
+            failure.message.orEmpty().contains("quantitative-tool obligation")
+        )
     }
 
     private fun assertInvalid(value: CompiledCouncilCandidateManifestV3) {

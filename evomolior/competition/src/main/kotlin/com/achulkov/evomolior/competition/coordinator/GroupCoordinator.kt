@@ -13,6 +13,7 @@ import com.achulkov.evomolior.competition.leaks.LeakOracle
 import com.achulkov.evomolior.competition.leaks.LeakOracleConfig
 import com.achulkov.evomolior.agents.factory.ProviderCallCostRecorder
 import com.achulkov.evomolior.core.config.LlmBackend
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
 import com.achulkov.evomolior.core.contract.GroupTopologyKind
 import com.achulkov.evomolior.competition.resourcemap.LegacyOwnedNodeYieldApplier
@@ -61,6 +62,7 @@ class GroupCoordinator(
     resourceNodes: List<ResourceNode> = emptyList(),
     openRouterApiKey: String? = null,
     llmBackend: LlmBackend = LlmBackend.OPENROUTER,
+    codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     privacyTransformModelId: String? = null,
     privacyTransformerOverride: (suspend (LeakPacket) -> LeakPacket)? = null,
     topologyKind: GroupTopologyKind = GroupTopologyKind.RING,
@@ -75,6 +77,7 @@ class GroupCoordinator(
             DifferentialPrivacyTransform(
                 openRouterApiKey = it,
                 llmBackend = llmBackend,
+                codexReasoningEffort = codexReasoningEffort,
                 modelId = privacyTransformModelId ?: ModelSelectionConfig.DEFAULT_LEAK_TRANSFORM_MODEL
             )
         }

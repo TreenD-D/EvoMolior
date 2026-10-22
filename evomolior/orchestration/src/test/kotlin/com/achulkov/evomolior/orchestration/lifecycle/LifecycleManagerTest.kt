@@ -1,15 +1,19 @@
 package com.achulkov.evomolior.orchestration.lifecycle
 
+import com.achulkov.evomolior.core.config.CodexRuntimePreset
+
 import com.achulkov.evomolior.core.budget.BudgetLedger
 import com.achulkov.evomolior.core.budget.BudgetConfig
 import com.achulkov.evomolior.core.contract.AgentBootContext
 import com.achulkov.evomolior.core.contract.AgentExecutionPhase
 import com.achulkov.evomolior.core.contract.AgentTtlPolicy
+import com.achulkov.evomolior.core.contract.TtlCheckpointKind
 import com.achulkov.evomolior.core.contract.AtlasSkeletonNodeView
 import com.achulkov.evomolior.core.contract.AtlasSkeletonView
 import com.achulkov.evomolior.core.contract.BlockingAgentAbortException
 import com.achulkov.evomolior.core.contract.CommitType
 import com.achulkov.evomolior.core.contract.ContributionCommit
+import com.achulkov.evomolior.core.contract.PersistExitResult
 import com.achulkov.evomolior.core.contract.RunInputArtifact
 import com.achulkov.evomolior.core.contract.RunInputArtifactKind
 import com.achulkov.evomolior.core.contract.RoleAllocation
@@ -44,6 +48,7 @@ import com.achulkov.evomolior.core.atlas.RewardClass
 import com.achulkov.evomolior.core.atlas.RewardSpec
 import com.achulkov.evomolior.core.model.GroupProfile
 import com.achulkov.evomolior.core.model.GroupProfileType
+import com.achulkov.evomolior.core.model.AgentStatus
 import com.achulkov.evomolior.core.model.Role
 import com.achulkov.evomolior.core.model.SubmissionType
 import com.achulkov.evomolior.orchestration.nested.NestedGroupConfig
@@ -73,9 +78,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -85,10 +95,12 @@ import kotlin.io.path.createTempDirectory
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 /**
@@ -298,7 +310,7 @@ class LifecycleManagerTest {
                 assertTrue(exit.useful)
                 assertEquals(1, summary.usefulExitCount)
                 assertEquals(1, summary.ordinaryExitCount)
-                assertEquals(LeaseState.COMMITTED, state.leases.single().state)
+                assertEquals(LeaseState.ABANDONED, state.leases.single().state)
                 assertEquals(emptyList(), state.grades)
                 assertEquals(null, state.ownerGroupId)
                 assertEquals(emptyList(), state.yieldHistory)
@@ -330,20 +342,26 @@ class LifecycleManagerTest {
     private fun makeManager(
         modelSelectionRandom: Random = Random(0),
         nestedRunner: (suspend (NestedGroupConfig) -> NestedGroupResult)? = null,
+        codexRuntimePreset: CodexRuntimePreset? = null,
         runner: suspend (AgentBootContext, ((BudgetLedger) -> Unit)?) -> Unit
     ): LifecycleManager = makeManagerHarness(
         modelSelectionRandom = modelSelectionRandom,
         nestedRunner = nestedRunner,
+        codexRuntimePreset = codexRuntimePreset,
         runner = runner
     ).manager
 
     private fun makeManagerHarness(
         modelSelectionRandom: Random = Random(0),
         nestedRunner: (suspend (NestedGroupConfig) -> NestedGroupResult)? = null,
+        budgetPollingIntervalMs: Long = 100L,
+        existingSubstrateFactory: SubstrateDatabaseFactory? = null,
+        codexRuntimePreset: CodexRuntimePreset? = null,
         runner: suspend (AgentBootContext, ((BudgetLedger) -> Unit)?) -> Unit
     ): ManagerHarness {
-        val tmpDir = createTempDirectory("lm-test-").toFile()
-        val substrateFactory = SubstrateDatabaseFactory(tmpDir)
+        val substrateFactory = existingSubstrateFactory ?: SubstrateDatabaseFactory(
+            createTempDirectory("lm-test-").toFile()
+        )
         val shuruVmManager = ShuruVmManager()
 
         return ManagerHarness(
@@ -356,10 +374,11 @@ class LifecycleManagerTest {
                 openRouterApiKey = "sk-test",
                 groupProfile = profile,
                 modelSelectionRandom = modelSelectionRandom,
+                codexRuntimePreset = codexRuntimePreset,
                 localAgentRunner = runner,
                 nestedGroupRunBlock = nestedRunner,
                 gracePeriodSeconds = 1,
-                budgetPollingIntervalMs = 100L
+                budgetPollingIntervalMs = budgetPollingIntervalMs
             ),
             substrateFactory = substrateFactory
         )
@@ -886,12 +905,13 @@ class LifecycleManagerTest {
     }
 
     @Test
-    fun `getLiveAgentCount decrements after agent completes`() = runTest {
+    fun `getLiveAgentCount decrements after agent completes`() = kotlinx.coroutines.runBlocking {
         val manager = makeManager { _, onBudgetLedger ->
             val ledger = BudgetLedger("auto", 50.0, 2.5, budgetConfig)
             onBudgetLedger?.invoke(ledger)
             // Agent completes immediately
         }
+        val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
         manager.spawnGeneration(
             allocation = singleResearcherAllocation(),
@@ -899,15 +919,50 @@ class LifecycleManagerTest {
             modelAssignments = emptyMap(),
             modelPools = emptyMap(),
             rolePrompts = emptyMap(),
-            scope = backgroundScope
+            scope = agentScope
         )
-        testScheduler.advanceUntilIdle()
+        awaitRealTimeValue { manager.getLiveAgentCount().takeIf { it == 0 } }
 
         assertEquals(0, manager.getLiveAgentCount(),
             "Live agent count should be 0 after agent completes")
         manager.terminateAll()
-        testScheduler.advanceUntilIdle()
+        agentScope.cancel()
     }
+
+    @Test
+    fun `snapshotLiveAgentBudgets reads current live state`() =
+        kotlinx.coroutines.runBlocking {
+            val runnerStarted = CompletableDeferred<Unit>()
+            val releaseRunner = CompletableDeferred<Unit>()
+            val harness = makeManagerHarness { _, onBudgetLedger ->
+                onBudgetLedger?.invoke(BudgetLedger("snapshot", 50.0, 2.5, budgetConfig))
+                runnerStarted.complete(Unit)
+                releaseRunner.await()
+            }
+            val manager = harness.manager
+            val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+            manager.spawnGeneration(
+                allocation = singleResearcherAllocation(),
+                stageDisclosure = "",
+                modelAssignments = emptyMap(),
+                modelPools = emptyMap(),
+                rolePrompts = emptyMap(),
+                scope = agentScope
+            )
+            withTimeout(2_000L) { runnerStarted.await() }
+
+            val snapshot = awaitRealTimeValue {
+                manager.snapshotLiveAgentBudgets().takeIf { it.size == 1 }
+            }
+            assertEquals(listOf(50.0), snapshot.values.toList())
+
+            releaseRunner.complete(Unit)
+            awaitRealTimeValue {
+                manager.snapshotLiveAgentBudgets().takeIf { it.isEmpty() }
+            }
+            agentScope.cancel()
+        }
 
     @Test
     fun `spawnGeneration draws models from the role pool per agent spawn`() = runTest {
@@ -952,6 +1007,107 @@ class LifecycleManagerTest {
         )
         manager.terminateAll()
         testScheduler.advanceUntilIdle()
+    }
+
+    @Test
+    fun `preset lifecycle selection respects exact weighted boundaries`() {
+        val preset = CodexRuntimePreset.MIXED_FAMILIES
+        val cases = listOf(
+            Triple(Role.Outlier, 0, CodexRuntimePreset.LUNA),
+            Triple(Role.Outlier, 84, CodexRuntimePreset.LUNA),
+            Triple(Role.Outlier, 85, CodexRuntimePreset.SOL),
+            Triple(Role.Outlier, 91, CodexRuntimePreset.SOL),
+            Triple(Role.Outlier, 92, CodexRuntimePreset.TERRA),
+            Triple(Role.Outlier, 98, CodexRuntimePreset.TERRA),
+            Triple(Role.Outlier, 99, CodexRuntimePreset.ASTRA),
+            Triple(Role.Planner, 49, CodexRuntimePreset.SOL),
+            Triple(Role.Planner, 50, CodexRuntimePreset.TERRA),
+            Triple(Role.Critic, 49, CodexRuntimePreset.SOL),
+            Triple(Role.Critic, 50, CodexRuntimePreset.TERRA),
+            Triple(Role.Inspector, 49, CodexRuntimePreset.SOL),
+            Triple(Role.Inspector, 50, CodexRuntimePreset.TERRA),
+            Triple(Role.PerspectiveTaker, 49, CodexRuntimePreset.SOL),
+            Triple(Role.PerspectiveTaker, 50, CodexRuntimePreset.TERRA)
+        )
+        cases.forEach { (role, draw, expected) ->
+            val random = object : Random() {
+                override fun nextBits(bitCount: Int): Int = error("Unexpected random call")
+                override fun nextInt(until: Int): Int {
+                    assertEquals(100, until)
+                    return draw
+                }
+            }
+            val manager = makeManager(
+                modelSelectionRandom = random,
+                codexRuntimePreset = preset
+            ) { _, _ -> }
+            assertEquals(
+                expected,
+                manager.resolveModelForRole(
+                    role, preset.runtimeAssignments(), preset.runtimeModelPools()
+                )
+            )
+        }
+    }
+
+    @Test
+    fun `preset lifecycle singleton and explicit overrides precede distributions`() {
+        val manager = makeManager(
+            codexRuntimePreset = CodexRuntimePreset.MIXED_FAMILIES,
+            modelSelectionRandom = object : Random() {
+                override fun nextBits(bitCount: Int): Int = error("Singleton must not sample")
+            }
+        ) { _, _ -> }
+        assertEquals(
+            CodexRuntimePreset.LUNA,
+            manager.resolveModelForRole(
+                Role.Planner,
+                mapOf(Role.Planner.name to CodexRuntimePreset.ASTRA),
+                mapOf(Role.Planner.name to listOf(CodexRuntimePreset.LUNA))
+            )
+        )
+        assertEquals(
+            CodexRuntimePreset.ASTRA,
+            manager.resolveModelForRole(
+                Role.Outlier, emptyMap(),
+                CodexRuntimePreset.MIXED_FAMILIES.runtimeModelPools(),
+                explicitModelAssignment = CodexRuntimePreset.ASTRA
+            )
+        )
+    }
+
+    @Test
+    fun `full Luna lifecycle fallback cannot select legacy provider models`() {
+        val manager = makeManager(codexRuntimePreset = CodexRuntimePreset.FULL_LUNA) { _, _ -> }
+        Role.entries.forEach { role ->
+            assertEquals(
+                CodexRuntimePreset.LUNA,
+                manager.resolveModelForRole(role, emptyMap(), emptyMap())
+            )
+        }
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            manager.resolveModelForRole(
+                Role.Researcher, mapOf(Role.Researcher.name to "openai/gpt-4o-mini"), emptyMap()
+            )
+        }
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            manager.resolveModelForRole(
+                Role.Researcher, emptyMap(),
+                mapOf(Role.Researcher.name to listOf("openai/gpt-4o-mini"))
+            )
+        }
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            manager.resolveModelForRole(
+                Role.Planner, emptyMap(), emptyMap(),
+                explicitModelAssignment = CodexRuntimePreset.ASTRA
+            )
+        }
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            manager.resolveModelForRole(
+                Role.Planner, emptyMap(),
+                mapOf(Role.Planner.name to listOf(CodexRuntimePreset.ASTRA))
+            )
+        }
     }
 
     @Test
@@ -1310,7 +1466,7 @@ class LifecycleManagerTest {
         manager.configureRunArtifacts(
             inputArtifacts = emptyList(),
             artifactsMountPath = null,
-            initialContextAllowedHosts = setOf("qwencloud-hackathon.devpost.com")
+            initialContextAllowedHosts = setOf("reference.example.com")
         )
 
         manager.spawnSpecialAgent(
@@ -1326,10 +1482,168 @@ class LifecycleManagerTest {
         val seenContext = awaitRealTimeValue { seenContexts.firstOrNull() }
         manager.terminateAll()
 
-        assertTrue("qwencloud-hackathon.devpost.com" in seenContext.sourceAllowedHosts)
+        assertTrue("reference.example.com" in seenContext.sourceAllowedHosts)
         assertTrue("docs.example.com" in seenContext.sourceAllowedHosts)
         assertTrue("help.aliyun.com" in seenContext.sourceAllowedHosts)
         assertEquals(auditFile.absolutePath, seenContext.sourceAccessAuditPath)
+    }
+
+    @Test
+    fun `budget telemetry retains settled unused credits without changing legacy availability`() = runTest {
+        val finish = CompletableDeferred<Unit>()
+        val ready = CompletableDeferred<BudgetLedger>()
+        val manager = makeManager { context, register ->
+            val ledger = BudgetLedger(context.agentId, context.allocatedBudget, 2.5, budgetConfig)
+            register?.invoke(ledger)
+            ledger.deductRaw(12.0, "telemetry-test")
+            ready.complete(ledger)
+            finish.await()
+        }
+        val observations = java.util.concurrent.CopyOnWriteArrayList<LifecycleBudgetTelemetry>()
+        manager.onBudgetTelemetryChanged = { observations += it }
+        manager.spawnGeneration(
+            allocation = singleResearcherAllocation(),
+            stageDisclosure = "",
+            modelAssignments = emptyMap(),
+            rolePrompts = emptyMap(),
+            scope = backgroundScope
+        )
+        ready.await()
+        val live = manager.snapshotBudgetTelemetry(1)
+        assertEquals(50.0, live.allocatedCredits)
+        assertEquals(50.0, live.liveAllocatedCredits)
+        assertEquals(38.0, live.liveCredits)
+        assertEquals(12.0, live.spentCredits)
+        assertEquals(0.0, live.returnedCredits)
+        assertEquals(1, live.liveAgentCount)
+        finish.complete(Unit)
+        awaitRealTimeValue { manager.getLiveAgentCount().takeIf { it == 0 } }
+        awaitRealTimeValue { observations.lastOrNull()?.takeIf { it.liveAgentCount == 0 } }
+        val settled = manager.snapshotBudgetTelemetry(1)
+        assertEquals(50.0, settled.allocatedCredits)
+        assertEquals(0.0, settled.liveAllocatedCredits)
+        assertEquals(0.0, settled.liveCredits)
+        assertEquals(12.0, settled.spentCredits)
+        assertEquals(38.0, settled.returnedCredits)
+        assertEquals(0, settled.liveAgentCount)
+        assertEquals(38.0, live.liveCredits, "Prior observation must remain immutable")
+        assertEquals(0.0, manager.snapshotBudgetTelemetry(2).allocatedCredits)
+        manager.terminateAll()
+        assertEquals(settled.returnedCredits, manager.snapshotBudgetTelemetry(1).returnedCredits)
+    }
+
+    @Test
+    fun `targeted quiescence timeout retains executing agent ownership`() = runTest {
+        val ready = CompletableDeferred<String>()
+        val finish = CompletableDeferred<Unit>()
+        val manager = makeManager { context, _ ->
+            ready.complete(context.agentId)
+            withContext(NonCancellable) { finish.await() }
+        }
+        manager.spawnGeneration(
+            allocation = singleResearcherAllocation(),
+            stageDisclosure = "",
+            modelAssignments = emptyMap(),
+            rolePrompts = emptyMap(),
+            scope = backgroundScope
+        )
+        val agentId = ready.await()
+        manager.terminateAgent(agentId)
+        assertFailsWith<TimeoutCancellationException> {
+            manager.awaitAgentQuiescence(agentId, timeoutMs = 100)
+        }
+        assertEquals(1, manager.snapshotBudgetTelemetry(1).liveAgentCount)
+        assertEquals(0.0, manager.snapshotBudgetTelemetry(1).returnedCredits)
+        finish.complete(Unit)
+        withContext(Dispatchers.Default) {
+            manager.awaitAgentQuiescence(agentId, timeoutMs = 5_000)
+        }
+        assertEquals(0, manager.snapshotBudgetTelemetry(1).liveAgentCount)
+        assertEquals(50.0, manager.snapshotBudgetTelemetry(1).returnedCredits)
+        manager.terminateAll()
+    }
+
+    @Test
+    fun `candidate staged stop carries expected marker and preserves killed exit accounting`() = runTest {
+        val started = CompletableDeferred<String>()
+        val stopped = CompletableDeferred<kotlinx.coroutines.CancellationException>()
+        val harness = makeManagerHarness { context, _ ->
+            started.complete(context.agentId)
+            try {
+                awaitCancellation()
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                stopped.complete(error)
+                throw error
+            }
+        }
+        val manager = harness.manager
+        manager.spawnGeneration(
+            allocation = singleResearcherAllocation(),
+            stageDisclosure = "",
+            modelAssignments = emptyMap(),
+            rolePrompts = emptyMap(),
+            scope = backgroundScope
+        )
+        val agentId = started.await()
+        assertTrue(manager.terminateAgentAfterCandidateStaged(agentId))
+        val cancellation = stopped.await()
+        assertTrue(cancellation is com.achulkov.evomolior.core.contract.ExpectedAgentStopCancellationException)
+        assertEquals("candidate_staged", cancellation.reason)
+        withContext(Dispatchers.Default) {
+            manager.awaitAgentQuiescence(agentId, timeoutMs = 5_000)
+        }
+        val exit = WorkerExecutionRepository(harness.substrateFactory.get("run-test", "group-0"))
+            .exits("run-test", "group-0").single()
+        assertTrue(exit.wasKilled, "Controlled cancellation must not manufacture natural completion")
+        assertEquals(0, manager.getLiveAgentCount())
+        assertFalse(manager.terminateAgentAfterCandidateStaged(agentId))
+        manager.terminateAll()
+    }
+
+    @Test
+    fun `polling includes prior policy refund while another agent spends`() = runTest {
+        val ordinal = java.util.concurrent.atomic.AtomicInteger()
+        val abort = CompletableDeferred<Unit>()
+        val survivorLedger = CompletableDeferred<BudgetLedger>()
+        val harness = makeManagerHarness { context, register ->
+            val ledger = BudgetLedger(context.agentId, context.allocatedBudget, 2.5, budgetConfig)
+            register?.invoke(ledger)
+            if (ordinal.getAndIncrement() == 0) {
+                abort.await()
+                ledger.deductRaw(12.0, "aborted-spend")
+                throw BlockingAgentAbortException("blocking-test")
+            } else {
+                survivorLedger.complete(ledger)
+                awaitCancellation()
+            }
+        }
+        val manager = harness.manager
+        val available = java.util.concurrent.atomic.AtomicReference(-1.0)
+        manager.onBudgetChanged = { available.set(it) }
+        manager.spawnGeneration(
+            allocation = singleResearcherAllocation().copy(
+                entries = listOf(RoleAllocationEntry(Role.Researcher, 2, 50.0)),
+                totalBudgetCeiling = 100.0
+            ),
+            stageDisclosure = "",
+            modelAssignments = emptyMap(),
+            rolePrompts = emptyMap(),
+            scope = backgroundScope
+        )
+        val survivor = survivorLedger.await()
+        abort.complete(Unit)
+        awaitRealTimeValue { available.get().takeIf { it == 100.0 } }
+        survivor.deductRaw(10.0, "survivor-spend")
+        testScheduler.advanceTimeBy(200)
+        awaitRealTimeValue { available.get().takeIf { it == 90.0 } }
+        val telemetry = manager.snapshotBudgetTelemetry(1)
+        assertEquals(100.0, telemetry.allocatedCredits)
+        assertEquals(50.0, telemetry.liveAllocatedCredits)
+        assertEquals(40.0, telemetry.liveCredits)
+        assertEquals(22.0, telemetry.spentCredits)
+        assertEquals(38.0, telemetry.returnedCredits)
+        assertEquals(1, telemetry.liveAgentCount)
+        manager.terminateAll()
     }
 
     @Test
@@ -1362,6 +1676,11 @@ class LifecycleManagerTest {
         awaitRealTimeValue { lastBudgetTotal.takeIf { it >= 0.0 } }
         assertEquals(0, manager.getLiveAgentCount(), "Blocking failure must remove the agent from the live set")
         assertEquals(50.0, lastBudgetTotal, 0.001, "Blocking failure must refund the full agent allocation")
+        val telemetry = manager.snapshotBudgetTelemetry(1)
+        assertEquals(50.0, telemetry.allocatedCredits)
+        assertEquals(12.0, telemetry.spentCredits, "A policy refund must not erase actual ledger consumption")
+        assertEquals(38.0, telemetry.returnedCredits, "Returned telemetry is unused balance, not policy refund")
+        assertEquals(0, telemetry.liveAgentCount)
         manager.terminateAll()
         testScheduler.advanceUntilIdle()
     }
@@ -1547,17 +1866,171 @@ class LifecycleManagerTest {
     }
 
     @Test
-    fun `terminateAll does not block on cancellation resistant in-process agent`() = kotlinx.coroutines.runBlocking {
-        val releaseRunner = CompletableDeferred<Unit>()
-        val runnerStarted = CompletableDeferred<Unit>()
-        val manager = makeManager { _, onBudgetLedger ->
-            val ledger = BudgetLedger("auto", 50.0, 2.5, budgetConfig)
-            onBudgetLedger?.invoke(ledger)
-            runnerStarted.complete(Unit)
-            withContext(NonCancellable) {
-                releaseRunner.await()
+    fun `shutdown drain waits for delayed provider cancellation and persists cleanup exactly once`() =
+        kotlinx.coroutines.runBlocking {
+            val started = CompletableDeferred<Unit>()
+            val cancellationReceived = CompletableDeferred<Unit>()
+            val releaseProvider = CompletableDeferred<Unit>()
+            val returned = java.util.concurrent.atomic.AtomicBoolean(false)
+            val deaths = java.util.concurrent.atomic.AtomicInteger()
+            val harness = makeManagerHarness { _, _ ->
+                started.complete(Unit)
+                try {
+                    awaitCancellation()
+                } finally {
+                    withContext(NonCancellable) {
+                        cancellationReceived.complete(Unit)
+                        releaseProvider.await()
+                        returned.set(true)
+                    }
+                }
+            }
+            val manager = harness.manager
+            manager.onAgentDied = { _, _ -> deaths.incrementAndGet() }
+            val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                manager.spawnGeneration(
+                    allocation = singleResearcherAllocation(),
+                    stageDisclosure = "",
+                    modelAssignments = emptyMap(),
+                    modelPools = emptyMap(),
+                    rolePrompts = emptyMap(),
+                    scope = agentScope
+                )
+                withTimeout(2_000L) { started.await() }
+                withTimeout(2_000L) { manager.terminateAll() }
+                withTimeout(2_000L) { cancellationReceived.await() }
+                val repository = WorkerExecutionRepository(
+                    harness.substrateFactory.get("run-test", "group-0")
+                )
+                val frozenExit = repository.exits("run-test", "group-0").single()
+                val firstDrain = async(start = CoroutineStart.UNDISPATCHED) {
+                    manager.awaitQuiescence(5_000L)
+                }
+                val concurrentDrain = async(start = CoroutineStart.UNDISPATCHED) {
+                    manager.awaitQuiescence(5_000L)
+                }
+                assertFalse(firstDrain.isCompleted)
+                assertFalse(concurrentDrain.isCompleted)
+                assertFalse(manager.publicationAccounting().isQuiescent)
+                assertEquals(0, deaths.get())
+                releaseProvider.complete(Unit)
+
+                assertTrue(firstDrain.await().isQuiescent)
+                assertTrue(concurrentDrain.await().isQuiescent)
+                assertTrue(returned.get())
+                val finalState = repository.runtimeStateEvents(
+                    "run-test", "group-0", frozenExit.agentId.value, frozenExit.round
+                ).last().state
+                assertTrue(finalState.executionSettled)
+                assertTrue(finalState.costSettled)
+                assertTrue(finalState.cleanupComplete)
+                manager.terminateAll()
+                assertTrue(manager.awaitQuiescence(2_000L).isQuiescent)
+                assertEquals(listOf(frozenExit), repository.exits("run-test", "group-0"))
+                assertEquals(1, deaths.get())
+                assertEquals(0, manager.lifecycleReconciliationMetrics().deathCallbackDuplicateCount)
+            } finally {
+                releaseProvider.complete(Unit)
+                agentScope.coroutineContext[kotlinx.coroutines.Job]?.cancelAndJoin()
             }
         }
+
+    @Test
+    fun `shutdown drain times out truthfully and caller cancellation does not settle stuck runner`() =
+        kotlinx.coroutines.runBlocking {
+            val started = CompletableDeferred<Unit>()
+            val releaseProvider = CompletableDeferred<Unit>()
+            val harness = makeManagerHarness { _, _ ->
+                withContext(NonCancellable) {
+                    started.complete(Unit)
+                    releaseProvider.await()
+                }
+            }
+            val manager = harness.manager
+            val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                manager.spawnGeneration(
+                    allocation = singleResearcherAllocation(),
+                    stageDisclosure = "",
+                    modelAssignments = emptyMap(),
+                    modelPools = emptyMap(),
+                    rolePrompts = emptyMap(),
+                    scope = agentScope
+                )
+                withTimeout(2_000L) { started.await() }
+                withTimeout(2_000L) { manager.terminateAll() }
+                val before = manager.publicationAccounting()
+                val began = System.nanoTime()
+                withTimeout(5_000L) {
+                    assertFailsWith<TimeoutCancellationException> {
+                        manager.awaitQuiescence(100L)
+                    }
+                }
+                assertTrue((System.nanoTime() - began) / 1_000_000L < 4_000L)
+                assertEquals(before, manager.publicationAccounting())
+                assertEquals(1, before.liveNonDaemonAgentIds.size)
+                assertFalse(before.isQuiescent)
+
+                val cancelledWaiter = async(start = CoroutineStart.UNDISPATCHED) {
+                    manager.awaitQuiescence()
+                }
+                withTimeout(2_000L) { cancelledWaiter.cancelAndJoin() }
+                assertTrue(cancelledWaiter.isCancelled)
+                assertEquals(before, manager.publicationAccounting())
+                val repository = WorkerExecutionRepository(
+                    harness.substrateFactory.get("run-test", "group-0")
+                )
+                val state = repository.runtimeStateEvents(
+                    "run-test", "group-0", before.liveNonDaemonAgentIds.single(),
+                    singleResearcherAllocation().generation
+                ).last().state
+                assertFalse(state.executionSettled)
+                assertFalse(state.costSettled)
+                assertFalse(state.cleanupComplete)
+                releaseProvider.complete(Unit)
+                assertTrue(manager.awaitQuiescence(5_000L).isQuiescent)
+            } finally {
+                releaseProvider.complete(Unit)
+                agentScope.coroutineContext[kotlinx.coroutines.Job]?.cancelAndJoin()
+            }
+        }
+
+    @Test
+    fun `shutdown drain handles execution cancelled before launch body begins`() =
+        kotlinx.coroutines.runBlocking {
+            val invoked = java.util.concurrent.atomic.AtomicBoolean(false)
+            val manager = makeManager { _, _ -> invoked.set(true) }
+            val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            agentScope.cancel()
+            manager.spawnGeneration(
+                allocation = singleResearcherAllocation(),
+                stageDisclosure = "",
+                modelAssignments = emptyMap(),
+                modelPools = emptyMap(),
+                rolePrompts = emptyMap(),
+                scope = agentScope
+            )
+            manager.terminateAll()
+            assertTrue(manager.awaitQuiescence(5_000L).isQuiescent)
+            assertFalse(invoked.get())
+            assertFailsWith<IllegalArgumentException> { manager.awaitQuiescence(0L) }
+        }
+
+    @Test
+    fun `cancellation resistant in-process agent blocks quiescence until execution finishes`() =
+        kotlinx.coroutines.runBlocking {
+        val releaseRunner = CompletableDeferred<Unit>()
+        val runnerStarted = CompletableDeferred<Unit>()
+        val harness = makeManagerHarness { _, onBudgetLedger ->
+                val ledger = BudgetLedger("auto", 50.0, 2.5, budgetConfig)
+                onBudgetLedger?.invoke(ledger)
+                runnerStarted.complete(Unit)
+                withContext(NonCancellable) {
+                    releaseRunner.await()
+                }
+            }
+        val manager = harness.manager
         val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
         manager.spawnGeneration(
@@ -1575,10 +2048,194 @@ class LifecycleManagerTest {
             manager.terminateAll()
         }
 
-        assertEquals(0, manager.getLiveAgentCount())
+        assertEquals(1, manager.getLiveAgentCount())
+        assertEquals(
+            1,
+            WorkerExecutionRepository(
+                harness.substrateFactory.get("run-test", "group-0")
+            ).exits("run-test", "group-0").size
+        )
+        assertFalse(manager.publicationAccounting().isQuiescent)
         releaseRunner.complete(Unit)
+        awaitRealTimeValue {
+            manager.publicationAccounting().takeIf { it.isQuiescent }
+        }
+        assertEquals(0, manager.getLiveAgentCount())
         agentScope.cancel()
     }
+
+    @Test
+    fun `durable exit precedes fallible lease cleanup and retry remains non-quiescent`() =
+        kotlinx.coroutines.runBlocking {
+            val cleanupAttempts = java.util.concurrent.atomic.AtomicInteger()
+            val deathCallbackCount = java.util.concurrent.atomic.AtomicInteger()
+            val durableBeforeCleanup = CompletableDeferred<Unit>()
+            val harness = makeManagerHarness(budgetPollingIntervalMs = 60_000L) { _, _ -> }
+            seedWorkerWip(harness.substrateFactory)
+            val manager = harness.manager
+            manager.configureWorkerAuthority { request ->
+                assignedWorkerAuthority(
+                    request = request,
+                    finalizeLease = {
+                        val exits = WorkerExecutionRepository(
+                            harness.substrateFactory.get("run-test", "group-0")
+                        ).exits("run-test", "group-0")
+                        assertEquals(1, exits.size)
+                        assertEquals(request.agentId, exits.single().agentId.value)
+                        durableBeforeCleanup.complete(Unit)
+                        if (cleanupAttempts.incrementAndGet() == 1) {
+                            error("transient lease cleanup failure")
+                        }
+                    }
+                )
+            }
+            manager.onAgentDied = { _, _ -> deathCallbackCount.incrementAndGet() }
+            val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+            try {
+                manager.spawnGeneration(
+                    allocation = singleResearcherAllocation(),
+                    stageDisclosure = "",
+                    modelAssignments = emptyMap(),
+                    modelPools = emptyMap(),
+                    rolePrompts = emptyMap(),
+                    scope = agentScope
+                )
+                withTimeout(2_000L) { durableBeforeCleanup.await() }
+
+                val duringRetry = manager.publicationAccounting()
+                assertEquals(1, duringRetry.exitedNonDaemonAgentIds.size)
+                assertTrue(duringRetry.unaccountedNonDaemonAgentIds.isEmpty())
+                assertFalse(duringRetry.isQuiescent)
+                assertEquals(0, deathCallbackCount.get())
+
+                withTimeout(2_000L) { manager.terminateAll() }
+
+                assertEquals(2, cleanupAttempts.get())
+                assertEquals(1, deathCallbackCount.get())
+                assertEquals(
+                    1,
+                    WorkerExecutionRepository(
+                        harness.substrateFactory.get("run-test", "group-0")
+                    ).exits("run-test", "group-0").size
+                )
+                assertTrue(manager.publicationAccounting().isQuiescent)
+            } finally {
+                agentScope.cancel()
+            }
+        }
+
+    @Test
+    fun `ttl expiry cleans frozen authority but blocks quiescence until runner finishes`() =
+        kotlinx.coroutines.runBlocking {
+            val releaseRunner = CompletableDeferred<Unit>()
+            val runnerStarted = CompletableDeferred<Unit>()
+            val agentDied = CompletableDeferred<Unit>()
+            val leaseFinalizationCount = java.util.concurrent.atomic.AtomicInteger()
+            val deathCallbackCount = java.util.concurrent.atomic.AtomicInteger()
+            val harness = makeManagerHarness(budgetPollingIntervalMs = 10L) { _, onBudgetLedger ->
+                val ledger = BudgetLedger("ttl-worker", 50.0, 2.5, budgetConfig)
+                onBudgetLedger?.invoke(ledger)
+                runnerStarted.complete(Unit)
+                withContext(NonCancellable) {
+                    releaseRunner.await()
+                }
+            }
+            seedWorkerWip(harness.substrateFactory)
+            val manager = harness.manager
+            manager.configureWorkerAuthority { request ->
+                val expiry = kotlin.time.Clock.System.now() + 2.seconds
+                assignedWorkerAuthority(
+                    request = request,
+                    finalizeLease = { leaseFinalizationCount.incrementAndGet() }
+                ).copy(
+                    assignedLease = WorkerLeaseAssignment(
+                        leaseId = "ttl-lease-${request.agentId}",
+                        nodeId = NodeId(requireNotNull(request.wipTaskClaim).nodeId),
+                        expiresAt = expiry,
+                        replicationSlot = 0
+                    ),
+                    ttlPolicy = AgentTtlPolicy(
+                        lifetimeSeconds = 1L,
+                        deadline = expiry
+                    )
+                )
+            }
+            manager.onAgentDied = { _, _ ->
+                deathCallbackCount.incrementAndGet()
+                agentDied.complete(Unit)
+            }
+            val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+            try {
+                manager.spawnGeneration(
+                    allocation = singleResearcherAllocation(),
+                    stageDisclosure = "",
+                    modelAssignments = emptyMap(),
+                    modelPools = emptyMap(),
+                    rolePrompts = emptyMap(),
+                    scope = agentScope
+                )
+                withTimeout(2_000L) { runnerStarted.await() }
+
+                val repository = WorkerExecutionRepository(
+                    harness.substrateFactory.get("run-test", "group-0")
+                )
+                val exit = awaitRealTimeValue {
+                    repository.exits("run-test", "group-0").singleOrNull()
+                }
+                assertTrue(exit.wasKilled)
+                assertEquals(1, leaseFinalizationCount.get())
+                assertEquals(0, deathCallbackCount.get())
+                assertEquals(
+                    listOf(
+                        TtlCheckpointKind.WORK_WARNING,
+                        TtlCheckpointKind.COMMIT_SELECTION_REQUIRED,
+                        TtlCheckpointKind.BROAD_EXPLORATION_DISABLED,
+                        TtlCheckpointKind.DEATH_NOTE_GRACE,
+                        TtlCheckpointKind.TERMINATED
+                    ),
+                    repository.checkpointsForAgent("run-test", "group-0", exit.agentId.value)
+                        .map { it.checkpoint }
+                )
+                assertEquals(1, manager.getLiveAgentCount())
+                assertFalse(manager.publicationAccounting().isQuiescent)
+                val releasedBeforeRunnerSettlement = assertNotNull(
+                    harness.substrateFactory.get("run-test", "group-0")
+                        .wipTaskDao()
+                        .getByNodeId("node-worker", "run-test", "group-0")
+                )
+                assertEquals("unclaimed", releasedBeforeRunnerSettlement.status)
+                assertEquals(1, releasedBeforeRunnerSettlement.abandonCount)
+
+                releaseRunner.complete(Unit)
+                withTimeout(2_000L) { agentDied.await() }
+                awaitRealTimeValue {
+                    manager.publicationAccounting().takeIf { it.isQuiescent }
+                }
+
+                assertEquals(1, leaseFinalizationCount.get())
+                assertEquals(1, deathCallbackCount.get())
+                assertEquals(0, manager.getLiveAgentCount())
+                val releasedWip = assertNotNull(
+                    harness.substrateFactory.get("run-test", "group-0")
+                        .wipTaskDao()
+                        .getByNodeId("node-worker", "run-test", "group-0")
+                )
+                assertEquals("unclaimed", releasedWip.status)
+                assertEquals(1, releasedWip.abandonCount)
+
+                delay(100L)
+
+                assertEquals(1, repository.exits("run-test", "group-0").size)
+                assertEquals(1, leaseFinalizationCount.get())
+                assertEquals(1, deathCallbackCount.get())
+            } finally {
+                releaseRunner.complete(Unit)
+                manager.terminateAll()
+                agentScope.cancel()
+            }
+        }
 
     @Test
     @OptIn(kotlin.time.ExperimentalTime::class)
@@ -1625,9 +2282,8 @@ class LifecycleManagerTest {
             releaseRunner.complete(Unit)
             withTimeout(2_000L) {
                 while (
-                    agentScope.coroutineContext[kotlinx.coroutines.Job]
-                        ?.children
-                        ?.any { it.isActive } == true
+                    deathCallbackCount.get() != 1 ||
+                    !manager.publicationAccounting().isQuiescent
                 ) {
                     delay(10L)
                 }
@@ -1636,6 +2292,174 @@ class LifecycleManagerTest {
             assertEquals(1, finalizationCount.get())
             assertEquals(1, deathCallbackCount.get())
             agentScope.cancel()
+        }
+
+    @Test
+    fun `concurrent kill requests preserve one frozen exit identity`() =
+        kotlinx.coroutines.runBlocking {
+            val releaseRunner = CompletableDeferred<Unit>()
+            val runnerStarted = CompletableDeferred<Unit>()
+            val harness = makeManagerHarness { _, _ ->
+                runnerStarted.complete(Unit)
+                withContext(NonCancellable) {
+                    releaseRunner.await()
+                }
+            }
+            val manager = harness.manager
+            val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+            try {
+                manager.spawnGeneration(
+                    allocation = singleResearcherAllocation(),
+                    stageDisclosure = "",
+                    modelAssignments = emptyMap(),
+                    modelPools = emptyMap(),
+                    rolePrompts = emptyMap(),
+                    scope = agentScope
+                )
+                withTimeout(2_000L) { runnerStarted.await() }
+
+                kotlinx.coroutines.coroutineScope {
+                    repeat(32) {
+                        launch(Dispatchers.Default) {
+                            manager.terminateAll()
+                        }
+                    }
+                }
+
+                val repository = WorkerExecutionRepository(
+                    harness.substrateFactory.get("run-test", "group-0")
+                )
+                assertEquals(1, repository.exits("run-test", "group-0").size)
+                assertFalse(manager.publicationAccounting().isQuiescent)
+
+                releaseRunner.complete(Unit)
+                awaitRealTimeValue {
+                    manager.publicationAccounting().takeIf { it.isQuiescent }
+                }
+                assertEquals(1, repository.exits("run-test", "group-0").size)
+            } finally {
+                releaseRunner.complete(Unit)
+                manager.terminateAll()
+                agentScope.cancel()
+            }
+        }
+
+    @Test
+    fun `kill request wins classification when execution completes concurrently`() =
+        kotlinx.coroutines.runBlocking {
+            val releaseRunner = CompletableDeferred<Unit>()
+            val runnerStarted = CompletableDeferred<Unit>()
+            val harness = makeManagerHarness { _, _ ->
+                runnerStarted.complete(Unit)
+                releaseRunner.await()
+            }
+            val manager = harness.manager
+            val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+            try {
+                manager.spawnGeneration(
+                    allocation = singleResearcherAllocation(),
+                    stageDisclosure = "",
+                    modelAssignments = emptyMap(),
+                    modelPools = emptyMap(),
+                    rolePrompts = emptyMap(),
+                    scope = agentScope
+                )
+                withTimeout(2_000L) { runnerStarted.await() }
+
+                val termination = launch(Dispatchers.Default) {
+                    manager.terminateAll()
+                }
+                withTimeout(2_000L) {
+                    manager.agentStates.first { states ->
+                        states.values.singleOrNull()?.status == AgentStatus.DyingGracefully
+                    }
+                }
+                releaseRunner.complete(Unit)
+                termination.join()
+
+                val repository = WorkerExecutionRepository(
+                    harness.substrateFactory.get("run-test", "group-0")
+                )
+                val exit = awaitRealTimeValue {
+                    repository.exits("run-test", "group-0").singleOrNull()
+                }
+                assertTrue(exit.wasKilled)
+                awaitRealTimeValue {
+                    manager.publicationAccounting().takeIf { it.isQuiescent }
+                }
+            } finally {
+                releaseRunner.complete(Unit)
+                manager.terminateAll()
+                agentScope.cancel()
+            }
+        }
+
+    @Test
+    fun `restart projection reuses frozen exit and blocks until orphan execution settles`() =
+        kotlinx.coroutines.runBlocking {
+            val releaseRunner = CompletableDeferred<Unit>()
+            val runnerStarted = CompletableDeferred<Unit>()
+            val original = makeManagerHarness(budgetPollingIntervalMs = 60_000L) { _, _ ->
+                runnerStarted.complete(Unit)
+                withContext(NonCancellable) {
+                    releaseRunner.await()
+                }
+            }
+            val originalScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                original.manager.spawnGeneration(
+                    allocation = singleResearcherAllocation(),
+                    stageDisclosure = "",
+                    modelAssignments = emptyMap(),
+                    rolePrompts = emptyMap(),
+                    scope = originalScope
+                )
+                withTimeout(2_000L) { runnerStarted.await() }
+                original.manager.terminateAll()
+
+                val repository = WorkerExecutionRepository(
+                    original.substrateFactory.get("run-test", "group-0")
+                )
+                val frozenExit = repository.exits("run-test", "group-0").single()
+                val restarted = makeManagerHarness(
+                    existingSubstrateFactory = original.substrateFactory,
+                    runner = { _, _ -> }
+                ).manager
+
+                val restartAccounting = restarted.publicationAccounting()
+                assertFalse(restartAccounting.isQuiescent)
+                assertEquals(
+                    setOf(frozenExit.agentId.value),
+                    restartAccounting.orphanedUnsettledAgentIds
+                )
+                assertEquals(
+                    PersistExitResult.AlreadyPersisted(
+                        AtlasHashing.hashAgentExitRecord(frozenExit)
+                    ),
+                    repository.recordExit(frozenExit)
+                )
+
+                releaseRunner.complete(Unit)
+                awaitRealTimeValue {
+                    original.manager.publicationAccounting().takeIf { it.isQuiescent }
+                }
+                assertTrue(restarted.publicationAccounting().isQuiescent)
+                val metrics = restarted.lifecycleReconciliationMetrics()
+                assertEquals(0, metrics.exitIdentityConflictCount)
+                assertEquals(0, metrics.exitFinalizationRetryCount)
+                assertEquals(0, metrics.registeredWithoutExitCount)
+                assertEquals(0, metrics.exitWithoutRegisteredAgentCount)
+                assertEquals(0, metrics.liveExecutionAfterArchiveBarrier)
+                assertEquals(0, metrics.deathCallbackDuplicateCount)
+                assertEquals(0, metrics.unsettledCostReservationCount)
+                assertNotNull(metrics.maxExitToQuiescenceMs)
+            } finally {
+                releaseRunner.complete(Unit)
+                original.manager.terminateAll()
+                originalScope.cancel()
+            }
         }
 
     @Test

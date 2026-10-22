@@ -129,25 +129,76 @@ object RunMetricCatalog {
 }
 
 /**
+ * Fixed completion-blueprint Section 11.3 closure catalog in canonical publication order.
+ */
+object RunClosureMetricCatalog {
+    private val canonicalMetricIds: List<String> = listOf(
+        "exit_identity_conflicts",
+        "exit_finalization_retries",
+        "tool_contract_transport_failure_rate",
+        "tool_repair_diagnostics_emitted",
+        "tool_repair_diagnostic_consumption_rate",
+        "repair_to_promotion_rate",
+        "repeated_identical_tool_failure_rate",
+        "receiver_component_coverage",
+        "interim_snapshot_coverage",
+        "recovery_component_coverage",
+        "provisional_claim_with_authority_rate",
+        "accepted_package_deterministic_content_rate",
+    )
+
+    /** Exact ordered closure metric IDs required by explicit acceptance publication. */
+    val orderedMetricIds: List<String>
+        get() = canonicalMetricIds.toList()
+}
+
+/** Declares what persisted activity the run-metric observations measure. */
+@Serializable
+enum class RunMetricMeasurementScope {
+    /** Measures the complete terminal attempt, including work in a later partially closed round. */
+    TERMINAL_ATTEMPTED_WORK
+}
+
+/**
  * Complete, ordered Section 18.2 metric export for one run.
  *
  * @param schemaVersion Stable wire-schema identifier; must equal [SCHEMA_VERSION].
  * @param runId Non-blank run identifier.
+ * @param measurementScope Explicit activity scope represented by the observations.
+ * @param decisionAuthorityThroughRound Last fully archived zero-based round supplying decision
+ * authority, or `-1` when no round reached archival.
  * @param observations Exactly one observation for every catalog metric in canonical order.
+ * @param closureObservations Exact Section 11.3 closure block, or empty for historical decoders
+ * and callers that have not requested explicit acceptance publication.
  */
 @Serializable
 data class RunMetricsV1(
     val schemaVersion: String = SCHEMA_VERSION,
     val runId: String,
+    val measurementScope: RunMetricMeasurementScope =
+        RunMetricMeasurementScope.TERMINAL_ATTEMPTED_WORK,
+    val decisionAuthorityThroughRound: Int = -1,
     val observations: List<RunMetricObservation>,
+    val closureObservations: List<RunMetricObservation> = emptyList(),
 ) {
     init {
         require(schemaVersion == SCHEMA_VERSION) {
             "Run metrics schema version must be $SCHEMA_VERSION"
         }
         require(runId.isNotBlank()) { "Run ID must not be blank" }
+        require(decisionAuthorityThroughRound >= -1) {
+            "Run metrics decision-authority round cannot be less than -1"
+        }
         require(observations.map(RunMetricObservation::metricId) == RunMetricCatalog.orderedMetricIds) {
             "Run metrics must contain the exact catalog once in canonical order"
+        }
+        require(
+            closureObservations.isEmpty() ||
+                closureObservations.map(RunMetricObservation::metricId) ==
+                RunClosureMetricCatalog.orderedMetricIds
+        ) {
+            "Run closure metrics must be empty or contain the exact closure catalog once " +
+                "in canonical order"
         }
     }
 

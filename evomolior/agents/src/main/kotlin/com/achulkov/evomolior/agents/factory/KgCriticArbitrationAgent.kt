@@ -2,6 +2,7 @@ package com.achulkov.evomolior.agents.factory
 
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
 import com.achulkov.evomolior.core.config.LlmBackend
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
 import com.achulkov.evomolior.core.contract.CriticReview
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
 
@@ -20,6 +21,7 @@ import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
 class KgCriticArbitrationAgent(
     openRouterApiKey: String,
     llmBackend: LlmBackend = LlmBackend.OPENROUTER,
+    codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     criticModelId: String = ModelSelectionConfig.DEFAULT_CRITIC_PIPELINE_MODEL,
     deterministicReviewRunner: (suspend (
         submission: StagingSubmissionEntity,
@@ -32,6 +34,7 @@ class KgCriticArbitrationAgent(
     private val criticReviewAgent = CriticReviewAgent(
         openRouterApiKey = openRouterApiKey,
         llmBackend = llmBackend,
+        codexReasoningEffort = codexReasoningEffort,
         criticModelId = criticModelId,
         systemPrompt = KG_ARBITRATION_SYSTEM_PROMPT,
         deterministicReviewRunner = deterministicReviewRunner,

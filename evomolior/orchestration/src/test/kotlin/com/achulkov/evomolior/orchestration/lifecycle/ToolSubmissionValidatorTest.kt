@@ -131,7 +131,7 @@ class ToolSubmissionValidatorTest {
     }
 
     @Test
-    fun `validator reports bounded expected and actual output on exact mismatch`() = runTest {
+    fun `validator hides expected and actual output on exact mismatch`() = runTest {
         val dataRoot = createTempDirectory("tool-submission-validator-mismatch-test").toFile()
         val validator = ToolSubmissionValidator(
             runId = "run-tool-validator",
@@ -153,16 +153,20 @@ class ToolSubmissionValidatorTest {
                         "properties":{"value":{"type":"number"}},
                         "required":["value"]
                       },
-                      "code": "cat >/dev/null\necho '{\"value\":2}'",
-                      "tests": [{"input": {}, "expectedOutput":{"value":1}}]
+                      "code": "cat >/dev/null\necho '{\"value\":2.0}'",
+                      "tests": [{"input": {}, "expectedOutput":{"value":1.0}}]
                     }
                 """.trimIndent()
             )
         )
 
         assertTrue(result is ToolSubmissionValidationResult.Invalid)
-        assertTrue(result.reason.contains("expected={\"value\":1}"))
-        assertTrue(result.reason.contains("actual={\"value\":2}"))
+        assertEquals(
+            "tool_validation_unexpected_output: test[0] output did not match expectedOutput.",
+            result.reason
+        )
+        assertTrue(!result.reason.contains("1.0"))
+        assertTrue(!result.reason.contains("2.0"))
     }
 
     @Test
@@ -185,6 +189,109 @@ class ToolSubmissionValidatorTest {
         val result = validator.validate(formulaSubmission(commitment, program))
 
         assertEquals(ToolSubmissionValidationResult.Valid, result)
+    }
+
+    @Test
+    fun `sealed contract preflight rejects algebraically equivalent noncanonical formula DSL`() =
+        runTest {
+            val dataRoot = createTempDirectory(
+                "tool-submission-validator-formula-reference-mismatch"
+            ).toFile()
+            val commitment = formulaCommitment()
+            val validator = ToolSubmissionValidator(
+                runId = "run-tool-validator",
+                groupId = "group-0",
+                toolsMountHostPath = dataRoot.resolve("tools").absolutePath,
+                opportunityResolver = { commitment }
+            )
+            val algebraicallyEquivalentProgram = ToolDslProgram(
+                kind = ToolDslKind.FORMULA,
+                outputs = listOf(
+                    ToolDslOutput(
+                        "normalized",
+                        ToolDslExpression.Binary(
+                            operation = ToolDslBinaryOperation.MULTIPLY,
+                            left = ToolDslExpression.Input("value"),
+                            right = ToolDslExpression.Literal(JsonPrimitive(1.0))
+                        )
+                    )
+                )
+            )
+
+            val result = assertIs<ToolSubmissionValidationResult.Invalid>(
+                validator.validate(formulaSubmission(commitment, algebraicallyEquivalentProgram))
+            )
+
+            assertEquals(
+                "tool_promotion_contract_formula_reference_program_mismatch",
+                result.reason
+            )
+        }
+
+    @Test
+    fun `sealed contract preflight rejects formula opportunity without reference authority`() =
+        runTest {
+            val dataRoot = createTempDirectory(
+                "tool-submission-validator-missing-formula-reference"
+            ).toFile()
+            val commitment = formulaCommitment().copy(
+                opportunity = formulaCommitment().opportunity.copy(
+                    formulaDslReferenceSemantics = null,
+                    formulaDslReferenceProgram = null
+                )
+            ).withComputedHash()
+            val validator = ToolSubmissionValidator(
+                runId = "run-tool-validator",
+                groupId = "group-0",
+                toolsMountHostPath = dataRoot.resolve("tools").absolutePath,
+                opportunityResolver = { commitment }
+            )
+            val candidate = ToolDslProgram(
+                kind = ToolDslKind.FORMULA,
+                outputs = listOf(
+                    ToolDslOutput("normalized", ToolDslExpression.Input("value"))
+                )
+            )
+
+            val result = assertIs<ToolSubmissionValidationResult.Invalid>(
+                validator.validate(formulaSubmission(commitment, candidate))
+            )
+
+            assertEquals(
+                "tool_promotion_contract_missing_formula_reference_program",
+                result.reason
+            )
+        }
+
+    @Test
+    fun `configured authority resolver rejects unknown tool opportunity`() = runTest {
+        val dataRoot = createTempDirectory("tool-submission-validator-unknown-authority").toFile()
+        val validator = ToolSubmissionValidator(
+            runId = "run-tool-validator",
+            groupId = "group-0",
+            toolsMountHostPath = dataRoot.resolve("tools").absolutePath,
+            opportunityResolver = { null }
+        )
+
+        val result = assertIs<ToolSubmissionValidationResult.Invalid>(
+            validator.validate(
+                toolSubmission(
+                    """
+                        {
+                          "name":"generic-tool",
+                          "domain":"calculation",
+                          "language":"shell",
+                          "inputSchema":{"type":"object"},
+                          "outputSchema":{"type":"object"},
+                          "code":"cat >/dev/null\necho '{}'",
+                          "tests":[{"input":{},"expectedOutput":{}}]
+                        }
+                    """.trimIndent()
+                )
+            )
+        )
+
+        assertEquals("tool_promotion_unknown_opportunity", result.reason)
     }
 
     @Test
@@ -504,7 +611,16 @@ class ToolSubmissionValidatorTest {
                 behavior = ToolBehavior.DETERMINISTIC,
                 promotionTestIds = setOf("identity-test"),
                 maximumRuntimeMillis = 5_000,
-                maximumOutputBytes = 4_096
+                maximumOutputBytes = 4_096,
+                formulaDslReferenceSemantics =
+                    com.achulkov.evomolior.core.atlas.FormulaDslReferenceSemantics
+                        .DIMENSIONAL_ANALYSIS_V1,
+                formulaDslReferenceProgram = ToolDslProgram(
+                    kind = ToolDslKind.FORMULA,
+                    outputs = listOf(
+                        ToolDslOutput("normalized", ToolDslExpression.Input("value"))
+                    )
+                )
             )
         ).withComputedHash()
 

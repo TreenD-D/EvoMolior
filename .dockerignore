@@ -1,5 +1,8 @@
 .gradle
 .gradle-user
+.gradle-tmp
+.evomolior-gradle-home
+.system-cache-relief
 **/build
 .git
 .idea

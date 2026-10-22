@@ -62,8 +62,26 @@ class DeathNoteProtocolTest {
             groupId: String,
             generation: Int
         ) = emptyList<StagingSubmissionEntity>()
+        override suspend fun getPromotedHypotheses(
+            runId: String,
+            groupId: String,
+            limit: Int
+        ) = emptyList<StagingSubmissionEntity>()
+        override suspend fun getReviewedToolsByGeneration(
+            runId: String,
+            groupId: String,
+            generation: Int
+        ) = emptyList<StagingSubmissionEntity>()
         override fun observePending(runId: String, groupId: String): Flow<List<StagingSubmissionEntity>> = flowOf(emptyList())
         override suspend fun getByAgent(runId: String, groupId: String, agentId: String) = emptyList<StagingSubmissionEntity>()
+        override suspend fun getPriorRejectedToolsForNode(
+            runId: String,
+            groupId: String,
+            authoringNodeId: String,
+            beforeGeneration: Int,
+            limit: Int,
+            offset: Int
+        ) = emptyList<StagingSubmissionEntity>()
         override suspend fun countPendingByType(runId: String, groupId: String, type: String) = 0
         override suspend fun countPending(runId: String, groupId: String) = 0
         override suspend fun countSubstantivePromotedByGeneration(

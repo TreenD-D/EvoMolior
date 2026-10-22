@@ -21,6 +21,7 @@ import com.achulkov.evomolior.substrate.db.entity.KnowledgeBaseEntryEntity
 import com.achulkov.evomolior.substrate.db.entity.EventLogEntryEntity
 import com.achulkov.evomolior.substrate.db.entity.EventTypes
 import com.achulkov.evomolior.substrate.publication.PublicationStateRepository
+import com.achulkov.evomolior.substrate.cost.CostLedgerRepository
 import com.achulkov.evomolior.substrate.worker.WorkerExecutionRepository
 import com.achulkov.evomolior.substrate.worker.ContributionGraphRepository
 import com.achulkov.evomolior.substrate.atlas.AtlasTransactionRepository
@@ -72,12 +73,55 @@ import java.util.zip.ZipOutputStream
  * - **ADVERSARIAL_DISCRIMINATOR_FEEDBACK** — per-group failure-focused critic brief
  *
  * @param dbFactory Substrate database factory for opening per-group databases.
+ * @param closureMetricInputProvider Live-only closure counters supplied by the run owner.
  */
 open class RunArchiveService(
     private val dbFactory: SubstrateDatabaseFactory,
     @Suppress("unused")
-    private val json: Json = Json { ignoreUnknownKeys = true; prettyPrint = false }
+    private val json: Json = Json { ignoreUnknownKeys = true; prettyPrint = false },
+    private val closureMetricInputProvider: (String) -> RunClosureMetricRuntimeInput? = { null },
 ) {
+
+    /**
+     * Compiles the bounded accepted outcome archive without touching substrate publication state.
+     *
+     * Production RunService wiring remains a separate integration step so an accepted v5 bundle
+     * cannot be emitted accidentally by the historical archive path.
+     */
+    internal open fun buildOutcomeAwareAcceptedBundle(
+        request: AcceptedOutcomeArchiveRequest,
+    ): OutcomeArchive = RunOutcomeArchiveService().archiveAccepted(request)
+
+    /** Loads exact persisted admission bytes and binds them to one terminal outcome. */
+    internal open fun acceptanceAdmissionBytesForOutcome(
+        runId: String,
+        acceptanceProfile: com.achulkov.evomolior.core.config.AcceptanceProfile,
+        distributionManifestSha256: String,
+    ): ByteArray? {
+        val file = File(
+            dbFactory.runControlDir(runId),
+            AcceptanceAdmissionArtifact.FILE_NAME,
+        )
+        if (acceptanceProfile == com.achulkov.evomolior.core.config.AcceptanceProfile.NORMAL) {
+            return null
+        }
+        val bytes = requireNotNull(file.takeIf(File::isFile)?.readBytes()) {
+            "Non-normal outcome requires ${AcceptanceAdmissionArtifact.FILE_NAME}"
+        }
+        decodeAcceptanceAdmissionArtifact(bytes).requireMatches(
+            runId = runId,
+            acceptanceProfile = acceptanceProfile,
+            distributionManifestSha256 = distributionManifestSha256,
+        )
+        return bytes
+    }
+
+    /** Complete non-accepted metric export plus its acceptance-policy diagnostics. */
+    internal data class NonAcceptedRunMetricsExport(
+        val artifact: RunMetricsV1Artifact,
+        val missingMeasurementInfrastructureMetricIds: Set<String>,
+        val appendixBPolicyFailures: List<String>
+    )
 
     /**
      * Archives all relevant artefacts for a completed run.
@@ -102,6 +146,7 @@ open class RunArchiveService(
         completionRecord: RunCompletionRecord? = null
     ) = withContext(Dispatchers.IO) {
         Napier.i("RunArchiveService: archiving run=$runId winner=$winnerId groups=${groupIds.size}")
+        requireSettledCostReservations(runId)
 
         val resumedPublicationRepository = PublicationStateRepository(dbFactory.getAtlas(runId))
         val resumedPublication = resumedPublicationRepository.latest(runId)
@@ -329,7 +374,7 @@ open class RunArchiveService(
                         finalGeneration = finalGeneration,
                         requestedOutputSpec = requestedOutputSpec,
                         completionRecord = completionRecord
-                    )
+                    ).artifact
                     null
                 }
 
@@ -341,7 +386,7 @@ open class RunArchiveService(
                         finalGeneration = finalGeneration,
                         requestedOutputSpec = requestedOutputSpec,
                         completionRecord = completionRecord
-                    )
+                    ).artifact
                     appendPublicationState(
                         repository = publicationRepository,
                         runId = runId,
@@ -361,6 +406,17 @@ open class RunArchiveService(
                             "METRICS_EXPORTED state lacks exact run-metrics authority"
                         )
                     metricsArtifact = metricsStore.readRequired(runId, expectedMetricsHash)
+                    if (
+                        PersistedRunStateStore.read(
+                            File(
+                                resolveRunRoot(runId),
+                                "control/${PersistedRunStateStore.STATE_FILE_NAME}"
+                            )
+                        )?.acceptanceProfile ==
+                        com.achulkov.evomolior.core.config.AcceptanceProfile.APPENDIX_B_FULL
+                    ) {
+                        AppendixBFullPublicationPolicy.requireAccepted(metricsArtifact.metrics)
+                    }
                     publicationBarrier
                 }
 
@@ -421,14 +477,673 @@ open class RunArchiveService(
         }
     }
 
-    private suspend fun exportRunMetrics(
+    /**
+     * Writes a separate, explicitly non-accepted recovery archive after a completed work cycle.
+     *
+     * This method never advances [PublicationState], writes `RUN_COMPLETED`, claims a winner, or
+     * invokes accepted-publication metric policy.
+     *
+     * @param request Exact public recovery inputs and optional best-effort output.
+     * @return Durable recovered-run authority committed by the recovery bundle.
+     */
+    internal open suspend fun archiveRecoveredRun(
+        request: RecoveredRunArchiveRequest
+    ): RecoveredRunRecord = withContext(Dispatchers.IO) {
+        requireSettledCostReservations(request.runId)
+        val archiveDb = dbFactory.get(request.runId, META_ARCHIVE_GROUP_ID)
+        check(
+            archiveDb.metaArchiveDao()
+                .getByType(ENTRY_RUN_COMPLETED)
+                .none { it.runId == request.runId }
+        ) {
+            "Accepted completion authority already exists for run=${request.runId}"
+        }
+        quarantineUnacceptedResultsBundle(request.runId)
+        val existing = archiveDb.metaArchiveDao()
+            .getByType(ENTRY_RUN_RECOVERED)
+            .singleOrNull { it.runId == request.runId }
+        if (existing != null) {
+            val record = json.decodeFromString(
+                RecoveredRunRecord.serializer(),
+                existing.contentJson
+            )
+            require(record.runId == request.runId) {
+                "Recovered-run marker belongs to another run"
+            }
+            readRecoveryBundleRequired(request.runId, record)
+            return@withContext record
+        }
+
+        val entries = archiveDb.metaArchiveDao().getByRun(request.runId)
+        val startingField = requireNotNull(selectCanonicalStartingFieldEntry(entries)) {
+            "Recovery requires a canonical StartingField"
+        }
+        val runRoot = resolveRunRoot(request.runId)
+        val persistedStateFile = File(
+            runRoot,
+            "control/${PersistedRunStateStore.STATE_FILE_NAME}"
+        ).takeIf(File::isFile)
+        val recoveredDeliverable = request.recoveredOutput?.let { output ->
+            val source = requireNotNull(request.recoveredOutputSource) {
+                "Recovered output requires explicit provenance"
+            }
+            val validated = validateGeneratedOutputFile(output)
+            require(validated.sourceGroupId == request.recoverySourceGroupId) {
+                "Recovered output source group does not match recovery authority"
+            }
+            val recoveredRelativePath = recoveryDeliverablePath(
+                validated.relativePath,
+                validated.mediaType
+            )
+            RecoveredDeliverableRecord(
+                relativePath = recoveredRelativePath,
+                sourceRelativePath = validated.relativePath
+                    .takeIf { it != recoveredRelativePath },
+                mediaType = validated.mediaType,
+                contentHash = validated.contentHash,
+                source = source,
+                sourceGroupId = validated.sourceGroupId,
+                sourceRoundIndex = request.sourceRoundIndex,
+                sourceSubmissionId = validated.sourceSubmissionId
+            )
+        }
+        val committedEntries = linkedMapOf<
+            String,
+            Pair<ByteArray, RecoveryBundleEntryCategory>
+            >()
+
+        fun addCommittedEntry(
+            path: String,
+            bytes: ByteArray,
+            category: RecoveryBundleEntryCategory
+        ) {
+            require(path !in committedEntries) {
+                "Duplicate recovery bundle entry $path"
+            }
+            committedEntries[path] = bytes to category
+        }
+
+        addCommittedEntry(
+            "recovery/recovery-notice.md",
+            request.recoveryNotice.toByteArray(Charsets.UTF_8),
+            RecoveryBundleEntryCategory.RECOVERY_NOTICE
+        )
+        entries.asSequence()
+            .filter { it.entryType == ENTRY_ROUND_SUMMARY }
+            .sortedBy { it.id }
+            .forEach { entry ->
+                val safeId = entry.id.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                addCommittedEntry(
+                    "recovery/round-summaries/$safeId.json",
+                    sanitizeRoundSummaryForRecovery(entry.contentJson),
+                    RecoveryBundleEntryCategory.ROUND_SUMMARY
+                )
+            }
+        RunMetricsV1ArtifactStore(dbFactory)
+            .file(request.runId)
+            .takeIf(File::isFile)
+            ?.let { metricsFile ->
+                addCommittedEntry(
+                    "recovery/${RunMetricsV1ArtifactStore.FILE_NAME}",
+                    metricsFile.readBytes(),
+                    RecoveryBundleEntryCategory.NON_ACCEPTED_RUN_METRICS
+                )
+            }
+        request.diagnosticSweepReport?.let { report ->
+            require(report.runId == request.runId && !report.accepted) {
+                "Acceptance diagnostic report does not match recovery authority"
+            }
+            addCommittedEntry(
+                AcceptanceDiagnosticSweepReport.BUNDLE_PATH,
+                encodeRecoveryDiagnosticSweepReport(report),
+                RecoveryBundleEntryCategory.DIAGNOSTIC_GATE_REPORT
+            )
+        }
+        request.recoveredOutput?.let { output ->
+            val path = requireNotNull(recoveredDeliverable).relativePath
+            addCommittedEntry(
+                "outputs/recovered/$path",
+                output.content.toByteArray(Charsets.UTF_8),
+                RecoveryBundleEntryCategory.RECOVERED_DELIVERABLE
+            )
+        }
+        val sourceInputs = com.achulkov.evomolior.agents.tools.ReportSourceInputs.load(
+            json.decodeFromString(StartingField.serializer(), startingField.contentJson).inputArtifacts,
+            File(runRoot, "artifacts").absolutePath,
+        )
+        committedEntries.toMap().forEach { (path, value) ->
+            if (ReportSourceSidecars.isReport(path, null)) {
+                addCommittedEntry(
+                    ReportSourceSidecars.pathFor(request.runId, path),
+                    ReportSourceSidecars.render(request.runId, path, value.first, sourceInputs),
+                    RecoveryBundleEntryCategory.RECOVERY_NOTICE,
+                )
+            }
+        }
+        val committedAuthorities = committedEntries.entries.map { (path, value) ->
+            RecoveryBundleEntry(
+                path = path,
+                sha256 = sha256Hex(value.first),
+                sizeBytes = value.first.size.toLong(),
+                category = value.second
+            )
+        }.sortedBy(RecoveryBundleEntry::path)
+        val manifest = RecoveryBundleManifest(
+            runId = request.runId,
+            entries = committedAuthorities
+        )
+        val manifestBytes = json.encodeToString(
+            RecoveryBundleManifest.serializer(),
+            manifest
+        ).toByteArray(Charsets.UTF_8)
+        val manifestAuthority = RecoveryBundleEntry(
+            path = RecoveryBundleManifest.MANIFEST_PATH,
+            sha256 = sha256Hex(manifestBytes),
+            sizeBytes = manifestBytes.size.toLong(),
+            category = RecoveryBundleEntryCategory.RECOVERY_MANIFEST
+        )
+        val record = RecoveredRunRecord(
+            runId = request.runId,
+            recoverySourceGroupId = request.recoverySourceGroupId,
+            acceptanceProfile = request.acceptanceProfile,
+            completedRoundCount = request.completedRoundCount,
+            failureClass = request.failureClass,
+            failureSummary = request.failureSummary,
+            opaqueFailureDigest = request.opaqueFailureDigest,
+            normalPublicationState = request.normalPublicationState,
+            requestedOutputSpec = request.requestedOutputSpec,
+            recoveredDeliverables = listOfNotNull(recoveredDeliverable),
+            diagnosticSweepReport = request.diagnosticSweepReport,
+            committedBundleEntries = committedAuthorities,
+            manifestAuthority = manifestAuthority,
+            startingFieldHash = sha256Hex(startingField.contentJson.toByteArray(Charsets.UTF_8)),
+            preRecoveryPersistedRunStateHash = persistedStateFile
+                ?.readBytes()
+                ?.let(::sha256Hex),
+            recoveredAtMs = System.currentTimeMillis()
+        )
+        val recordBytes = json.encodeToString(
+            RecoveredRunRecord.serializer(),
+            record
+        ).toByteArray(Charsets.UTF_8)
+        val recoveryEntries = linkedMapOf<
+            String,
+            Pair<ByteArray, RecoveryBundleEntryCategory>
+            >().apply {
+            putAll(committedEntries)
+            put(
+                RecoveryBundleManifest.RECOVERY_RECORD_PATH,
+                recordBytes to RecoveryBundleEntryCategory.RECOVERY_AUTHORITY
+            )
+            put(
+                RecoveryBundleManifest.MANIFEST_PATH,
+                manifestBytes to RecoveryBundleEntryCategory.RECOVERY_MANIFEST
+            )
+        }
+        val bundleBytes = ByteArrayOutputStream().use { output ->
+            ZipOutputStream(output).use { zip ->
+                recoveryEntries.toSortedMap().forEach { (path, value) ->
+                    zip.putNextEntry(ZipEntry(path).apply { time = ZIP_EPOCH_1980_MS })
+                    zip.write(value.first)
+                    zip.closeEntry()
+                }
+            }
+            output.toByteArray()
+        }
+        verifyRecoveryBundle(bundleBytes, record)
+
+        val bundleFile = recoveryBundleFile(request.runId)
+        bundleFile.parentFile?.mkdirs()
+        val temporaryBundle = File(
+            bundleFile.parentFile,
+            ".${bundleFile.name}.${UUID.randomUUID()}.tmp"
+        )
+        temporaryBundle.writeBytes(bundleBytes)
+        try {
+            runCatching {
+                Files.move(
+                    temporaryBundle.toPath(),
+                    bundleFile.toPath(),
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                )
+            }.getOrElse {
+                Files.move(
+                    temporaryBundle.toPath(),
+                    bundleFile.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                )
+            }
+        } finally {
+            temporaryBundle.delete()
+        }
+
+        request.recoveredOutput?.let { output ->
+            val recoveredFile = File(
+                resolveRunRoot(request.runId),
+                "results/outputs/recovered/${requireNotNull(recoveredDeliverable).relativePath}"
+            )
+            recoveredFile.parentFile?.mkdirs()
+            recoveredFile.writeText(output.content)
+        }
+        val noticeFile = File(
+            resolveRunRoot(request.runId),
+            "results/recovery/recovery-notice.md"
+        )
+        noticeFile.parentFile?.mkdirs()
+        noticeFile.writeText(request.recoveryNotice)
+
+        archiveDb.metaArchiveDao().insert(
+            MetaArchiveEntryEntity(
+                id = "run-recovered-${request.runId}",
+                runId = request.runId,
+                entryType = ENTRY_RUN_RECOVERED,
+                groupId = request.recoverySourceGroupId,
+                label = "Run Recovered (non-accepted) — ${request.runId}",
+                contentJson = json.encodeToString(RecoveredRunRecord.serializer(), record),
+                runObjective = startingField.runObjective,
+                finalScore = null,
+                isFromWinner = false,
+                generation = request.completedRoundCount,
+                archivedAtMs = record.recoveredAtMs
+            )
+        )
+        readRecoveryBundleRequired(request.runId, record)
+        record
+    }
+
+    /**
+     * Removes private grader/sealed-test channels from an archived round summary.
+     *
+     * @param contentJson Persisted round-summary JSON.
+     * @return Canonical public recovery bytes.
+     */
+    internal fun sanitizeRoundSummaryForRecovery(contentJson: String): ByteArray {
+        fun JsonObject.publicScalar(key: String): JsonElement? =
+            this[key]?.also { value ->
+                require(value is JsonPrimitive || value is JsonNull) {
+                    "Recovery round-summary field $key must be scalar"
+                }
+            }
+
+        fun publicDimensions(value: JsonElement?): JsonObject {
+            val dimensions = value as? JsonObject ?: return JsonObject(emptyMap())
+            require(dimensions.values.all { it is JsonPrimitive || it is JsonNull }) {
+                "Recovery dimension scores must be scalar"
+            }
+            return dimensions
+        }
+
+        fun publicScore(
+            source: JsonObject,
+            scalarKeys: List<String>
+        ): JsonObject = buildJsonObject {
+            scalarKeys.forEach { key ->
+                source.publicScalar(key)?.let { put(key, it) }
+            }
+            source["dimensionScores"]?.let {
+                put("dimensionScores", publicDimensions(it))
+            }
+        }
+
+        fun publicGroup(source: JsonObject): JsonObject = buildJsonObject {
+            RECOVERY_GROUP_SCALAR_KEYS.forEach { key ->
+                source.publicScalar(key)?.let { put(key, it) }
+            }
+            (source["deterministicScore"] as? JsonObject)?.let {
+                put(
+                    "deterministicScore",
+                    publicScore(it, RECOVERY_DETERMINISTIC_SCORE_KEYS)
+                )
+            }
+            (source["disclosureCheckin"] as? JsonObject)?.let {
+                put(
+                    "disclosureCheckin",
+                    publicScore(it, RECOVERY_DISCLOSURE_SCORE_KEYS)
+                )
+            }
+            (source["blindScore"] as? JsonObject)?.let {
+                put("blindScore", publicScore(it, RECOVERY_BLIND_SCORE_KEYS))
+            }
+        }
+
+        val source = json.parseToJsonElement(contentJson) as? JsonObject
+            ?: error("Recovery round summary must be a JSON object")
+        val sanitized = if ("groupSummaries" in source) {
+            val groups = source["groupSummaries"] as? JsonArray
+                ?: error("Recovery run-level round summary has no group array")
+            buildJsonObject {
+                RECOVERY_ROUND_SCALAR_KEYS.forEach { key ->
+                    source.publicScalar(key)?.let { put(key, it) }
+                }
+                put(
+                    "groupSummaries",
+                    JsonArray(
+                        groups.map { group ->
+                            publicGroup(
+                                group as? JsonObject
+                                    ?: error("Recovery group summary must be an object")
+                            )
+                        }
+                    )
+                )
+            }
+        } else {
+            publicGroup(source)
+        }
+        return json.encodeToString(
+            JsonElement.serializer(),
+            sanitized
+        ).toByteArray(Charsets.UTF_8)
+    }
+
+    /**
+     * Reads and verifies an existing non-accepted recovery bundle.
+     *
+     * @param runId Owning run.
+     * @return Verified bundle bytes, or null when the run has no recovery authority.
+     */
+    internal suspend fun readRecoveryBundle(runId: String): ByteArray? =
+        withContext(Dispatchers.IO) {
+            recoveryBundleFile(runId).takeIf(File::isFile)?.readBytes()?.let { bytes ->
+                require(!resultsBundleFile(runId).exists()) {
+                    "Recovery archive cannot coexist with an accepted archive"
+                }
+                require(
+                    !File(resolveRunRoot(runId), "results/startup-diagnostic.zip").exists()
+                ) { "Recovery archive cannot coexist with a startup diagnostic archive" }
+                runCatching {
+                    RunOutcomeArchiveService().verifyProvisional(bytes)
+                }.getOrNull()?.let { authority ->
+                    require(authority.runId == runId) {
+                        "Provisional recovery archive belongs to another run"
+                    }
+                    return@withContext bytes
+                }
+            }
+            val archiveDb = dbFactory.get(runId, META_ARCHIVE_GROUP_ID)
+            val marker = archiveDb.metaArchiveDao()
+                .getByType(ENTRY_RUN_RECOVERED)
+                .singleOrNull { it.runId == runId }
+                ?: return@withContext null
+            val record = json.decodeFromString(
+                RecoveredRunRecord.serializer(),
+                marker.contentJson
+            )
+            readRecoveryBundleRequired(runId, record)
+        }
+
+    /** Reads the immutable provisional-v2 terminal authority, when one exists. */
+    internal suspend fun readProvisionalRecoveredRunRecord(
+        runId: String
+    ): ProvisionalRecoveredRunRecordV2? = withContext(Dispatchers.IO) {
+        val file = recoveryBundleFile(runId).takeIf(File::isFile) ?: return@withContext null
+        require(!resultsBundleFile(runId).exists()) {
+            "Provisional recovery archive cannot coexist with an accepted archive"
+        }
+        require(
+            !File(resolveRunRoot(runId), "results/startup-diagnostic.zip").exists()
+        ) { "Provisional recovery archive cannot coexist with a startup diagnostic archive" }
+        runCatching {
+            RunOutcomeArchiveService().verifyProvisional(file.readBytes())
+        }.getOrNull()?.also { authority ->
+            require(authority.runId == runId) {
+                "Provisional recovery archive belongs to another run"
+            }
+        }
+    }
+
+    /** Reads a verified outcome-aware accepted-v5 archive, when one exists. */
+    internal suspend fun readAcceptedOutcomeArchive(runId: String): ByteArray? =
+        withContext(Dispatchers.IO) {
+            val file = resultsBundleFile(runId).takeIf(File::isFile)
+                ?: return@withContext null
+            val bytes = file.readBytes()
+            require(!recoveryBundleFile(runId).exists()) {
+                "Accepted archive cannot coexist with a recovery archive"
+            }
+            require(
+                !File(resolveRunRoot(runId), "results/startup-diagnostic.zip").exists()
+            ) { "Accepted archive cannot coexist with a startup diagnostic archive" }
+            val verification = RunManifestVerifier.verify(bytes, expectedRunId = runId)
+            bytes.takeIf {
+                verification.isValid && verification.manifest?.schemaVersion == 5
+            }?.also {
+                RunOutcomeArchiveService().acceptedPublicationHistory(it)
+            }
+        }
+
+    /** Reads and verifies the diagnostic-only startup outcome archive, when one exists. */
+    internal suspend fun readStartupDiagnosticArchive(runId: String): ByteArray? =
+        withContext(Dispatchers.IO) {
+            val file = File(resolveRunRoot(runId), "results/startup-diagnostic.zip")
+                .takeIf(File::isFile)
+                ?: return@withContext null
+            require(!resultsBundleFile(runId).exists()) {
+                "Startup diagnostic cannot coexist with an accepted archive"
+            }
+            require(!recoveryBundleFile(runId).exists()) {
+                "Startup diagnostic cannot coexist with a recovery archive"
+            }
+            val bytes = file.readBytes()
+            val authority = RunOutcomeArchiveService().verifyStartup(bytes)
+            require(authority.runId == runId) {
+                "Startup diagnostic archive belongs to another run"
+            }
+            RunOutcomeArchiveService().startupPublicationHistory(bytes)
+            bytes
+        }
+
+    private fun recoveryDeliverablePath(
+        sourceRelativePath: String,
+        mediaType: String
+    ): String {
+        val basename = sourceRelativePath.substringAfterLast('/').lowercase()
+        if (basename !in setOf("final_answer.md", "final-answer.md")) {
+            return sourceRelativePath
+        }
+        val extension = when {
+            mediaType.substringBefore(';').trim().equals(
+                "application/json",
+                ignoreCase = true
+            ) -> "json"
+            mediaType.substringBefore(';').trim().startsWith(
+                "text/html",
+                ignoreCase = true
+            ) -> "html"
+            else -> "md"
+        }
+        return "recovered-deliverable.$extension"
+    }
+
+    /**
+     * Reads an existing recovered-run marker without treating it as normal completion.
+     *
+     * @param runId Owning run.
+     * @return Recovered-run authority, or null when absent.
+     */
+    internal suspend fun readRecoveredRunRecord(runId: String): RecoveredRunRecord? =
+        withContext(Dispatchers.IO) {
+            dbFactory.get(runId, META_ARCHIVE_GROUP_ID)
+                .metaArchiveDao()
+                .getByType(ENTRY_RUN_RECOVERED)
+                .singleOrNull { it.runId == runId }
+                ?.contentJson
+                ?.let {
+                    json.decodeFromString(RecoveredRunRecord.serializer(), it)
+                }
+        }
+
+    private fun readRecoveryBundleRequired(
+        runId: String,
+        expectedRecord: RecoveredRunRecord
+    ): ByteArray {
+        require(!resultsBundleFile(runId).exists()) {
+            "Recovered run retains an unaccepted normal results.zip"
+        }
+        val bundle = recoveryBundleFile(runId)
+        require(bundle.isFile) {
+            "Recovered-run authority exists without recovery-results.zip"
+        }
+        return bundle.readBytes().also { verifyRecoveryBundle(it, expectedRecord) }
+    }
+
+    private fun quarantineUnacceptedResultsBundle(runId: String) {
+        val normalBundle = resultsBundleFile(runId)
+        if (!normalBundle.exists()) return
+        require(normalBundle.isFile) {
+            "Unaccepted normal results bundle path is not a file"
+        }
+        val quarantineDirectory = File(
+            resolveRunRoot(runId),
+            "control/rejected-normal-publication"
+        )
+        check(quarantineDirectory.mkdirs() || quarantineDirectory.isDirectory) {
+            "Unable to create rejected normal-publication quarantine"
+        }
+        val quarantinedBundle = File(
+            quarantineDirectory,
+            "results-${UUID.randomUUID()}.zip.quarantined"
+        )
+        Files.move(
+            normalBundle.toPath(),
+            quarantinedBundle.toPath(),
+            java.nio.file.StandardCopyOption.ATOMIC_MOVE
+        )
+        check(!normalBundle.exists() && quarantinedBundle.isFile) {
+            "Unaccepted normal results.zip was not atomically quarantined"
+        }
+    }
+
+    private fun verifyRecoveryBundle(
+        bundleBytes: ByteArray,
+        expectedRecord: RecoveredRunRecord
+    ) {
+        LegacyRecoveryBundleVerifier.verify(bundleBytes, expectedRecord.runId, expectedRecord, json)
+    }
+
+    /**
+     * Exports all 21 observations without applying accepted-publication policy.
+     */
+    internal open suspend fun exportNonAcceptedRunMetrics(
         runId: String,
         groupIds: List<String>,
         startingFieldJson: String,
         finalGeneration: Int,
         requestedOutputSpec: FinalOutputSpec?,
         completionRecord: RunCompletionRecord?
-    ): RunMetricsV1Artifact {
+    ): NonAcceptedRunMetricsExport = withContext(Dispatchers.IO) {
+        exportRunMetrics(
+            runId = runId,
+            groupIds = groupIds,
+            startingFieldJson = startingFieldJson,
+            finalGeneration = finalGeneration,
+            requestedOutputSpec = requestedOutputSpec,
+            completionRecord = completionRecord,
+            requirePublishable = false
+        )
+    }
+
+    /** Exports and enforces the exact accepted-publication metric policy. */
+    internal open suspend fun exportAcceptedRunMetrics(
+        runId: String,
+        groupIds: List<String>,
+        startingFieldJson: String,
+        finalGeneration: Int,
+        requestedOutputSpec: FinalOutputSpec?,
+        completionRecord: RunCompletionRecord?,
+        closureRuntimeInput: RunClosureMetricRuntimeInput? =
+            closureMetricInputProvider(runId),
+    ): RunMetricsV1Artifact = withContext(Dispatchers.IO) {
+        exportRunMetrics(
+            runId = runId,
+            groupIds = groupIds,
+            startingFieldJson = startingFieldJson,
+            finalGeneration = finalGeneration,
+            requestedOutputSpec = requestedOutputSpec,
+            completionRecord = completionRecord,
+            closureRuntimeInput = closureRuntimeInput,
+            requirePublishable = true
+        ).artifact
+    }
+
+    /**
+     * Compiles and enforces accepted metrics without publishing the standalone control artifact.
+     *
+     * The accepted package candidate and metrics bytes become durable together in the atomic
+     * outcome archive; standalone authorities are persisted only after that archive exists.
+     */
+    internal open suspend fun compileAcceptedRunMetrics(
+        runId: String,
+        groupIds: List<String>,
+        startingFieldJson: String,
+        finalGeneration: Int,
+        requestedOutputSpec: FinalOutputSpec?,
+        completionRecord: RunCompletionRecord?,
+        acceptedDecisionPackage: com.achulkov.evomolior.core.deliverable.ReceiverDecisionPackage,
+        closureRuntimeInput: RunClosureMetricRuntimeInput? =
+            closureMetricInputProvider(runId),
+    ): RunMetricsV1Artifact = withContext(Dispatchers.IO) {
+        exportRunMetrics(
+            runId = runId,
+            groupIds = groupIds,
+            startingFieldJson = startingFieldJson,
+            finalGeneration = finalGeneration,
+            requestedOutputSpec = requestedOutputSpec,
+            completionRecord = completionRecord,
+            closureRuntimeInput = closureRuntimeInput,
+            acceptedDecisionPackage = acceptedDecisionPackage,
+            persistArtifact = false,
+            requirePublishable = true,
+        ).artifact
+    }
+
+    /**
+     * Compiles non-accepted run metrics for atomic inclusion in a recovery archive.
+     *
+     * The artifact is not persisted as accepted control-plane authority.
+     */
+    internal open suspend fun compileProvisionalRunMetrics(
+        runId: String,
+        groupIds: List<String>,
+        startingFieldJson: String,
+        finalGeneration: Int,
+        requestedOutputSpec: FinalOutputSpec?,
+        closureRuntimeInput: RunClosureMetricRuntimeInput?,
+    ): RunMetricsV1Artifact = withContext(Dispatchers.IO) {
+        exportRunMetrics(
+            runId = runId,
+            groupIds = groupIds,
+            startingFieldJson = startingFieldJson,
+            finalGeneration = finalGeneration,
+            requestedOutputSpec = requestedOutputSpec,
+            completionRecord = null,
+            closureRuntimeInput = closureRuntimeInput,
+            acceptedDecisionPackage = null,
+            persistArtifact = false,
+            requirePublishable = false,
+        ).artifact
+    }
+
+    /** Publishes an already policy-checked accepted metrics artifact idempotently. */
+    internal open fun persistCompiledRunMetrics(
+        artifact: RunMetricsV1Artifact,
+    ): RunMetricsV1Artifact = RunMetricsV1ArtifactStore(dbFactory).persist(artifact)
+
+    private suspend fun exportRunMetrics(
+        runId: String,
+        groupIds: List<String>,
+        startingFieldJson: String,
+        finalGeneration: Int,
+        requestedOutputSpec: FinalOutputSpec?,
+        completionRecord: RunCompletionRecord?,
+        closureRuntimeInput: RunClosureMetricRuntimeInput? =
+            closureMetricInputProvider(runId),
+        acceptedDecisionPackage:
+            com.achulkov.evomolior.core.deliverable.ReceiverDecisionPackage? = null,
+        persistArtifact: Boolean = true,
+        requirePublishable: Boolean = true
+    ): NonAcceptedRunMetricsExport {
         val persistedState = PersistedRunStateStore.read(
             File(resolveRunRoot(runId), "control/${PersistedRunStateStore.STATE_FILE_NAME}")
         )
@@ -483,11 +1198,30 @@ open class RunArchiveService(
                 acceptanceProfile = acceptanceProfile,
                 finalOutputSpec = outputSpec,
                 completionRecord = completionRecord,
-                claimLedgerJsonl = claimLedgerJsonl
+                claimLedgerJsonl = claimLedgerJsonl,
+                closureRuntimeInput = closureRuntimeInput,
+                acceptedDecisionPackage = acceptedDecisionPackage,
             )
         )
-        export.requirePublishable(acceptanceProfile)
-        return RunMetricsV1ArtifactStore(dbFactory).persist(export.metrics)
+        if (requirePublishable) {
+            export.requirePublishable(acceptanceProfile)
+        }
+        return NonAcceptedRunMetricsExport(
+            artifact = RunMetricsV1ArtifactStore(dbFactory).let { store ->
+                val compiled = store.compile(export.metrics)
+                if (persistArtifact) store.persist(compiled) else compiled
+            },
+            missingMeasurementInfrastructureMetricIds =
+                export.missingMeasurementInfrastructureMetricIds,
+            appendixBPolicyFailures = if (
+                acceptanceProfile ==
+                com.achulkov.evomolior.core.config.AcceptanceProfile.APPENDIX_B_FULL
+            ) {
+                AppendixBFullPublicationPolicy.failures(export.metrics)
+            } else {
+                emptyList()
+            }
+        )
     }
 
     private fun verifyBundleBeforeManifestHash(
@@ -601,6 +1335,10 @@ open class RunArchiveService(
 
         val runRoot = resolveRunRoot(runId)
         val artifactsRoot = File(runRoot, "artifacts")
+        val sourceInputs = com.achulkov.evomolior.agents.tools.ReportSourceInputs.load(
+            startingField.inputArtifacts,
+            artifactsRoot.absolutePath,
+        )
         val persistedStateFile = File(
             runRoot,
             "control/${PersistedRunStateStore.STATE_FILE_NAME}"
@@ -816,6 +1554,16 @@ open class RunArchiveService(
                         sha256 = sha256Hex(content),
                         mediaType = mediaType,
                         finalDeliverableReferences = finalReferences
+                    )
+                }
+                if (category == RunManifestEntryCategory.OUTPUT &&
+                    ReportSourceSidecars.isReport(normalizedPath, mediaType)
+                ) {
+                    addEntry(
+                        ReportSourceSidecars.pathFor(runId, normalizedPath),
+                        ReportSourceSidecars.render(runId, normalizedPath, content, sourceInputs),
+                        RunManifestEntryCategory.ARCHIVE,
+                        "text/markdown; charset=utf-8",
                     )
                 }
             }
@@ -1187,9 +1935,106 @@ open class RunArchiveService(
         bundleFile
     }
 
+    /** Atomically persists one already-verified outcome-specific archive. */
+    internal suspend fun writeOutcomeArchive(
+        runId: String,
+        archive: OutcomeArchive
+    ): File = withContext(Dispatchers.IO) {
+        require(archive.outcomeManifest.runId == runId) {
+            "Outcome archive belongs to another run"
+        }
+        requireSettledCostReservations(runId)
+        val target = when (archive.outcomeManifest.outcomeClass) {
+            com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+                .ACCEPTED_DECISION_PACKAGE -> resultsBundleFile(runId)
+            com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+                .PROVISIONAL_DECISION_PACKAGE -> recoveryBundleFile(runId)
+            com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+                .STARTUP_DIAGNOSTIC_PACKAGE ->
+                File(resolveRunRoot(runId), "results/startup-diagnostic.zip")
+        }
+        val startupDiagnosticFile =
+            File(resolveRunRoot(runId), "results/startup-diagnostic.zip")
+        when (archive.outcomeManifest.outcomeClass) {
+            com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+                .ACCEPTED_DECISION_PACKAGE -> {
+                require(!recoveryBundleFile(runId).exists()) {
+                    "Accepted outcome cannot coexist with a recovery archive"
+                }
+                require(!startupDiagnosticFile.exists()) {
+                    "Accepted outcome cannot coexist with a startup diagnostic archive"
+                }
+            }
+            com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+                .PROVISIONAL_DECISION_PACKAGE -> {
+                require(!resultsBundleFile(runId).exists()) {
+                    "Recovery outcome cannot coexist with an accepted archive"
+                }
+                require(!startupDiagnosticFile.exists()) {
+                    "Recovery outcome cannot coexist with a startup diagnostic archive"
+                }
+            }
+            com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+                .STARTUP_DIAGNOSTIC_PACKAGE -> {
+                require(!resultsBundleFile(runId).exists()) {
+                    "Startup diagnostic cannot coexist with an accepted archive"
+                }
+                require(!recoveryBundleFile(runId).exists()) {
+                    "Startup diagnostic cannot coexist with a recovery archive"
+                }
+            }
+        }
+        target.takeIf(File::isFile)?.let { existing ->
+            require(existing.readBytes().contentEquals(archive.bytes)) {
+                "Outcome archive identity is immutable"
+            }
+            return@withContext existing
+        }
+        target.parentFile?.mkdirs()
+        val temporary = File(target.parentFile, ".${target.name}.${UUID.randomUUID()}.tmp")
+        temporary.writeBytes(archive.bytes)
+        try {
+            runCatching {
+                Files.move(
+                    temporary.toPath(),
+                    target.toPath(),
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE
+                )
+            }.getOrElse {
+                Files.move(temporary.toPath(), target.toPath())
+            }
+        } finally {
+            temporary.delete()
+        }
+        target
+    }
+
+    private suspend fun requireSettledCostReservations(runId: String) {
+        val ledger = CostLedgerRepository(
+            dbFactory.get(runId, COST_LEDGER_GROUP_ID)
+        )
+        ledger.closeForPublication(runId)
+        try {
+            val entries = ledger.entriesForRun(runId)
+            val roles = entries.mapNotNull { it.groupId?.value }.distinct()
+                .filter { dbFactory.dbFilePath(runId, it).isFile }
+                .flatMap { groupId ->
+                    WorkerExecutionRepository(dbFactory.get(runId, groupId)).registrations(runId, groupId)
+                }
+                .associate { (it.groupId.value to it.agentId.value) to it.role }
+            ProviderArchiveSummary.render(runId, entries, roles).forEach { Napier.i(it) }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            // Observational logging must not add an acceptance gate after the strict ledger closure.
+            Napier.w("Provider archival summary unavailable for run=$runId; ledger remains authoritative", error)
+        }
+    }
+
     companion object {
         /** Pseudo-group ID used for run-level meta-archive database. */
         private const val META_ARCHIVE_GROUP_ID = "__meta_archive__"
+        private const val COST_LEDGER_GROUP_ID = "__cost_ledger__"
         private const val ZIP_EPOCH_1980_MS = 315_532_800_000L
 
         const val ENTRY_STARTING_FIELD   = "STARTING_FIELD"
@@ -1210,11 +2055,48 @@ open class RunArchiveService(
         const val ENTRY_ROUND_SUMMARY    = "ROUND_SUMMARY"
         const val ENTRY_GRADING_SHEET    = "GRADING_SHEET"
         const val ENTRY_RUN_COMPLETED    = "RUN_COMPLETED"
+        const val ENTRY_RUN_RECOVERED    = "RUN_RECOVERED_NON_ACCEPTED"
         const val ENTRY_RUN_GRAPH_MESSAGE = "RUN_GRAPH_MESSAGE"
         const val ENTRY_ADVERSARIAL_DISCRIMINATOR_FEEDBACK = "ADVERSARIAL_DISCRIMINATOR_FEEDBACK"
         const val ENTRY_ADVERSARIAL_DISCRIMINATOR_REWARD = "ADVERSARIAL_DISCRIMINATOR_REWARD"
         const val ENTRY_GRADER_GROUP_FEEDBACK = "GRADER_GROUP_FEEDBACK"
         private const val MANIFEST_EVENT_PAGE_SIZE = 1_000
+        private val RECOVERY_ROUND_SCALAR_KEYS = listOf(
+            "runId",
+            "roundIndex",
+            "roundWinnerId",
+            "generatedAtMs"
+        )
+        private val RECOVERY_GROUP_SCALAR_KEYS = listOf(
+            "runId",
+            "roundIndex",
+            "groupId",
+            "criticPromoted",
+            "criticRejected",
+            "criticArbitrated",
+            "fitnessScoredAgents",
+            "fitnessTopEligibleAgents",
+            "legacyProtocolsExtracted",
+            "legacyProtocolsExpired",
+            "deadEndsInserted"
+        )
+        private val RECOVERY_DETERMINISTIC_SCORE_KEYS = listOf(
+            "overallScore",
+            "automatedTestsPassed",
+            "automatedTestsFailed",
+            "mandatoryFailure"
+        )
+        private val RECOVERY_DISCLOSURE_SCORE_KEYS = listOf(
+            "overallScore",
+            "passed",
+            "testPassRate",
+            "failedTestCount",
+            "stageAdvanced"
+        )
+        private val RECOVERY_BLIND_SCORE_KEYS = listOf(
+            "weightedTotal",
+            "rank"
+        )
 
         internal val REQUIRED_DETERMINISTIC_DELIVERABLES = listOf(
             "final_report.md",
@@ -1231,6 +2113,9 @@ open class RunArchiveService(
         ?: error("Unable to resolve run root for $runId")
 
     private fun resultsBundleFile(runId: String): File = File(resolveRunRoot(runId), "results/results.zip")
+
+    private fun recoveryBundleFile(runId: String): File =
+        File(resolveRunRoot(runId), "results/recovery-results.zip")
 
     private fun finalArticleFile(runId: String): File = File(resolveRunRoot(runId), "results/final-article.html")
 
@@ -2558,7 +3443,10 @@ open class RunArchiveService(
         require(output.relativePath == spec.relativePath) {
             "Generated output path ${output.relativePath} does not match ${spec.relativePath}"
         }
-        require(output.mediaType.equals(spec.mediaType, ignoreCase = true)) {
+        require(
+            output.mediaType.normalizedBaseMediaType() ==
+                spec.mediaType.normalizedBaseMediaType()
+        ) {
             "Generated output media type ${output.mediaType} does not match ${spec.mediaType}"
         }
         val failures = FinalOutputContractValidator.validate(output, spec)
@@ -2668,8 +3556,7 @@ open class RunArchiveService(
             assessment.automatedTestsPassed + assessment.automatedTestsFailed > 0 &&
                 !assessment.mandatoryFailure
         ) {
-            "Archive output failed active sealed-tests-v3 authority: " +
-                assessment.failedTestIds.joinToString()
+            "Archive output failed active sealed-tests-v3 authority"
         }
     }
 
@@ -2718,8 +3605,8 @@ open class RunArchiveService(
     ): GeneratedOutputFile? {
         directBodyGeneratedOutputFile(summary, outputSpec)?.let { return validateGeneratedOutputFile(it) }
 
-        if (outputSpec.mediaType.equals("application/json", ignoreCase = true) ||
-            outputSpec.mediaType.endsWith("+json", ignoreCase = true)
+        if (outputSpec.mediaType.normalizedBaseMediaType() == "application/json" ||
+            outputSpec.mediaType.normalizedBaseMediaType().endsWith("+json")
         ) {
             extractFencedCodeBlock(summary, preferredLanguage = "json")
                 ?.let { directBodyGeneratedOutputFile(it, outputSpec) }
@@ -2741,11 +3628,11 @@ open class RunArchiveService(
         if (body.isBlank()) return null
 
         val acceptsBody = when {
-            outputSpec.mediaType.startsWith("text/html", ignoreCase = true) -> false
-            outputSpec.mediaType.equals("application/json", ignoreCase = true) ||
-                outputSpec.mediaType.endsWith("+json", ignoreCase = true) ->
+            outputSpec.mediaType.normalizedBaseMediaType() == "text/html" -> false
+            outputSpec.mediaType.normalizedBaseMediaType() == "application/json" ||
+                outputSpec.mediaType.normalizedBaseMediaType().endsWith("+json") ->
                 runCatching { json.parseToJsonElement(body) }.isSuccess
-            outputSpec.mediaType.startsWith("text/", ignoreCase = true) -> true
+            outputSpec.mediaType.normalizedBaseMediaType().startsWith("text/") -> true
             else -> false
         }
         if (!acceptsBody) return null
@@ -2966,7 +3853,7 @@ internal fun validateGeneratedOutputFile(
         "Generated output ${output.relativePath} content hash is invalid"
     }
     return when {
-        output.mediaType.startsWith("text/html", ignoreCase = true) -> {
+        output.mediaType.normalizedBaseMediaType() == "text/html" -> {
             validateCompleteHtmlEnvelope(output.content, output.relativePath)
             val normalizedContent = if (normalizeHtmlStructure) {
                 normalizePublishedHtmlStructure(
@@ -2986,8 +3873,8 @@ internal fun validateGeneratedOutputFile(
             validateHtmlCitationTraceability(normalizedOutput.content, normalizedOutput.relativePath)
             normalizedOutput
         }
-        output.mediaType.equals("application/json", ignoreCase = true) ||
-            output.mediaType.endsWith("+json", ignoreCase = true) -> {
+        output.mediaType.normalizedBaseMediaType() == "application/json" ||
+            output.mediaType.normalizedBaseMediaType().endsWith("+json") -> {
             validateJsonCitationTraceability(output.content, output.relativePath)
             output
         }

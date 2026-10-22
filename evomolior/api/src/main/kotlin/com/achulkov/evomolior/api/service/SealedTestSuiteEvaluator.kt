@@ -188,9 +188,11 @@ internal class SealedTestSuiteEvaluator(
         suiteJson: String,
         validationContext: SealedTestSuiteV3ValidationContext,
         input: SealedTestEvaluationInputV3,
-        scoringDimensions: List<ScoringDimension>
+        scoringDimensions: List<ScoringDimension>,
+        selection: SealedTestEvaluationSelection = SealedTestEvaluationSelection.COMPLETE_SUITE
     ): DeterministicRoundAssessment {
         val suite = decodeVerifiedV3(suiteJson, validationContext)
+        val selectedTests = suite.tests.filter(selection::includes)
         val output = input.finalOutput?.also { candidate ->
             require(candidate.hasValidHash()) {
                 "Sealed-test final output content hash is invalid"
@@ -207,13 +209,13 @@ internal class SealedTestSuiteEvaluator(
             output != null &&
             outputUtf8Bytes != null &&
             outputUtf8Bytes <= GeneralTestLimits.MAX_OUTPUT_TEXT_FILE_BYTES &&
-            suite.tests.any(::requiresParsedJson)
+            selectedTests.any(::requiresParsedJson)
         ) {
             parseBoundedOutputJson(output.content)
         } else {
             null
         }
-        val results = suite.tests.map { test ->
+        val results = selectedTests.map { test ->
             V3TestResult(
                 testId = test.testId,
                 passed = when (test) {
@@ -564,7 +566,11 @@ internal class SealedTestSuiteEvaluator(
     ): DeterministicRoundAssessment {
         val passedCount = results.count(V3TestResult::passed)
         val failedCount = results.size - passedCount
-        val passedRatio = passedCount.toDouble() / results.size.toDouble()
+        val passedRatio = if (results.isEmpty()) {
+            0.0
+        } else {
+            passedCount.toDouble() / results.size.toDouble()
+        }
         val mandatoryPenalty = failedCount.toDouble()
         val baseScore = (passedRatio / (1.0 + mandatoryPenalty)).coerceIn(0.0, 1.0)
         val mandatoryFailed = failedCount > 0
@@ -1045,6 +1051,30 @@ internal data class SealedTestEvaluationInputV3(
         require(runId.isNotBlank()) { "V3 sealed-test evaluation requires a run ID" }
         require(groupId.isNotBlank()) { "V3 sealed-test evaluation requires a group ID" }
         require(roundIndex >= 0) { "V3 sealed-test evaluation round must be non-negative" }
+    }
+}
+
+/**
+ * Selects the sealed-test authority addressable by one runtime phase.
+ *
+ * Final writers can change only receiver-output bytes. Promotion fixtures are immutable
+ * run-level authority by publication time and therefore must be checked outside writer retries.
+ */
+internal enum class SealedTestEvaluationSelection {
+    /** Evaluate every GENERAL and PROMOTION test for scoring and publication. */
+    COMPLETE_SUITE,
+
+    /** Evaluate only GENERAL tests whose result can change with final-output bytes. */
+    FINAL_OUTPUT_ADDRESSABLE,
+
+    /** Evaluate only PROMOTION tests backed by already-recorded run-level executions. */
+    RUN_AUTHORITY;
+
+    /** Returns whether [test] belongs to this evaluation selection. */
+    fun includes(test: SealedTestV3): Boolean = when (this) {
+        COMPLETE_SUITE -> true
+        FINAL_OUTPUT_ADDRESSABLE -> test is SealedTestV3.General
+        RUN_AUTHORITY -> test is SealedTestV3.Promotion
     }
 }
 

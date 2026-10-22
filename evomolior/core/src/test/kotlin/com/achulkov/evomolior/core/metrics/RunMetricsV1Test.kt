@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 internal class RunMetricsV1Test {
     @Test
@@ -36,6 +37,39 @@ internal class RunMetricsV1Test {
         )
         assertEquals(21, RunMetricCatalog.orderedMetricIds.size)
         assertEquals(21, RunMetricCatalog.orderedMetricIds.distinct().size)
+    }
+
+    @Test
+    fun `closure catalog has the exact 12 blueprint metric IDs in order`() {
+        assertEquals(
+            listOf(
+                "exit_identity_conflicts",
+                "exit_finalization_retries",
+                "tool_contract_transport_failure_rate",
+                "tool_repair_diagnostics_emitted",
+                "tool_repair_diagnostic_consumption_rate",
+                "repair_to_promotion_rate",
+                "repeated_identical_tool_failure_rate",
+                "receiver_component_coverage",
+                "interim_snapshot_coverage",
+                "recovery_component_coverage",
+                "provisional_claim_with_authority_rate",
+                "accepted_package_deterministic_content_rate",
+            ),
+            RunClosureMetricCatalog.orderedMetricIds,
+        )
+    }
+
+    @Test
+    fun `historical callers may omit closure block but partial closure is rejected`() {
+        assertTrue(validRun().closureObservations.isEmpty())
+        assertFailsWith<IllegalArgumentException> {
+            validRun().copy(
+                closureObservations = listOf(
+                    unavailable(RunClosureMetricCatalog.orderedMetricIds.first())
+                )
+            )
+        }
     }
 
     @Test

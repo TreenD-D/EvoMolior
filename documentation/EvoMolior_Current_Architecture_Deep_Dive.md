@@ -6,7 +6,7 @@ The sole authority for current roadmap status, production connectivity, known ga
 actions is
 [`EvoMolior_Roadmap_and_Project_State.md`](EvoMolior_Roadmap_and_Project_State.md). This deep dive
 explains components and flows in more detail; it does not override the canonical status
-classifications. Section 21 is historical run evidence.
+classifications. Later sections include historical design notes.
 
 Primary evidence:
 
@@ -1137,13 +1137,13 @@ Weak targets:
 
 ## 20. Improvement Questions for the Next EvoMolior Run
 
-The requested enrichment run should challenge and improve this document along these axes:
+Future enrichment work should challenge and improve this document along these axes:
 
 - Is the bottom-up layering understandable to a new operator?
 - Which current code paths contradict older spec-level descriptions?
 - Which modules need diagrams or sequence charts?
 - What parts of the run loop deserve operator-facing telemetry explanations?
-- What Qwen-specific runtime constraints should be elevated into setup docs?
+- What provider-specific runtime constraints should be elevated into setup docs?
 - Which high-value run targets should become first-class templates in the UI/CLI?
 - Which architecture mechanisms most strongly differentiate EvoMolior from ordinary multi-agent
   orchestration?
@@ -1153,31 +1153,20 @@ The requested enrichment run should challenge and improve this document along th
   staging pollution, grader disagreement, Shuru unavailability, budget starvation, and no-final-file
   completion?
 
-## 21. Qwen Enrichment Run Findings
+## 21. Historical Enrichment Run Findings
 
-**Historical evidence:** this section records a specific 2026-07-01 run. It is not current
-roadmap or runtime-status authority.
+**Historical evidence:** this section distills a dated architecture-enrichment run. It is not
+current roadmap or runtime-status authority.
 
-This section incorporates findings from a Qwen-backed EvoMolior CLI run launched after the first
-version of this document was written. It used this document plus an internal enrichment prompt.
-The prompt and complete run outputs remain intact in ignored local development/result directories.
-The primary stage completed with:
-
-- Run ID: `qwen-architecture-enrichment-20260701-185954`.
-- Backend: `qwen-cloud`.
-- Shape: `4` groups, `3` agents per group, `8` rounds.
-- Published output: retained in ignored local run results.
-- Follow-up refinement: retained in ignored local run results.
-- Pipeline status: `COMPLETED`; the private pipeline summary remains with the local run results.
-
-At that July 1 evidence cut, the run used `--fast`, in-process agents, frequent text-only Qwen
-completions, warning-only Death Notes, and fallback score paths. Those observations motivated later
-hardening; they are historical run evidence, not current runtime-status authority. Use the canonical
-roadmap for current behavior and limitations.
+The underlying prompt and complete run outputs remain in ignored local development/result
+directories. They are historical engineering material, not public benchmark evidence. The run used
+fast in-process execution, repeated text completions, warning-only Death Notes, and fallback score
+paths; those observations motivated later hardening. Use the canonical roadmap for current behavior
+and limitations.
 
 ### 21.1 Standout Architecture Thesis
 
-The run's strongest synthesis was that EvoMolior does not stand out merely because it runs many
+The strongest synthesis was that EvoMolior does not stand out merely because it runs many
 agents. Its differentiator is the evolutionary topology: budget ceilings, group profiles, leak
 timing, dispatch lag, grading pressure, Death Notes, and durable substrate all act as selection
 forces. Ordinary orchestrators usually freeze the graph and ask agents to follow it. EvoMolior lets
@@ -1191,8 +1180,8 @@ stronger artifacts.
 
 ### 21.2 Proposed Architecture Improvements
 
-The Qwen run proposed these experiment candidates. They are not all implemented today; treat them
-as ranked design hypotheses.
+The enrichment run proposed these experiment candidates. They are not all implemented today; treat
+them as ranked design hypotheses.
 
 - Adaptive leak interval: make leak cadence depend on diversity and convergence metrics. If groups
   collapse into similar solutions too early, reduce cross-pollination or increase diversity
@@ -1318,17 +1307,17 @@ Specific future project runs that would make EvoMolior stand out:
 - Build a configuration recommender that maps objective type to group count, agents per group,
   rounds, model pool, leak interval, and grader strictness.
 - Create a lineage graph viewer for final artifacts.
-- Run a Qwen-vs-OpenRouter backend reliability study focused on tool-call validity, structured
-  score compliance, latency, and final-file success.
+- Run a supported-backend reliability study focused on tool-call validity, structured score
+  compliance, latency, and final-file success.
 - Add a versioned KB/KG experiment with rollback after detected contradiction.
-- Run self-improvement tasks that specifically target grader fallback scoring and Qwen text-only
-  write behavior.
+- Run self-improvement tasks that specifically target grader fallback scoring and provider
+  text-only write behavior.
 - Generate reusable UI/CLI templates for architecture audit, strategy synthesis, codebase
   improvement, threat modeling, and research synthesis.
 
 ### 21.6 Configuration Guidance
 
-Default recommendations from the enrichment run:
+Default recommendations from the historical enrichment run:
 
 - Simple, narrow objectives: `2-3` groups, `2-3` agents per group, `1-3` rounds.
 - Medium objectives with several plausible approaches: `3-5` groups, `3-5` agents per group,
@@ -1343,4 +1332,4 @@ Default recommendations from the enrichment run:
 
 For this repository, a pragmatic default remains `4` groups, `3` agents per group, and `8` rounds
 for documentation/architecture enrichment: it provides enough breadth for divergent viewpoints
-without overwhelming the current Qwen/backend/tooling constraints.
+without overwhelming the selected provider and tooling constraints.

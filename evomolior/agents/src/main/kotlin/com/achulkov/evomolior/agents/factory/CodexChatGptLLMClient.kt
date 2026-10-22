@@ -10,6 +10,7 @@ import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.streaming.StreamFrame
 import ai.koog.utils.time.KoogClock
+import com.achulkov.evomolior.core.config.CodexRuntimePreset
 import com.achulkov.evomolior.core.config.LlmBackend
 import com.achulkov.evomolior.core.config.LlmTimeoutPolicy
 import io.github.aakira.napier.Napier
@@ -25,6 +26,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
@@ -36,10 +38,32 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 
+typealias CodexReasoningEffort =
+    com.achulkov.evomolior.core.config.CodexReasoningEffort
+
 private const val CODEX_TMPDIR_ENV = "EVOMOLIOR_CODEX_TMPDIR"
-private const val CODEX_MODEL_REASONING_EFFORT = "medium"
+
+/** Tail retained from Codex stderr/stdout in failure messages. */
+internal const val CODEX_FAILURE_DIAGNOSTIC_MAX_CHARS = 4_000
+
+/**
+ * Keeps the end of a Codex failure stream, where the error is reported.
+ *
+ * When stderr is empty the stream is the full JSONL session transcript; embedding it verbatim made
+ * 57% of a 5.3 MB October 2026 run log out of three failures, each re-logged about eight times.
+ *
+ * @param stream Raw stderr, or stdout when stderr is blank.
+ */
+internal fun boundedCodexFailureDiagnostic(stream: String): String {
+    val trimmed = stream.trim()
+    if (trimmed.length <= CODEX_FAILURE_DIAGNOSTIC_MAX_CHARS) return trimmed
+    val omitted = trimmed.length - CODEX_FAILURE_DIAGNOSTIC_MAX_CHARS
+    return "[... $omitted earlier chars omitted]\n" + trimmed.takeLast(CODEX_FAILURE_DIAGNOSTIC_MAX_CHARS)
+}
 private const val CODEX_CAPACITY_RETRY_BUDGET = 2
 private const val CODEX_CAPACITY_RETRY_DELAY_MS = 15_000L
+private const val CODEX_TEMP_CLEANUP_RETRY_COUNT = 8
+private const val CODEX_TEMP_CLEANUP_RETRY_DELAY_MS = 100L
 internal const val CODEX_OUTPUT_SCHEMA_MAX_BYTES = 1024 * 1024
 private const val CODEX_CAPACITY_MESSAGE =
     "Selected model is at capacity. Please try a different model."
@@ -48,7 +72,7 @@ internal const val CODEX_NATIVE_SEARCH_REQUIRED_MARKER = "CODEX_NATIVE_SEARCH_RE
 /**
  * Koog client adapter around the local OpenAI Codex CLI authenticated with ChatGPT.
  *
- * GPT-5.6 Luna is executed in Codex code mode. Agent-scoped EvoMolior tools are exposed through an
+ * Supported models execute in Codex code mode. Agent-scoped EvoMolior tools are exposed through an
  * isolated filesystem bridge, allowing model-generated shell code to invoke the real typed tools
  * without granting the Codex workspace access to the repository or substrate files.
  *
@@ -56,6 +80,7 @@ internal const val CODEX_NATIVE_SEARCH_REQUIRED_MARKER = "CODEX_NATIVE_SEARCH_RE
  * @param onSearchEvents Receives auditable native-search events.
  * @param codeModeToolRuntime Optional typed-tool bridge for code mode.
  * @param nativeSearchEnabled Whether the Codex process may use native web search.
+ * @param reasoningEffort Validated Codex model reasoning effort.
  * @param executionTimeout Finite positive maximum for every process attempt.
  * @param structuredOutputDiagnosticRoot Optional owner-only root for bounded invalid-response
  *   evidence. Prompts, credentials, environment variables, stdout, and stderr are never retained.
@@ -68,6 +93,7 @@ class CodexChatGptLLMClient(
     private val onSearchEvents: suspend (List<CodexSearchEvent>) -> Unit = {},
     private val codeModeToolRuntime: CodexCodeModeToolRuntime? = null,
     private val nativeSearchEnabled: Boolean = true,
+    private val reasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     private val executionTimeout: Duration = LlmTimeoutPolicy.DEFAULT_CODEX_EXECUTION,
     structuredOutputDiagnosticRoot: Path? = null,
     private val processRunner: CodexProcessRunner = CodexExecProcess,
@@ -120,6 +146,7 @@ class CodexChatGptLLMClient(
                         nativeSearchEnabled =
                             nativeSearchEnabled && !structuredOutputOnly,
                         structuredOutputOnly = structuredOutputOnly,
+                        reasoningEffort = reasoningEffort,
                         executionTimeout = executionTimeout
                     )
                 )
@@ -162,7 +189,7 @@ class CodexChatGptLLMClient(
             if (result.exitCode != 0) {
                 error(
                     "Codex/ChatGPT backend failed with exit code ${result.exitCode}: " +
-                        result.stderr.ifBlank { result.stdout }.trim()
+                        boundedCodexFailureDiagnostic(result.stderr.ifBlank { result.stdout })
                 )
             }
             if (nativeSearchRequired && result.searchEvents.isEmpty()) {
@@ -204,15 +231,13 @@ class CodexChatGptLLMClient(
                 metaInfo = ResponseMetaInfo.create(KoogClock.System, modelId = model.id)
             )
         } finally {
-            try {
-                codeModeSession?.close()
-            } finally {
-                try {
-                    outputPath.deleteIfExists()
-                } finally {
-                    outputSchemaPath?.deleteIfExists()
+            runCatching { codeModeSession?.close() }.onFailure { failure ->
+                Napier.w(failure) {
+                    "Codex code-mode workspace cleanup failed; continuing with independent temp cleanup"
                 }
             }
+            deleteCodexTempPath(outputPath, "last-message output")
+            outputSchemaPath?.let { deleteCodexTempPath(it, "structured-output schema") }
         }
     }
 
@@ -225,9 +250,8 @@ class CodexChatGptLLMClient(
     override suspend fun moderate(prompt: Prompt, model: LLModel): ModerationResult =
         ModerationResult(isHarmful = false, categories = emptyMap())
 
-    override suspend fun models(): List<LLModel> = listOf(
-        CodexChatGptModelResolver.resolve(com.achulkov.evomolior.core.config.ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL)
-    )
+    override suspend fun models(): List<LLModel> =
+        CodexRuntimePreset.ALL_MODEL_IDS.map(CodexChatGptModelResolver::resolve)
 
     override fun llmProvider(): LLMProvider = LLMProvider.OpenAI
 
@@ -282,6 +306,7 @@ data class CodexProcessResult(
  * @param codeModeSession Required isolated code-mode session.
  * @param nativeSearchEnabled Whether to expose native Codex search.
  * @param structuredOutputOnly Whether the command must expose no model tools.
+ * @param reasoningEffort Validated model reasoning effort.
  * @param executionTimeout Finite positive maximum for this attempt.
  */
 data class CodexProcessRequest(
@@ -293,6 +318,7 @@ data class CodexProcessRequest(
     val codeModeSession: CodexCodeModeSession?,
     val nativeSearchEnabled: Boolean = true,
     val structuredOutputOnly: Boolean = false,
+    val reasoningEffort: CodexReasoningEffort,
     val executionTimeout: Duration = LlmTimeoutPolicy.DEFAULT_CODEX_EXECUTION
 ) {
     init {
@@ -344,6 +370,7 @@ object CodexExecProcess : CodexProcessRunner {
      * @param nativeSearchEnabled Whether to expose native search.
      * @param structuredOutputOnly Whether to disable every Codex tool surface and ignore user
      *   tool configuration.
+     * @param reasoningEffort Validated model reasoning effort.
      * @return Ordered process arguments.
      */
     fun command(
@@ -353,7 +380,8 @@ object CodexExecProcess : CodexProcessRunner {
         workspace: Path,
         outputSchemaPath: Path? = null,
         nativeSearchEnabled: Boolean = true,
-        structuredOutputOnly: Boolean = false
+        structuredOutputOnly: Boolean = false,
+        reasoningEffort: CodexReasoningEffort
     ): List<String> {
         require((outputSchemaPath != null) == structuredOutputOnly) {
             "Codex output schema and tool-free structured mode must be selected together"
@@ -385,7 +413,7 @@ object CodexExecProcess : CodexProcessRunner {
             add("-m")
             add(modelId)
             add("-c")
-            add("model_reasoning_effort=\"$CODEX_MODEL_REASONING_EFFORT\"")
+            add("model_reasoning_effort=\"${reasoningEffort.configValue}\"")
             if (!structuredOutputOnly) {
                 add("-c")
                 add("features.code_mode=true")
@@ -433,7 +461,8 @@ object CodexExecProcess : CodexProcessRunner {
                     session.workspace,
                     request.outputSchemaPath,
                     request.nativeSearchEnabled,
-                    request.structuredOutputOnly
+                    request.structuredOutputOnly,
+                    request.reasoningEffort
                 )
             )
                 .redirectInput(stdinPath.toFile())
@@ -476,16 +505,22 @@ object CodexExecProcess : CodexProcessRunner {
                 searchEvents = parseSearchEvents(stdout)
             )
         } finally {
-            process?.takeIf { it.isAlive }?.let { activeProcess ->
-                activeProcess.destroy()
-                if (!activeProcess.waitFor(1, TimeUnit.SECONDS)) {
-                    activeProcess.destroyForcibly()
-                    activeProcess.waitFor(5, TimeUnit.SECONDS)
+            runCatching {
+                process?.takeIf { it.isAlive }?.let { activeProcess ->
+                    activeProcess.destroy()
+                    if (!activeProcess.waitFor(1, TimeUnit.SECONDS)) {
+                        activeProcess.destroyForcibly()
+                        activeProcess.waitFor(5, TimeUnit.SECONDS)
+                    }
+                }
+            }.onFailure { failure ->
+                Napier.w(failure) {
+                    "Codex child-process cleanup failed; continuing with bounded temp cleanup"
                 }
             }
-            stdoutPath.deleteIfExists()
-            stderrPath.deleteIfExists()
-            stdinPath.deleteIfExists()
+            deleteCodexTempPath(stdoutPath, "JSONL stdout")
+            deleteCodexTempPath(stderrPath, "stderr")
+            deleteCodexTempPath(stdinPath, "stdin")
         }
     }
 
@@ -543,6 +578,25 @@ object CodexExecProcess : CodexProcessRunner {
             },
             messages = messages
         )
+    }
+}
+
+private suspend fun deleteCodexTempPath(path: Path, description: String) {
+    var lastFailure: IOException? = null
+    repeat(CODEX_TEMP_CLEANUP_RETRY_COUNT) { attempt ->
+        try {
+            path.deleteIfExists()
+            return
+        } catch (failure: IOException) {
+            lastFailure = failure
+            if (attempt + 1 < CODEX_TEMP_CLEANUP_RETRY_COUNT) {
+                currentCoroutineContext().ensureActive()
+                delay(CODEX_TEMP_CLEANUP_RETRY_DELAY_MS)
+            }
+        }
+    }
+    Napier.w(lastFailure) {
+        "Could not remove Codex $description after $CODEX_TEMP_CLEANUP_RETRY_COUNT attempts: $path"
     }
 }
 

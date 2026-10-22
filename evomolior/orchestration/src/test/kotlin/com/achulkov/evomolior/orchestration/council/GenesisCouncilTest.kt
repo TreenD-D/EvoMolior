@@ -29,12 +29,15 @@ import com.achulkov.evomolior.core.council.ModelEcologistOutput
 import com.achulkov.evomolior.core.council.NodeAtomicityAssessment
 import com.achulkov.evomolior.core.council.RoleModelAssignment
 import com.achulkov.evomolior.core.council.PromptArchitectOutput
+import com.achulkov.evomolior.core.council.ExecutionEnvelope
 import com.achulkov.evomolior.core.council.SeedCuratorOutput
 import com.achulkov.evomolior.core.council.SealedTestDraft
 import com.achulkov.evomolior.core.council.StartingFieldCompileResult
 import com.achulkov.evomolior.core.council.SynthesisOutput
 import com.achulkov.evomolior.core.council.TaskAnatomistOutput
+import com.achulkov.evomolior.core.council.compileCouncilToolOpportunityAuthority
 import com.achulkov.evomolior.core.config.AcceptanceProfile
+import com.achulkov.evomolior.core.contract.SeedKGFact
 import com.achulkov.evomolior.core.model.Role
 import com.achulkov.evomolior.core.serialization.CouncilSynthesisContextualOutputSerializer
 import com.achulkov.evomolior.core.serialization.TaskAnatomistContextualOutputSerializer
@@ -935,6 +938,99 @@ class GenesisCouncilTest {
                 observedContexts.getValue(Role.CouncilSynthesis)
             ).jsonObject
         )
+        val modelDependencies = json.parseToJsonElement(
+            observedContexts.getValue(Role.CouncilModelEcologist)
+        ).jsonObject.getValue("dependencyOutputs").jsonObject
+        assertEquals(
+            json.encodeToJsonElement(EcologistOutput.serializer(), outputs.ecologist),
+            modelDependencies.getValue(Role.CouncilEcologist.name)
+        )
+        assertEquals(
+            json.encodeToJsonElement(
+                PromptArchitectOutput.serializer(),
+                outputs.promptArchitect
+            ),
+            modelDependencies.getValue(Role.CouncilPromptArchitect.name)
+        )
+        val seedDependencies = json.parseToJsonElement(
+            observedContexts.getValue(Role.CouncilSeedCurator)
+        ).jsonObject.getValue("dependencyOutputs").jsonObject
+        assertEquals(
+            json.encodeToJsonElement(KgArchitectOutput.serializer(), outputs.kgArchitect),
+            seedDependencies.getValue(Role.CouncilKGArchitect.name)
+        )
+    }
+
+    @Test
+    fun `KG repair precedes seed repair and supplies repaired schema authority`() = runTest {
+        val validOutputs = fixtures.outputs()
+        val validSeed = validOutputs.seedCurator.copy(
+            primordialKgFacts = listOf(
+                SeedKGFact(
+                    id = "fact-shelter-area",
+                    subject = "shelter",
+                    relation = "supports",
+                    `object` = "500-square-metres",
+                    confidence = 1.0
+                )
+            )
+        )
+        val invalidKg = validOutputs.kgArchitect.copy(
+            aliases = validOutputs.kgArchitect.aliases + ("supports" to "supports")
+        )
+        val calls = ConcurrentHashMap<Role, Int>()
+        val kgRepairContexts = CopyOnWriteArrayList<String>()
+        val seedRepairContexts = CopyOnWriteArrayList<String>()
+        val council = GenesisCouncil(
+            objective = "Objective",
+            executionEnvelope = fixtures.envelope()
+        )
+
+        val result = council.runCompiled(
+            runId = "kg-before-seed-repair",
+            agentRunner = { request ->
+                val count = calls.merge(request.role, 1, Int::plus)!!
+                when (request.role) {
+                    Role.CouncilKGArchitect -> {
+                        if (count > 1) kgRepairContexts += request.contextJson
+                        encode(
+                            KgArchitectOutput.serializer(),
+                            if (count == 1) invalidKg else validOutputs.kgArchitect
+                        )
+                    }
+                    Role.CouncilSeedCurator -> {
+                        if (count > 1) seedRepairContexts += request.contextJson
+                        encode(
+                            SeedCuratorOutput.serializer(),
+                            validSeed
+                        )
+                    }
+                    else -> encode(request, validOutputs)
+                }
+            },
+            maxRetries = 1
+        )
+
+        assertIs<StartingFieldCompileResult.Valid>(result)
+        assertEquals(2, calls[Role.CouncilKGArchitect])
+        assertEquals(2, calls[Role.CouncilSeedCurator])
+        assertTrue(
+            Role.CouncilSeedCurator.name !in
+                json.parseToJsonElement(kgRepairContexts.single())
+                    .jsonObject
+                    .getValue("dependencyOutputs")
+                    .jsonObject
+        )
+        val seedRepairDependencies = json.parseToJsonElement(
+            seedRepairContexts.single()
+        ).jsonObject.getValue("dependencyOutputs").jsonObject
+        assertEquals(
+            json.encodeToJsonElement(
+                KgArchitectOutput.serializer(),
+                validOutputs.kgArchitect
+            ),
+            seedRepairDependencies.getValue(Role.CouncilKGArchitect.name)
+        )
     }
 
     @Test
@@ -999,9 +1095,119 @@ class GenesisCouncilTest {
         assertEquals(
             json.encodeToJsonElement(
                 ModelEcologistOutput.serializer(),
-                validOutputs.modelEcologist
+                validOutputs.projectDeterministicCompilerAuthority(
+                    "selective-compiler-retry", fixtures.envelope()
+                ).modelEcologist
             ),
             repairedDependencies.getValue(Role.CouncilModelEcologist.name)
+        )
+    }
+
+    @Test
+    fun `quantitative closure repair receives exact mismatches and succeeds once`() = runTest {
+        val runId = "quantitative-specialist-repair"
+        val baseOutputs = fixtures.fullAcceptanceOutputs(runId)
+        val outputs = baseOutputs.copy(
+            taskAnatomist = baseOutputs.taskAnatomist.copy(
+                nodes = baseOutputs.taskAnatomist.nodes.map { node ->
+                    node.copy(
+                        toolOpportunity = node.toolOpportunity?.copy(
+                            opportunityType = ToolOpportunityType.CALCULATION
+                        )
+                    )
+                }
+            )
+        )
+        val repairedOutputs = fixtures.gateDQuantitativeAcceptanceOutputs(runId)
+        val obligation = fixtures.gateDQuantitativeToolObligation()
+        val envelope = fixtures.acceptanceEnvelope(AcceptanceProfile.APPENDIX_B_FULL).copy(
+            quantitativeToolObligation = obligation
+        )
+        val taskContexts = CopyOnWriteArrayList<String>()
+        val calls = ConcurrentHashMap<Role, Int>()
+        val progress = mutableListOf<String>()
+        val council = GenesisCouncil(
+            objective = "Require a bounded quantitative energy calculator.",
+            executionEnvelope = envelope
+        )
+
+        val result = council.runCompiled(
+            runId = runId,
+            agentRunner = { request ->
+                val call = calls.merge(request.role, 1, Int::plus)!!
+                if (request.role == Role.CouncilTaskAnatomist) {
+                    taskContexts += request.contextJson
+                    TaskAnatomistContextualOutputSerializer(request.acceptanceProfile)
+                        .encodeProviderWire(
+                            if (call == 1) {
+                                outputs.taskAnatomist
+                            } else {
+                                repairedOutputs.taskAnatomist
+                            }
+                        )
+                        .toString()
+                } else {
+                    encode(request, repairedOutputs)
+                }
+            },
+            onProgress = progress::add,
+            maxRetries = 1
+        )
+
+        assertIs<StartingFieldCompileResult.Valid>(result)
+        assertEquals(2, calls[Role.CouncilTaskAnatomist])
+        Role.entries.filter(Role::isCouncilRole)
+            .filterNot {
+                it == Role.CouncilTaskAnatomist ||
+                    it == Role.CouncilSynthesis
+            }
+            .forEach { role -> assertEquals(2, calls[role], role.name) }
+        assertEquals(1, calls[Role.CouncilSynthesis])
+        assertEquals(2, taskContexts.size)
+        val repairContext = json.parseToJsonElement(taskContexts.last()).jsonObject
+        assertEquals(
+            json.encodeToJsonElement(ExecutionEnvelope.serializer(), envelope)
+                .jsonObject
+                .getValue("quantitativeToolObligation"),
+            repairContext
+                .getValue("executionEnvelope")
+                .jsonObject
+                .getValue("quantitativeToolObligation")
+        )
+        assertEquals(
+            obligation.compileCouncilToolOpportunityAuthority(),
+            repairContext.getValue("quantitativeToolContractAuthority")
+        )
+        val errors = repairContext
+            .getValue("repairRequest")
+            .jsonObject
+            .getValue("errors")
+            .jsonArray
+        assertTrue(
+            errors.any { error ->
+                error.jsonObject.getValue("path").jsonObject
+                    .getValue("segments").jsonArray
+                    .last().jsonPrimitive.content == "shelter_area" &&
+                    error.jsonObject.getValue("message").jsonPrimitive.content
+                        .contains("Missing required top-level input field 'shelter_area_m2'")
+            },
+            errors.toString()
+        )
+        assertTrue(
+            errors.any { error ->
+                error.jsonObject.getValue("path").jsonObject
+                    .getValue("segments").jsonArray
+                    .last().jsonPrimitive.content == "hourly_electrical_energy"
+            },
+            errors.toString()
+        )
+        assertTrue(
+            progress.any {
+                it.startsWith("Council specialist closure repair 1/1:") &&
+                    "shelter_area_m2" in it &&
+                    "hourly_electrical_energy_kwh" in it
+            },
+            progress.joinToString()
         )
     }
 
@@ -1172,7 +1378,13 @@ class GenesisCouncilTest {
             .getValue("repairRequest")
             .jsonObject
         assertEquals(
-            json.encodeToJsonElement(ModelEcologistOutput.serializer(), invalidModel),
+            json.encodeToJsonElement(
+                ModelEcologistOutput.serializer(),
+                validOutputs.copy(modelEcologist = invalidModel)
+                    .projectDeterministicCompilerAuthority(
+                        "task-dependent-errors-preserved", fixtures.envelope()
+                    ).modelEcologist
+            ),
             repairRequest.getValue("previousOutput")
         )
         val errors = repairRequest.getValue("errors").jsonArray
@@ -1341,6 +1553,205 @@ class GenesisCouncilTest {
                     .startsWith("Council specialist closure repair $index/5:")
             )
         }
+    }
+
+    @Test
+    fun `deterministic specialist projection closes without spending role repairs`() = runTest {
+        val source = fixtures.outputs()
+        val envelope = fixtures.envelope().copy(
+            operatorOverrides = mapOf("model.Researcher" to "provider/worker")
+        )
+        val outputs = source.copy(
+            modelEcologist = source.modelEcologist.copy(assignments =
+                source.modelEcologist.assignments.filterNot { it.role == Role.Researcher } +
+                    RoleModelAssignment(Role.CouncilModelEcologist, "non-runtime-model")
+            ),
+            seedCurator = source.seedCurator.copy(calibrationArtifacts =
+                source.seedCurator.calibrationArtifacts.map { it.copy(sha256 = "llm-placeholder") }
+            )
+        )
+        val calls = ConcurrentHashMap<Role, Int>()
+        val result = GenesisCouncil("Objective", envelope).runCompiled(
+            "project-before-closure",
+            agentRunner = { request ->
+                calls.merge(request.role, 1, Int::plus)
+                encode(request, outputs)
+            },
+            maxRetries = 0
+        )
+        assertIs<StartingFieldCompileResult.Valid>(result)
+        Role.entries.filter(Role::isCouncilRole).forEach { assertEquals(1, calls[it], it.name) }
+    }
+
+    @Test
+    fun `infeasible valid plan exhausts bounded replan then warns without relaxing acceptance`() = runTest {
+        val source = fixtures.outputs()
+        val envelope = fixtures.envelope().copy(maxAgentsPerGroupPerRound = 1, maxRounds = 1)
+        val outputs = source.copy(ecologist = source.ecologist.copy(
+            checkinRounds = listOf(1), leakIntervalRounds = 1
+        ))
+        val calls = ConcurrentHashMap<Role, Int>()
+        val contexts = CopyOnWriteArrayList<String>()
+        val progress = CopyOnWriteArrayList<String>()
+        val reports = mutableListOf<com.achulkov.evomolior.core.council.CouncilFeasibilityReport>()
+        val result = GenesisCouncil("Objective", envelope).runCompiled(
+            "bounded-feasibility",
+            agentRunner = { request ->
+                calls.merge(request.role, 1, Int::plus)
+                contexts += request.contextJson
+                encode(request, outputs)
+            },
+            onProgress = progress::add,
+            maxRetries = 1,
+            onFeasibility = reports::add
+        )
+        val valid = assertIs<StartingFieldCompileResult.Valid>(result)
+        assertEquals(
+            com.achulkov.evomolior.core.council.CouncilFeasibilityStatus.PROVISIONAL_ONLY,
+            reports.single().status
+        )
+        assertEquals(1, reports.single().replansUsed)
+        assertEquals(2, calls[Role.CouncilTaskAnatomist])
+        assertEquals(2, calls[Role.CouncilSynthesis])
+        assertTrue(progress.any { "provisional-only" in it && "Strict acceptance gates remain unchanged" in it })
+        assertEquals(source.taskAnatomist.nodes.size, valid.atlas.nodes.size)
+        contexts.forEach { context ->
+            assertEquals(
+                json.encodeToJsonElement(ExecutionEnvelope.serializer(), envelope),
+                json.parseToJsonElement(context).jsonObject.getValue("executionEnvelope")
+            )
+        }
+    }
+
+    @Test
+    fun `feasibility replan can fit horizon without increasing limits`() = runTest {
+        val source = fixtures.outputs()
+        val envelope = fixtures.envelope().copy(maxAgentsPerGroupPerRound = 2, maxRounds = 1)
+        val fitting = source.copy(ecologist = source.ecologist.copy(
+            checkinRounds = listOf(1), leakIntervalRounds = 1
+        ))
+        val infeasible = fitting.copy(taskAnatomist = fitting.taskAnatomist.copy(
+            nodes = fitting.taskAnatomist.nodes.map {
+                if (it.key.value == "delivery") it.copy(
+                    prerequisiteKeys = setOf(LocalNodeKey("evidence"))
+                ) else it
+            }
+        ))
+        var taskCalls = 0
+        var report: com.achulkov.evomolior.core.council.CouncilFeasibilityReport? = null
+        val result = GenesisCouncil("Objective", envelope).runCompiled(
+            "feasible-after-replan",
+            agentRunner = { request ->
+                if (request.role == Role.CouncilTaskAnatomist) taskCalls += 1
+                encode(request, if (taskCalls == 1) infeasible else fitting)
+            },
+            maxRetries = 1,
+            onFeasibility = { report = it }
+        )
+        assertIs<StartingFieldCompileResult.Valid>(result)
+        assertEquals(2, taskCalls)
+        assertEquals(
+            com.achulkov.evomolior.core.council.CouncilFeasibilityStatus.FITS_SCHEDULING_BOUNDS,
+            report?.status
+        )
+        assertEquals(1, report?.replansUsed)
+    }
+
+    @Test
+    fun `semantic failure after feasibility replan still fails closed`() = runTest {
+        val source = fixtures.outputs()
+        val envelope = fixtures.envelope().copy(maxAgentsPerGroupPerRound = 1, maxRounds = 1)
+        val outputs = source.copy(ecologist = source.ecologist.copy(
+            checkinRounds = listOf(1), leakIntervalRounds = 1
+        ))
+        var taskCalls = 0
+        val reports = mutableListOf<com.achulkov.evomolior.core.council.CouncilFeasibilityReport>()
+        val result = GenesisCouncil("Objective", envelope).runCompiled(
+            "semantic-failure-after-replan",
+            agentRunner = { request ->
+                if (request.role == Role.CouncilTaskAnatomist) taskCalls += 1
+                if (taskCalls > 1 && request.role == Role.CouncilModelEcologist) {
+                    encode(ModelEcologistOutput.serializer(), outputs.modelEcologist.copy(
+                        assignments = outputs.modelEcologist.assignments.map {
+                            it.copy(requiredCapabilities = setOf("unavailable-capability"))
+                        }
+                    ))
+                } else encode(request, outputs)
+            },
+            maxRetries = 1,
+            onFeasibility = reports::add
+        )
+        assertIs<StartingFieldCompileResult.Invalid>(result)
+        assertTrue(reports.isEmpty())
+    }
+
+    @Test
+    fun `illegal operator model authority is not repaired away during specialist projection`() = runTest {
+        val outputs = fixtures.outputs()
+        listOf(
+            "model.Researcher" to "provider/unavailable",
+            "model.CouncilTaskAnatomist" to "provider/worker",
+            "model.UnknownRole" to "provider/worker",
+            "model.Researcher" to "provider/grader"
+        ).forEach { override ->
+            val result = GenesisCouncil(
+                "Objective", fixtures.envelope().copy(operatorOverrides = mapOf(override))
+            ).runCompiled(
+                "illegal-operator-authority",
+                agentRunner = { request -> encode(request, outputs) },
+                maxRetries = 0
+            )
+            val invalid = assertIs<StartingFieldCompileResult.Invalid>(result, override.toString())
+            assertTrue(invalid.errors.any { it.code == FieldCompileErrorCode.UNKNOWN_MODEL })
+        }
+    }
+
+    @Test
+    fun `duplicate runtime model assignments keep semantic and capability rejection`() = runTest {
+        val source = fixtures.outputs()
+        val outputs = source.copy(modelEcologist = source.modelEcologist.copy(
+            assignments = source.modelEcologist.assignments + RoleModelAssignment(
+                role = Role.Researcher,
+                primaryModelId = "provider/worker",
+                requiredCapabilities = setOf("unavailable-capability")
+            )
+        ))
+        val result = GenesisCouncil("Objective", fixtures.envelope()).runCompiled(
+            "duplicate-runtime-assignments",
+            agentRunner = { request -> encode(request, outputs) },
+            maxRetries = 0
+        )
+        val invalid = assertIs<StartingFieldCompileResult.Invalid>(result)
+        assertTrue(invalid.errors.any { "duplicated" in it.message })
+        assertTrue(invalid.errors.any { "lacks required capabilities" in it.message })
+    }
+
+    @Test
+    fun `zero replan allowance returns provisional warning only after valid compilation`() = runTest {
+        val source = fixtures.outputs()
+        val outputs = source.copy(ecologist = source.ecologist.copy(
+            checkinRounds = listOf(1), leakIntervalRounds = 1
+        ))
+        var taskCalls = 0
+        var report: com.achulkov.evomolior.core.council.CouncilFeasibilityReport? = null
+        val result = GenesisCouncil(
+            "Objective", fixtures.envelope().copy(maxAgentsPerGroupPerRound = 1, maxRounds = 1)
+        ).runCompiled(
+            "no-feasibility-retries",
+            agentRunner = { request ->
+                if (request.role == Role.CouncilTaskAnatomist) taskCalls += 1
+                encode(request, outputs)
+            },
+            maxRetries = 0,
+            onFeasibility = { report = it }
+        )
+        assertIs<StartingFieldCompileResult.Valid>(result)
+        assertEquals(1, taskCalls)
+        assertEquals(0, report?.replansUsed)
+        assertEquals(
+            com.achulkov.evomolior.core.council.CouncilFeasibilityStatus.PROVISIONAL_ONLY,
+            report?.status
+        )
     }
 
     private fun encode(

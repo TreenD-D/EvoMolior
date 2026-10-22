@@ -2,6 +2,7 @@ package com.achulkov.evomolior.api.events
 
 import com.achulkov.evomolior.core.model.GradingResult
 import com.achulkov.evomolior.core.model.Role
+import com.achulkov.evomolior.core.deliverable.RunTerminalOutcomeV2
 import kotlinx.serialization.Serializable
 
 /**
@@ -34,6 +35,33 @@ sealed class EvoMoliorEvent {
     /** The run has ended (all rounds complete or early termination). */
     @Serializable
     data class RunCompleted(val runId: String, val winnerId: String?) : EvoMoliorEvent()
+
+    /**
+     * The work cycle completed and a recovery bundle was archived without acceptance authority.
+     */
+    @Serializable
+    data class RunRecovered(
+        val runId: String,
+        val sourceGroupId: String?,
+        val recoveredOutputPaths: List<String>,
+        val reason: String,
+        val terminalOutcome: RunTerminalOutcomeV2? = null,
+    ) : EvoMoliorEvent()
+
+    /**
+     * The run completed its execution axis and produced a provisional, non-accepted artifact.
+     *
+     * Strict-gate failure is retained as acceptance metadata; it is not reported as process
+     * recovery unless the execution itself failed or the run is being resumed from recovery.
+     */
+    @Serializable
+    data class RunCompletedProvisional(
+        val runId: String,
+        val sourceGroupId: String?,
+        val outputPaths: List<String>,
+        val reason: String,
+        val terminalOutcome: RunTerminalOutcomeV2,
+    ) : EvoMoliorEvent()
 
     /** The run was aborted due to an error or user request. */
     @Serializable
@@ -87,7 +115,8 @@ sealed class EvoMoliorEvent {
     data class GroupBudgetChanged(
         val runId: String,
         val groupId: String,
-        val remainingBudget: Double
+        val remainingBudget: Double,
+        val accounting: GroupBudgetAccounting? = null,
     ) : EvoMoliorEvent()
 
     /** A resource node was claimed by a group. */

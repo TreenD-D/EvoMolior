@@ -134,6 +134,8 @@ class EvoMoliorRunServiceHistoricalDisclosureTest {
         assertEquals(0, projections.disclosure.groupStageIndices.getValue(groupB.value))
         assertEquals(1, engine.currentStage(groupA.value).stageIndex)
         assertEquals(0, engine.currentStage(groupB.value).stageIndex)
+        assertTrue(service.buildDisclosureCheckinResult(groupA.value, 1).stageAdvanced)
+        assertFalse(service.buildDisclosureCheckinResult(groupB.value, 1).stageAdvanced)
 
         val futureState = repository.currentStates(runId, atlasId).getValue(futureId)
         assertEquals(setOf(groupA), futureState.revealedToGroups)

@@ -40,6 +40,12 @@ fun EvoMoliorEvent.toLogLine(): String = when (this) {
     is EvoMoliorEvent.RunCompleted ->
         "✅ [COMPLETED] winner=${winnerId ?: "none"} (run=${runId.take(8)})"
 
+    is EvoMoliorEvent.RunCompletedProvisional ->
+        "🟡 [COMPLETED — PROVISIONAL / NOT ACCEPTED] $reason (run=${runId.take(8)})"
+
+    is EvoMoliorEvent.RunRecovered ->
+        "🛟 [RECOVERED — NOT ACCEPTED] $reason (run=${runId.take(8)})"
+
     is EvoMoliorEvent.RunAborted ->
         "❌ [ABORTED] $reason (run=${runId.take(8)})"
 

@@ -52,6 +52,8 @@ enum class LlmBackend(
         const val CODEX_CLI_ENV_VAR = "CODEX_CLI_PATH"
         const val DEFAULT_CODEX_APP_CLI_PATH = "/Applications/Codex.app/Contents/Resources/codex"
         const val CHATGPT_APP_CODEX_CLI_PATH = "/Applications/ChatGPT.app/Contents/Resources/codex"
+        const val CHATGPT_APP_NESTED_CODEX_CLI_PATH =
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"
 
         fun parse(value: String): LlmBackend = entries.firstOrNull {
             it.id.equals(value, ignoreCase = true) ||
@@ -73,6 +75,7 @@ enum class LlmBackend(
         fun codexCliCandidates(getenv: (String) -> String? = System::getenv): Sequence<String> = sequenceOf(
             getenv("EVOMOLIOR_CODEX_CLI"),
             getenv(CODEX_CLI_ENV_VAR),
+            CHATGPT_APP_NESTED_CODEX_CLI_PATH,
             CHATGPT_APP_CODEX_CLI_PATH,
             DEFAULT_CODEX_APP_CLI_PATH,
             "codex"

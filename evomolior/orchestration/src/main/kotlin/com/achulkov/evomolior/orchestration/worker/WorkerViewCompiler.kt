@@ -22,11 +22,14 @@ import com.achulkov.evomolior.core.contract.NodePortfolio
 import com.achulkov.evomolior.core.contract.RevealedNodeCard
 import com.achulkov.evomolior.core.contract.WorkerArtifactRef
 import com.achulkov.evomolior.core.contract.WorkerDeathNoteRef
+import com.achulkov.evomolior.core.contract.WorkerToolRepairDiagnostic
 import com.achulkov.evomolior.core.contract.WorkerToolCard
 import com.achulkov.evomolior.core.contract.WorkerView
 import com.achulkov.evomolior.core.contract.VisibleShadowNodeCard
+import com.achulkov.evomolior.core.contract.ProvisionalNovelHypothesis
 import com.achulkov.evomolior.core.contract.toRevealedNodeCard
 import com.achulkov.evomolior.core.council.CouncilDeterministicIds
+import com.achulkov.evomolior.core.repair.ApproachVector
 
 /** Compiles redacted, hash-bound ordinary-worker context from sealed Atlas authority. */
 class WorkerViewCompiler {
@@ -43,7 +46,11 @@ class WorkerViewCompiler {
      * @param availableToolCards Bounded promoted tool descriptions.
      * @param predecessorNotes Bounded predecessor note references.
      * @param visibleShadowNodes Identity-redacted accepted discoveries available for testing.
+     * @param provisionalHypotheses Group-local hypotheses available only for provisional testing.
      * @param outlierMandate Outlier-only novelty mandate.
+     * @param opportunityCommitments Canonical origin-version opportunity commitments.
+     * @param assignedToolRepairDiagnostics Prior failures for this exact authoring opportunity.
+     * @param assignedToolRepairApproach Sealed strategy authority for the repair candidate.
      * @return Deterministically hashed worker view.
      */
     fun compile(
@@ -57,7 +64,11 @@ class WorkerViewCompiler {
         availableToolCards: List<WorkerToolCard> = emptyList(),
         predecessorNotes: List<WorkerDeathNoteRef> = emptyList(),
         visibleShadowNodes: List<VisibleShadowNodeCard> = emptyList(),
-        outlierMandate: String? = null
+        provisionalHypotheses: List<ProvisionalNovelHypothesis> = emptyList(),
+        outlierMandate: String? = null,
+        opportunityCommitments: Map<String, ToolOpportunityCommitment> = emptyMap(),
+        assignedToolRepairDiagnostics: List<WorkerToolRepairDiagnostic> = emptyList(),
+        assignedToolRepairApproach: ApproachVector? = null
     ): WorkerView {
         require(atlas.atlasHash.isNotBlank() && atlas.validate().isValid) {
             "Worker views require a valid sealed Atlas"
@@ -67,6 +78,12 @@ class WorkerViewCompiler {
         }
         require(states.values.all { it.nodeId in atlas.nodes && it.round <= round }) {
             "Worker view execution states must belong to this Atlas and not come from a future round"
+        }
+        val expectedOpportunityIds = atlas.nodes.values.mapNotNull {
+            it.toolOpportunity?.opportunityId
+        }.toSet()
+        require(opportunityCommitments.keys == expectedOpportunityIds) {
+            "Worker views require explicit authority for every sealed tool opportunity"
         }
         validateDisclosureLineage(atlas, states)
 
@@ -101,13 +118,21 @@ class WorkerViewCompiler {
                             ToolExecutionPurpose.AGENT_USE
                         else -> null
                     } ?: return@let null
+                    val commitment = requireNotNull(
+                        opportunityCommitments[opportunity.opportunityId]
+                    ) {
+                        "Worker view lacks sealed authority for ${opportunity.opportunityId}"
+                    }
+                    require(
+                        commitment.hasValidHash() &&
+                            commitment.runId == atlas.runId &&
+                            commitment.nodeId == sourceNode.id &&
+                            commitment.opportunity == opportunity
+                    ) {
+                        "Worker view opportunity authority does not match the sealed Atlas node"
+                    }
                     opportunity.opportunityId to ToolCardExpectation(
-                        commitment = ToolOpportunityCommitment(
-                            runId = atlas.runId,
-                            atlasHash = atlas.atlasHash,
-                            nodeId = sourceNode.id,
-                            opportunity = opportunity
-                        ).withComputedHash(),
+                        commitment = commitment,
                         purpose = purpose
                     )
                 }
@@ -161,14 +186,65 @@ class WorkerViewCompiler {
         }
         val assignedNode = assignedNodeId?.let { atlas.nodes.getValue(it).toRevealedNodeCard() }
         val assignedToolSkeleton = assignedNode?.toolOpportunity?.let { opportunity ->
+            val commitment = requireNotNull(
+                opportunityCommitments[opportunity.opportunityId]
+            ) {
+                "Assigned tool node lacks sealed opportunity authority"
+            }
+            require(
+                commitment.hasValidHash() &&
+                    commitment.runId == atlas.runId &&
+                    commitment.nodeId == assignedNode.nodeId &&
+                    commitment.opportunity == opportunity
+            ) {
+                "Assigned tool authority does not match the sealed Atlas node"
+            }
             ToolProjectSkeletonCompiler.compile(
-                ToolOpportunityCommitment(
-                    runId = atlas.runId,
-                    atlasHash = atlas.atlasHash,
-                    nodeId = assignedNode.nodeId,
-                    opportunity = opportunity
-                ).withComputedHash()
+                commitment
             )
+        }
+        require(assignedToolRepairDiagnostics.all { diagnostic ->
+            val opportunity = assignedNode?.toolOpportunity
+            val publicFields = opportunity
+                ?.let { it.requiredInputs + it.requiredOutputs }
+                ?.associateBy { it.name }
+                .orEmpty()
+            val affectedField = diagnostic.affectedPublicField?.let(publicFields::get)
+            assignedToolSkeleton != null &&
+                diagnostic.runId == atlas.runId &&
+                diagnostic.groupId == groupId &&
+                diagnostic.authoringNodeId == assignedNode.nodeId &&
+                diagnostic.opportunityId == opportunity?.opportunityId &&
+                diagnostic.opportunityCommitmentHash ==
+                assignedToolSkeleton.opportunityCommitmentHash &&
+                diagnostic.visibleFromRound <= round &&
+                diagnostic.createdRound < round &&
+                (
+                    diagnostic.affectedPublicField == null ||
+                        affectedField != null
+                    ) &&
+                (
+                    diagnostic.publicQuantitySpec == null ||
+                        affectedField?.quantitySpec == diagnostic.publicQuantitySpec
+                    )
+        }) {
+            "Tool-repair diagnostics must match the exact prior assigned opportunity authority"
+        }
+        require(
+            (assignedToolRepairDiagnostics.isEmpty() &&
+                assignedToolRepairApproach == null) ||
+                (
+                    assignedToolRepairDiagnostics.isNotEmpty() &&
+                        assignedToolRepairApproach != null &&
+                        assignedToolRepairApproach.hasValidHash() &&
+                        assignedToolRepairApproach.runId == atlas.runId &&
+                        assignedToolRepairApproach.groupId == groupId.value &&
+                        assignedToolRepairApproach.opportunityId ==
+                        assignedNode?.toolOpportunity?.opportunityId &&
+                        assignedToolRepairApproach.round == round
+                    )
+        ) {
+            "Tool-repair context requires one exact sealed approach vector"
         }
 
         return WorkerView(
@@ -187,10 +263,25 @@ class WorkerViewCompiler {
             assignedNode = assignedNode,
             groupFeedback = feedback,
             assignedToolSkeleton = assignedToolSkeleton,
+            assignedToolOpportunityOriginAtlasHash = assignedToolSkeleton?.let { skeleton ->
+                opportunityCommitments.values.single {
+                    it.commitmentHash == skeleton.opportunityCommitmentHash
+                }.atlasHash
+            },
+            assignedToolOpportunityCommitmentHash = assignedToolSkeleton
+                ?.opportunityCommitmentHash,
+            assignedToolRepairDiagnostics = assignedToolRepairDiagnostics.sortedWith(
+                compareByDescending<WorkerToolRepairDiagnostic> { it.createdRound }
+                    .thenBy { it.diagnosticId }
+            ),
+            assignedToolRepairApproach = assignedToolRepairApproach,
             allowedKnowledgeRefs = allowedKnowledgeRefs.sortedBy(WorkerArtifactRef::artifactId),
             availableToolCards = availableToolCards.sortedBy(WorkerToolCard::toolId),
             predecessorNotes = predecessorNotes.sortedBy(WorkerDeathNoteRef::noteId),
             visibleShadowNodes = visibleShadowNodes.sortedBy(VisibleShadowNodeCard::proposalId),
+            provisionalHypotheses = provisionalHypotheses.sortedBy(
+                ProvisionalNovelHypothesis::hypothesisId
+            ),
             outlierMandate = outlierMandate
         ).withComputedHash()
     }

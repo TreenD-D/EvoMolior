@@ -7,6 +7,8 @@ import com.achulkov.evomolior.api.service.EngineStatus
 import com.achulkov.evomolior.api.service.EvoMoliorEngineService
 import com.achulkov.evomolior.api.service.MetaArchiveEntryRecord
 import com.achulkov.evomolior.api.service.MetaArchiveSummary
+import com.achulkov.evomolior.api.service.RunOutcomePresentation
+import com.achulkov.evomolior.core.deliverable.ExecutionCompletionStatus
 import com.achulkov.evomolior.core.contract.OverseerDeadEnd
 import com.achulkov.evomolior.core.contract.OverseerDeadEndHistoryEntry
 import com.achulkov.evomolior.core.contract.OverseerExperimentPlan
@@ -125,6 +127,11 @@ class EvoMoliorViewModel(
 
     private val _runCompletionEntries = MutableStateFlow<List<MetaArchiveEntryRecord>>(emptyList())
     val runCompletionEntries: StateFlow<List<MetaArchiveEntryRecord>> = _runCompletionEntries.asStateFlow()
+
+    private val _runOutcomePresentation = MutableStateFlow<RunOutcomePresentation?>(null)
+    /** Verified accepted, provisional, or startup-diagnostic terminal package projection. */
+    val runOutcomePresentation: StateFlow<RunOutcomePresentation?> =
+        _runOutcomePresentation.asStateFlow()
 
     private val _archivedLogText = MutableStateFlow<String?>(null)
     /** Archived log text for a historical run, if one has been opened from disk. */
@@ -295,11 +302,13 @@ class EvoMoliorViewModel(
     fun loadArchivedRun(runId: String) {
         Napier.i("EvoMoliorViewModel: loadArchivedRun runId=$runId")
         _engineState.value = _engineState.value.copy(
-            status = EngineStatus.COMPLETED,
+            status = EngineStatus.EVALUATING,
             activeRunId = runId,
             currentRound = null
         )
         _gradingHistory.value = emptyList()
+        _runOutcomePresentation.value = null
+        loadOutcomePresentation(runId)
 
         scope.launch {
             try {
@@ -323,7 +332,23 @@ class EvoMoliorViewModel(
         scope.launch {
             try {
                 val completionEntries = engineService.getMetaArchiveEntries(runId, "RUN_COMPLETED")
+                val recoveredEntries = engineService.getMetaArchiveEntries(
+                    runId,
+                    "RUN_RECOVERED_NON_ACCEPTED"
+                )
+                check(completionEntries.isEmpty() || recoveredEntries.isEmpty()) {
+                    "Run $runId has conflicting completed and recovered terminal authority"
+                }
                 _runCompletionEntries.value = completionEntries
+                if (_runOutcomePresentation.value == null) {
+                    _engineState.value = _engineState.value.copy(
+                        status = if (recoveredEntries.isNotEmpty()) {
+                            EngineStatus.RECOVERED
+                        } else {
+                            EngineStatus.COMPLETED
+                        }
+                    )
+                }
                 Napier.i("EvoMoliorViewModel: archived run completion entries loaded count=${completionEntries.size}")
             } catch (e: Exception) {
                 Napier.w("EvoMoliorViewModel: failed to load archived run completion entries: ${e.message}")
@@ -395,6 +420,7 @@ class EvoMoliorViewModel(
                 _roundSummaryEntries.value = emptyList()
                 _runCompletionEntries.value = emptyList()
                 _metaArchiveSummary.value = null
+                _runOutcomePresentation.value = null
                 // Auto-select this run in the Substrate Browser so data is visible immediately
                 val startedRunId = event.runId
                 if (_selectedBrowserRunId.value != startedRunId) {
@@ -453,11 +479,55 @@ class EvoMoliorViewModel(
                     }
                 }
                 persistRunDebugLog(event.runId)
+                loadOutcomePresentation(event.runId)
+            }
+            is EvoMoliorEvent.RunCompletedProvisional -> {
+                Napier.w(
+                    "EvoMoliorViewModel: run completed provisionally " +
+                        "runId=${event.runId} reason=${event.reason}"
+                )
+                _engineState.value = _engineState.value.copy(
+                    status = engineStatusForExecution(event.terminalOutcome.executionStatus)
+                )
+                scope.launch {
+                    _metaArchiveSummary.value =
+                        engineService.getMetaArchiveSummary(event.runId)
+                    _roundSummaryEntries.value = engineService.getMetaArchiveEntries(
+                        event.runId,
+                        "ROUND_SUMMARY"
+                    )
+                }
+                persistRunDebugLog(event.runId)
+                loadOutcomePresentation(event.runId)
+                refreshAvailableRuns()
+                refreshSubstrate()
+            }
+            is EvoMoliorEvent.RunRecovered -> {
+                Napier.w(
+                    "EvoMoliorViewModel: run recovered without acceptance " +
+                        "runId=${event.runId} reason=${event.reason}"
+                )
+                _engineState.value = _engineState.value.copy(
+                    status = engineStatusForExecution(event.terminalOutcome?.executionStatus)
+                )
+                scope.launch {
+                    _metaArchiveSummary.value =
+                        engineService.getMetaArchiveSummary(event.runId)
+                    _roundSummaryEntries.value = engineService.getMetaArchiveEntries(
+                        event.runId,
+                        "ROUND_SUMMARY"
+                    )
+                }
+                persistRunDebugLog(event.runId)
+                loadOutcomePresentation(event.runId)
+                refreshAvailableRuns()
+                refreshSubstrate()
             }
             is EvoMoliorEvent.RunAborted -> {
                 Napier.w("EvoMoliorViewModel: run aborted runId=${event.runId} reason=${event.reason}")
                 _engineState.value = _engineState.value.copy(status = EngineStatus.IDLE)
                 scope.launch { _error.emit("Run aborted: ${event.reason}") }
+                loadOutcomePresentation(event.runId)
             }
             is EvoMoliorEvent.GroupBudgetChanged -> {
                 val summaries = _engineState.value.groupSummaries.map { s ->
@@ -522,6 +592,36 @@ class EvoMoliorViewModel(
                 Napier.d("EvoMoliorViewModel: unhandled event type ${event::class.simpleName}")
             }
         }
+    }
+
+    private fun loadOutcomePresentation(runId: String) {
+        scope.launch(ioDispatcher) {
+            runCatching {
+                engineService.getRunOutcomePresentation(runId)
+            }.onSuccess { outcome ->
+                _runOutcomePresentation.value = outcome
+                if (outcome != null) {
+                    _engineState.value = _engineState.value.copy(
+                        status = engineStatusForExecution(outcome.executionStatus)
+                    )
+                }
+            }.onFailure { error ->
+                Napier.w(
+                    "EvoMoliorViewModel: failed to load run outcome for $runId: " +
+                        error.message
+                )
+            }
+        }
+    }
+
+    private fun engineStatusForExecution(
+        executionStatus: ExecutionCompletionStatus?,
+    ): EngineStatus = when (executionStatus) {
+        ExecutionCompletionStatus.COMPLETED -> EngineStatus.COMPLETED
+        ExecutionCompletionStatus.FAILED_PRE_ADMISSION,
+        ExecutionCompletionStatus.FAILED_CORRUPT_STATE,
+        ExecutionCompletionStatus.FAILED_UNWRITABLE_OUTPUT -> EngineStatus.RECOVERED
+        null -> EngineStatus.RECOVERED
     }
 }
 

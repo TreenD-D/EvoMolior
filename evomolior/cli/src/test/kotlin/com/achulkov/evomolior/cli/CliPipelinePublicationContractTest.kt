@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlin.io.path.createDirectories
 import kotlin.io.path.writeBytes
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -101,6 +102,35 @@ class CliPipelinePublicationContractTest {
             )
         )
         assertNotNull(verifyPublishedStageOutput(stageDir, outputSpec))
+    }
+
+    @Test
+    fun `completed provisional output can be verified from the recovery archive path`() {
+        val stageDir = Files.createTempDirectory("cli-recovery-publication-")
+        val output = "provisional receiver artifact"
+        val outputDir = stageDir.resolve("published").also { it.createDirectories() }
+        outputDir.resolve("submission.md").also {
+            it.parent.createDirectories()
+            it.writeBytes(output.toByteArray())
+        }
+        val outputSpec = CliPipelineFinalOutputSpec(
+            relativePath = "submission.md",
+            mediaType = "text/markdown",
+        )
+
+        stageDir.resolve("results.zip").writeBytes(
+            zipBytes(
+                mapOf("outputs/recovered/submission.md" to output),
+            ),
+        )
+
+        assertNotNull(
+            verifyPublishedStageOutput(
+                stageOutputDir = stageDir,
+                outputSpec = outputSpec,
+                publishedOutputDir = outputDir,
+            ),
+        )
     }
 
     private fun zipBytes(entries: Map<String, String>): ByteArray {

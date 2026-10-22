@@ -1,11 +1,15 @@
 package com.achulkov.evomolior.api.service
 
 import com.achulkov.evomolior.api.model.FinalOutputSpec
+import com.achulkov.evomolior.api.model.AcceptanceDiagnosticMode
 import com.achulkov.evomolior.api.model.RunConfig
 import com.achulkov.evomolior.api.model.RunAutoCompletionPolicy
 import com.achulkov.evomolior.core.config.AcceptanceProfile
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
+import com.achulkov.evomolior.core.config.CodexRuntimePreset
 import com.achulkov.evomolior.core.config.LlmBackend
 import com.achulkov.evomolior.core.config.CouncilExecutionPurpose
+import com.achulkov.evomolior.core.council.QuantitativeToolObligation
 import com.achulkov.evomolior.core.model.GroupProfileType
 import com.achulkov.evomolior.core.model.ScoringDimension
 import kotlinx.serialization.EncodeDefault
@@ -37,6 +41,14 @@ data class PersistedRunState(
     val councilExecutionPurpose: CouncilExecutionPurpose = CouncilExecutionPurpose.STANDARD,
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val acceptanceProfile: AcceptanceProfile = AcceptanceProfile.NORMAL,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val acceptanceDiagnosticMode: AcceptanceDiagnosticMode = AcceptanceDiagnosticMode.STRICT,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val codexRuntimePreset: CodexRuntimePreset? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val quantitativeToolObligation: QuantitativeToolObligation? = null,
     val autoCompletionPolicy: RunAutoCompletionPolicy? = null,
     val modelOverrides: Map<String, String> = emptyMap(),
     val finalOutputSpec: FinalOutputSpec? = null,
@@ -56,6 +68,16 @@ data class PersistedRunState(
     val bootstrappedAtMs: Long = System.currentTimeMillis(),
     val lastUpdatedAtMs: Long = System.currentTimeMillis()
 ) {
+    init {
+        require(rounds > 0) { "Persisted run rounds must be positive" }
+        require(nextRoundIndex in 0..rounds) {
+            "Persisted nextRoundIndex=$nextRoundIndex is outside 0..$rounds"
+        }
+        require(activeRoundIndex == null || activeRoundIndex in 0 until rounds) {
+            "Persisted activeRoundIndex=$activeRoundIndex is outside 0 until $rounds"
+        }
+    }
+
     /**
      * Fails closed when a caller attempts to resume with different execution intent.
      *
@@ -73,6 +95,21 @@ data class PersistedRunState(
         require(config.acceptanceProfile == acceptanceProfile) {
             "Recovery acceptance profile=${config.acceptanceProfile.id} does not match " +
                 "persisted profile=${acceptanceProfile.id}"
+        }
+        require(config.acceptanceDiagnosticMode == acceptanceDiagnosticMode) {
+            "Recovery acceptance diagnostic mode=${config.acceptanceDiagnosticMode} does not " +
+                "match persisted mode=$acceptanceDiagnosticMode"
+        }
+        require(config.codexReasoningEffort == codexReasoningEffort) {
+            "Recovery Codex reasoning effort=${config.codexReasoningEffort.configValue} does not " +
+                "match persisted effort=${codexReasoningEffort.configValue}"
+        }
+        require(config.codexRuntimePreset == codexRuntimePreset) {
+            "Recovery Codex preset must match the persisted run"
+        }
+        require(config.quantitativeToolObligation == quantitativeToolObligation) {
+            "Recovery quantitative-tool obligation=${config.quantitativeToolObligation} does not " +
+                "match persisted obligation=$quantitativeToolObligation"
         }
         require(config.autoCompletionPolicy == autoCompletionPolicy) {
             "Recovery auto-completion policy=${config.autoCompletionPolicy} does not match " +
@@ -97,6 +134,10 @@ data class PersistedRunState(
         llmBackend = llmBackend,
         councilExecutionPurpose = councilExecutionPurpose,
         acceptanceProfile = acceptanceProfile,
+        acceptanceDiagnosticMode = acceptanceDiagnosticMode,
+        codexReasoningEffort = codexReasoningEffort,
+        codexRuntimePreset = codexRuntimePreset,
+        quantitativeToolObligation = quantitativeToolObligation,
         autoCompletionPolicy = autoCompletionPolicy,
         modelOverrides = modelOverrides,
         contextArtifacts = emptyList(),
@@ -133,6 +174,10 @@ data class PersistedRunState(
                 llmBackend = config.llmBackend,
                 councilExecutionPurpose = config.councilExecutionPurpose,
                 acceptanceProfile = config.acceptanceProfile,
+                acceptanceDiagnosticMode = config.acceptanceDiagnosticMode,
+                codexReasoningEffort = config.codexReasoningEffort,
+                codexRuntimePreset = config.codexRuntimePreset,
+                quantitativeToolObligation = config.quantitativeToolObligation,
                 autoCompletionPolicy = config.autoCompletionPolicy,
                 modelOverrides = config.modelOverrides,
                 finalOutputSpec = config.finalOutputSpec,
@@ -159,6 +204,7 @@ enum class PersistedRunStatus {
     RUNNING,
     PAUSED,
     COMPLETED,
+    RECOVERED,
     ABORTED,
     FAILED
 }

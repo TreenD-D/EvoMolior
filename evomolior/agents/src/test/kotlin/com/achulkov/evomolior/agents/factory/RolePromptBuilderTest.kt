@@ -12,6 +12,7 @@ import com.achulkov.evomolior.core.contract.RunInputArtifactKind
 import com.achulkov.evomolior.core.contract.StartingField
 import com.achulkov.evomolior.core.contract.WorkerView
 import com.achulkov.evomolior.core.atlas.AtlasGroupId
+import com.achulkov.evomolior.core.atlas.AtlasHashing
 import com.achulkov.evomolior.core.contract.AtlasSkeletonView
 import com.achulkov.evomolior.core.atlas.ArtifactType
 import com.achulkov.evomolior.core.atlas.CapturePolicy
@@ -41,9 +42,15 @@ import com.achulkov.evomolior.core.atlas.TypedField
 import com.achulkov.evomolior.core.atlas.TypedFieldType
 import com.achulkov.evomolior.core.contract.RevealedNodeCard
 import com.achulkov.evomolior.core.contract.WorkerToolCard
+import com.achulkov.evomolior.core.contract.WorkerToolRepairDiagnostic
 import com.achulkov.evomolior.core.model.Role
+import com.achulkov.evomolior.core.repair.ApproachVector
+import com.achulkov.evomolior.core.repair.RepairStrategy
+import com.achulkov.evomolior.core.repair.ToolRepairCode
+import com.achulkov.evomolior.core.repair.ToolRepairSource
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -92,10 +99,16 @@ class RolePromptBuilderTest {
             ),
             payloadHash = "node-payload-hash"
         )
+        val opportunityCommitment = ToolOpportunityCommitment(
+            runId = "run-worker",
+            atlasHash = "atlas-hash",
+            nodeId = nodeId,
+            opportunity = requireNotNull(node.toolOpportunity)
+        ).withComputedHash()
         val workerView = WorkerView(
             runId = "run-worker",
             groupId = AtlasGroupId("group-worker"),
-            round = 0,
+            round = 1,
             stageId = "stage-0",
             visibleAtlasSkeleton = AtlasSkeletonView(
                 atlasId = "atlas-worker",
@@ -121,13 +134,34 @@ class RolePromptBuilderTest {
                 )
             ),
             assignedToolSkeleton = ToolProjectSkeletonCompiler.compile(
-                ToolOpportunityCommitment(
+                opportunityCommitment
+            ),
+            assignedToolOpportunityCommitmentHash = opportunityCommitment.commitmentHash,
+            assignedToolRepairDiagnostics = listOf(
+                WorkerToolRepairDiagnostic(
+                    diagnosticId = "repair-ratio-tool",
                     runId = "run-worker",
-                    atlasHash = "atlas-hash",
-                    nodeId = nodeId,
-                    opportunity = requireNotNull(node.toolOpportunity)
-                ).withComputedHash()
-            )
+                    groupId = AtlasGroupId("group-worker"),
+                    opportunityId = "evidence-calculator",
+                    opportunityCommitmentHash = opportunityCommitment.commitmentHash,
+                    authoringNodeId = nodeId,
+                    source = ToolRepairSource.PRIVATE_PROMOTION_AUTHORITY,
+                    code = ToolRepairCode.POWER_TO_ENERGY_UNIT_CONVERSION,
+                    createdRound = 0,
+                    visibleFromRound = 1,
+                    affectedPublicField = "ratio",
+                    diagnosticHash = "d".repeat(64)
+                )
+            ),
+            assignedToolRepairApproach = ApproachVector(
+                vectorId = "approach-run-worker-group-worker-1",
+                runId = "run-worker",
+                groupId = "group-worker",
+                opportunityId = "evidence-calculator",
+                round = 1,
+                lineageAttempt = 1,
+                strategy = RepairStrategy.DIMENSIONAL_ANALYSIS_FIRST
+            ).withComputedHash()
         ).withComputedHash()
         val prompt = RolePromptBuilder.build(
             AgentBootContext(
@@ -147,7 +181,7 @@ class RolePromptBuilderTest {
                 stageDisclosure = "Use the redacted worker view.",
                 modelAssignment = "gpt-test",
                 ipcBaseUrl = "http://127.0.0.1:10000",
-                generation = 0,
+                generation = 1,
                 workerView = workerView
             )
         )
@@ -158,17 +192,40 @@ class RolePromptBuilderTest {
         assertContains(prompt, "Staging alone does not establish contribution")
         assertContains(prompt, "commit_contribution MUST be the last authority action")
         assertContains(prompt, "Required runtime language: python")
-        assertContains(prompt, "Exact generated inputSchema JSON")
-        assertContains(prompt, "fields opportunityId, name, domain")
-        assertContains(prompt, "ratio-boundary")
-        assertContains(prompt, "non-empty JSON string containing runnable implementation")
-        assertContains(prompt, "=== GENERATED TOOL PROJECT SKELETON ===")
+        assertContains(prompt, "Repeated question pattern: Calculate an evidence ratio.")
+        assertContains(prompt, "Promotion validation strategy: Run the committed boundary case.")
+        assertContains(
+            prompt,
+            "runtime owns canonical typed-value bytes"
+        )
+        assertContains(prompt, "Opportunity handle: T1")
+        assertContains(prompt, "Unknown, stale, or foreign handles fail closed")
+        assertContains(prompt, "contract/public-tests.json")
+        assertContains(prompt, "=== GENERATED IMMUTABLE TOOL WORKSPACE ===")
         assertContains(prompt, "Skeleton hash: ${workerView.assignedToolSkeleton?.skeletonHash}")
-        assertContains(prompt, "Generated file tool.py (executable=true)")
-        assertContains(prompt, "Generated file contract.json (executable=false)")
-        assertContains(prompt, "Generated file promotion-tests.json (executable=false)")
-        assertContains(prompt, "Implement exactly one bounded tool function")
-        assertContains(prompt, "Complete the generated tool.py implementation")
+        assertContains(prompt, "contract/input-schema.json")
+        assertContains(prompt, "contract/output-schema.json")
+        assertContains(prompt, "src/main.py")
+        assertContains(prompt, "tests/author-tests.json")
+        assertContains(prompt, "toolCandidate must contain opportunityHandle=\"T1\"")
+        assertContains(prompt, "entryPoint=\"run_tool\"")
+        assertContains(prompt, "Do not place opportunityId, inputSchema, outputSchema")
+        assertContains(prompt, "content-hashes generated files")
+        assertContains(prompt, "=== PRIOR TYPED TOOL REPAIR DIAGNOSTICS ===")
+        assertContains(prompt, "diagnosticId=repair-ratio-tool")
+        assertContains(prompt, "code=POWER_TO_ENERGY_UNIT_CONVERSION")
+        assertContains(prompt, "remediationKey=tool_repair.power_to_energy_unit_conversion")
+        assertFalse(prompt.contains("ratio-boundary"))
+        assertContains(prompt, "Private fixtures and exact private outputs are never disclosed")
+        assertContains(prompt, "Treat them as hypotheses")
+        assertContains(prompt, "=== SEALED TOOL REPAIR APPROACH ===")
+        assertContains(prompt, "Strategy: DIMENSIONAL_ANALYSIS_FIRST")
+        assertFalse(prompt.contains("Opportunity ID: evidence-calculator"))
+        assertFalse(prompt.contains("Exact generated inputSchema JSON"))
+        assertFalse(prompt.contains(workerView.assignedToolSkeleton!!.inputSchemaJson))
+        assertFalse(prompt.contains(workerView.assignedToolSkeleton!!.outputSchemaJson))
+        assertFalse(prompt.contains("private-fixture-input"))
+        assertFalse(prompt.contains("private-expected-output"))
         assertContains(prompt, "exactly outputSchema.properties")
         assertContains(prompt, "additionalProperties=false")
         assertContains(prompt, "Do not add assumptions, exclusions, diagnostics")
@@ -177,8 +234,7 @@ class RolePromptBuilderTest {
         assertContains(prompt, "maximumOutputBytes=4096")
         assertContains(prompt, "maximum variable-length horizon")
         assertContains(prompt, "do not silently default them")
-        assertContains(prompt, "expected/actual or schema/runtime defect")
-        assertContains(prompt, "JSON encoded as a string")
+        assertContains(prompt, "one wire error")
         assertContains(prompt, "INTEGER and NUMBER are distinct")
         assertContains(prompt, "decimal literals such as 0.0")
         assertContains(prompt, "Literal nodes use the tagged value shape")
@@ -369,6 +425,12 @@ class RolePromptBuilderTest {
             toolOpportunity = opportunity,
             payloadHash = "formula-payload"
         )
+        val opportunityCommitment = ToolOpportunityCommitment(
+            runId = "run-formula",
+            atlasHash = "atlas-hash",
+            nodeId = nodeId,
+            opportunity = opportunity
+        ).withComputedHash()
         val workerView = WorkerView(
             runId = "run-formula",
             groupId = AtlasGroupId("group-formula"),
@@ -385,13 +447,9 @@ class RolePromptBuilderTest {
             assignedNode = node,
             groupFeedback = null,
             assignedToolSkeleton = ToolProjectSkeletonCompiler.compile(
-                ToolOpportunityCommitment(
-                    runId = "run-formula",
-                    atlasHash = "atlas-hash",
-                    nodeId = nodeId,
-                    opportunity = opportunity
-                ).withComputedHash()
-            )
+                opportunityCommitment
+            ),
+            assignedToolOpportunityCommitmentHash = opportunityCommitment.commitmentHash
         ).withComputedHash()
 
         val prompt = RolePromptBuilder.build(
@@ -418,15 +476,21 @@ class RolePromptBuilderTest {
         )
 
         assertContains(prompt, "Exact FORMULA_DSL physical dimensions")
+        assertContains(prompt, "Repeated question pattern: Calculate required cooling power.")
+        assertContains(
+            prompt,
+            "Promotion validation strategy: Run the committed exact cooling case."
+        )
         assertContains(
             prompt,
             "per_area_coefficient: length=-2,power=1,temperature=-1"
         )
         assertContains(prompt, "Reference semantics: DIMENSIONAL_ANALYSIS_V1")
-        assertContains(prompt, "Council-authored reference FORMULA_DSL program")
-        assertContains(prompt, "\"field\":\"per_area_coefficient\"")
-        assertContains(prompt, "need not be byte-identical")
-        assertContains(prompt, "Numeric literals are dimensionless")
+        assertContains(prompt, "editable src/formula.json carry the Council executable authority")
+        assertContains(prompt, "sourceArtifactPath=\"src/formula.json\"")
+        assertContains(prompt, "entryPoint=\"formula\"")
+        assertFalse(prompt.contains("Council-authored reference FORMULA_DSL program"))
+        assertFalse(prompt.contains("\"field\":\"per_area_coefficient\""))
     }
 
     @Test
@@ -510,6 +574,35 @@ class RolePromptBuilderTest {
         assertContains(prompt, "Include exactly one object for every group × dimension combination.")
         assertContains(prompt, "Do not add prose, markdown, code fences, comments, or additional fields.")
         assertFalse(prompt.contains("GRADING_SCORE targetGroupId="))
+    }
+
+    @Test
+    fun `round judge prompt carries substantial snapshot evidence within a shared budget`() {
+        val reportBody = "Regional terrain inventory row. ".repeat(900) // ~28.8k chars
+        val snapshot = "=== CANON SNAPSHOT ===\n$reportBody\nFINAL-SECTION-MARKER\n=== END SNAPSHOT ==="
+        val single = RolePromptBuilder.buildRoundJudge(
+            runObjective = "Rank the submission.",
+            dimensionDescriptions = "  • [evidence] Evidence (weight=1.00): Evidence quality.",
+            criteriaContext = "Score the full report.",
+            allGroupSnapshots = mapOf("group-0" to snapshot),
+            roundIndex = 0
+        )
+        // The former flat 2,000-character cut hid everything after the first document lines.
+        assertContains(single, "FINAL-SECTION-MARKER")
+        assertFalse(single.contains("snapshot truncated"))
+
+        val oversized = "x".repeat(RolePromptBuilder.ROUND_JUDGE_SNAPSHOT_BUDGET_CHARS + 500)
+        val manyGroups = (0 until 12).associate { "group-$it" to oversized }
+        val crowded = RolePromptBuilder.buildRoundJudge(
+            runObjective = "Rank twelve submissions.",
+            dimensionDescriptions = "  • [evidence] Evidence (weight=1.00): Evidence quality.",
+            criteriaContext = "Score each group.",
+            allGroupSnapshots = manyGroups,
+            roundIndex = 0
+        )
+        val perSnapshot = RolePromptBuilder.roundJudgeSnapshotChars(12)
+        assertEquals(RolePromptBuilder.ROUND_JUDGE_MIN_SNAPSHOT_CHARS, perSnapshot)
+        assertContains(crowded, "snapshot truncated: ${oversized.length - perSnapshot} of ${oversized.length} chars omitted")
     }
 
     @Test

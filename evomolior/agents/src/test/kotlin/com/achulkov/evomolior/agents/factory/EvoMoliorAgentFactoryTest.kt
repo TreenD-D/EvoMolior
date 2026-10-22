@@ -46,6 +46,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
@@ -270,6 +271,30 @@ class EvoMoliorAgentFactoryTest {
     }
 
     @Test
+    fun `source denied agent has no report correction callback`() {
+        val rootDir = createTempDirectory("agent-source-denied-").toFile()
+        val factory = qwenFactory(
+            rootDir = rootDir,
+            taskToolCapabilityPolicy = TaskToolCapabilityPolicy(emptySet())
+        )
+        assertNull(factory.reportSourceAdvisory(qwenBootContext()))
+    }
+
+    @Test
+    fun `source capable agent without verified inputs receives no correction request`() = runBlocking {
+        val rootDir = createTempDirectory("agent-source-unavailable-").toFile()
+        val factory = qwenFactory(
+            rootDir = rootDir,
+            taskToolCapabilityPolicy = TaskToolCapabilityPolicy(setOf(TaskToolCapabilityPolicy.READ_RUN_ARTIFACT))
+        )
+        val advisory = assertNotNull(factory.reportSourceAdvisory(qwenBootContext()))
+        val feedback = assertNotNull(advisory.check("Useful report"))
+        assertTrue(feedback.contains("NO_SOURCE_AUTHORITY"))
+        assertTrue(feedback.contains("No correction is requested"))
+        assertFalse(feedback.contains("Make one correction pass"))
+    }
+
+    @Test
     fun `compiled worker view removes dynamic task claims while legacy mode retains them`() {
         val rootDir = createTempDirectory("agent-factory-worker-authority-tools-").toFile()
         val factory = qwenFactory(rootDir)
@@ -369,9 +394,21 @@ class EvoMoliorAgentFactoryTest {
             limit = 10,
             offset = 0
         )
-        assertEquals(2, events.size)
-        assertTrue(events.any { it.payloadJson.contains("\"blocked\":false") })
-        assertTrue(events.any { it.payloadJson.contains("\"blocked\":true") })
+        assertEquals(1, events.size)
+        assertTrue(events.single().payloadJson.contains("\"blocked\":true"))
+        val auditEvents = db.eventLogDao().queryFiltered(
+            runId = context.runId,
+            groupId = context.groupId,
+            agentId = context.agentId,
+            eventType = EventTypes.CONSTITUTIONAL_AUDIT,
+            minGeneration = null,
+            maxGeneration = null,
+            limit = 10,
+            offset = 0
+        )
+        assertEquals(1, auditEvents.size)
+        assertTrue(auditEvents.single().payloadJson.contains("\"blocked\":false"))
+        assertTrue(auditEvents.single().payloadJson.contains("\"actionType\":\"TOOL_CALL\""))
     }
 
     @Test
@@ -769,6 +806,71 @@ class EvoMoliorAgentFactoryTest {
 
         assertEquals(0, written)
         assertEquals(1, db.stagingDao().getAll("run-001", "g0").size)
+    }
+
+    @Test
+    fun `rejected tool preserves exact repair reason instead of satisfying contract`() = runBlocking {
+        val rootDir = createTempDirectory("agent-factory-rejected-tool-contract-").toFile()
+        val db = SubstrateDatabaseFactory(rootDir).get("run-001", "g0")
+        val factory = EvoMoliorAgentFactory(
+            openRouterApiKey = "sk-test",
+            llmBackend = LlmBackend.OPENROUTER,
+            db = db,
+            toolSubSandbox = ToolSubSandbox(),
+            budgetConfig = defaultConfig
+        )
+        val bootContext = bootContext(role = Role.Researcher, isSubAgent = false)
+        db.stagingDao().insert(
+            StagingSubmissionEntity(
+                id = "kg-accepted",
+                agentId = bootContext.agentId,
+                role = bootContext.role.name,
+                type = "KG_FACT",
+                content = "SUBJECT: run\nRELATION: demonstrates\nOBJECT: kg",
+                budgetSignature = "test",
+                status = "pending",
+                generation = bootContext.generation,
+                groupId = bootContext.groupId,
+                runId = bootContext.runId,
+                submittedAtMs = 1L
+            )
+        )
+        db.stagingDao().insert(
+            StagingSubmissionEntity(
+                id = "tool-rejected",
+                agentId = bootContext.agentId,
+                role = bootContext.role.name,
+                type = "TOOL",
+                content = """{"name":"invalid"}""",
+                budgetSignature = "test",
+                status = "rejected",
+                rejectionReason =
+                    "tool_validation_unexpected_output: expected={\"value\":1}; actual={\"value\":2}",
+                generation = bootContext.generation,
+                groupId = bootContext.groupId,
+                runId = bootContext.runId,
+                submittedAtMs = 2L
+            )
+        )
+
+        val written = factory.writeMissingSubstrateContractFallbacks(
+            bootContext = bootContext,
+            finalResult =
+                "Tool submission completed with expected={\"private\":1}; " +
+                    "actual={\"private\":2}; stderr=/Users/private/secret",
+            actionLog = emptyList()
+        )
+
+        val fallback = db.stagingDao().getAll("run-001", "g0")
+            .single { it.type == "PLAN_UPDATE" }
+        assertEquals(1, written)
+        assertTrue(fallback.content.startsWith("TOOL ABSTENTION RATIONALE"))
+        assertTrue(fallback.content.contains("tool-rejected"))
+        assertTrue(fallback.content.contains("tool_validation_unexpected_output"))
+        assertTrue(fallback.content.contains("reasonHash="))
+        assertFalse(fallback.content.contains("expected={\"value\":1}"))
+        assertFalse(fallback.content.contains("actual={\"value\":2}"))
+        assertFalse(fallback.content.contains("/Users/private/secret"))
     }
 
     @Test

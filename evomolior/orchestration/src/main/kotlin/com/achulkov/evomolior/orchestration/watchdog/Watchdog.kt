@@ -1,6 +1,7 @@
 package com.achulkov.evomolior.orchestration.watchdog
 
 import com.achulkov.evomolior.core.model.Role
+import com.achulkov.evomolior.orchestration.lifecycle.LifecycleBudgetTelemetry
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
 import io.github.aakira.napier.Napier
 import java.util.Locale
@@ -53,6 +54,8 @@ class Watchdog(
 
     // Per-group budget tracking for BudgetCritical signals
     private val groupBudgets = ConcurrentHashMap<String, Double>()
+    private data class BudgetObservation(val generation: Int, val revision: Long, val critical: Boolean)
+    private val groupBudgetObservations = ConcurrentHashMap<String, BudgetObservation>()
 
     private var watchJob: Job? = null
 
@@ -82,21 +85,74 @@ class Watchdog(
         agentGroupMap[agentId] = groupId
     }
 
-    /** Called when an agent dies; removes it from monitoring. */
+    /** Called when an agent completes or is stopped; retains the protocol-compatible method name. */
     @Suppress("unused")
     fun onAgentDied(agentId: String) {
         agentLastActivity.remove(agentId)
         agentGroupMap.remove(agentId)
     }
 
-    /** Resets threshold-crossing state for a newly allocated generation budget. */
+    /** Resets legacy scalar threshold tracking; typed observations carry their own generation. */
     fun beginGenerationBudget(groupId: String, totalBudget: Double) {
         require(totalBudget >= 0.0) { "Generation budget must be non-negative" }
         groupBudgets[groupId] = totalBudget
     }
 
     /**
-     * Called by orchestration when a group's live generation budget is updated.
+     * Checks depletion only among allocations that still have live lifecycle owners.
+     *
+     * Settled unused balances are neither spent nor live allocation. In particular an empty
+     * fleet cannot be depleted. Generation/revision ordering rejects delayed callback work.
+     * @param groupId Group owning the observation.
+     * @param telemetry Immutable lifecycle accounting observation.
+     * @param criticalFraction Live-balance fraction at which to emit a crossing.
+     */
+    suspend fun updateBudget(
+        groupId: String,
+        telemetry: LifecycleBudgetTelemetry,
+        criticalFraction: Double = 0.10
+    ) {
+        require(criticalFraction in 0.0..1.0) { "Critical fraction must be between 0 and 1" }
+        require(telemetry.liveAgentCount >= 0)
+        require(telemetry.liveAllocatedCredits.isFinite() && telemetry.liveAllocatedCredits >= 0.0)
+        require(telemetry.liveCredits.isFinite())
+        val critical = telemetry.liveAgentCount > 0 &&
+            telemetry.liveAllocatedCredits > 0.0 &&
+            telemetry.liveCredits / telemetry.liveAllocatedCredits <= criticalFraction
+        var crossed = false
+        groupBudgetObservations.compute(groupId) { _, previous ->
+            if (previous != null && (
+                    telemetry.generation < previous.generation ||
+                        (telemetry.generation == previous.generation && telemetry.revision <= previous.revision)
+                    )
+            ) {
+                previous
+            } else {
+                crossed = critical && (previous == null ||
+                    previous.generation != telemetry.generation || !previous.critical)
+                BudgetObservation(telemetry.generation, telemetry.revision, critical)
+            }
+        }
+        if (!crossed) return
+        Napier.w(
+            "Watchdog: group $groupId live budget CRITICAL — ${telemetry.liveCredits} / " +
+                "${telemetry.liveAllocatedCredits}; liveAgents=${telemetry.liveAgentCount} " +
+                "allocated=${telemetry.allocatedCredits} spent=${telemetry.spentCredits} " +
+                "returned=${telemetry.returnedCredits}"
+        )
+        _signals.emit(
+            WatchdogSignal.BudgetCritical(
+                groupId = groupId,
+                remainingBudget = telemetry.liveCredits,
+                generationBudget = telemetry.liveAllocatedCredits,
+                generation = telemetry.generation
+            )
+        )
+    }
+
+    /**
+     * Legacy scalar observation; callers must provide a consistent budget population.
+     * Lifecycle callers should use the typed overload, which can distinguish an empty fleet.
      * Triggers a [WatchdogSignal.BudgetCritical] when budget drops below [criticalFraction].
      *
      * @param groupId The group whose budget changed.

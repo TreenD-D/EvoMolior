@@ -106,6 +106,10 @@ internal object CouncilPromotionTestContractValidator {
             val inputFailure = TypedToolSchemaValidator.validationFailure(input, inputSchema)
             val outputFailure =
                 TypedToolSchemaValidator.validationFailure(expectedOutput, outputSchema)
+                    ?: TypedToolSchemaValidator.canonicalOutputFailure(
+                        expectedOutput,
+                        outputSchema
+                    )
             if (inputFailure != null) {
                 failures += failure(
                     test,

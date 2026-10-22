@@ -2,6 +2,7 @@
 
 package com.achulkov.evomolior.api.grader
 
+import com.achulkov.evomolior.core.repair.StorageExhaustion
 import com.achulkov.evomolior.agents.factory.GraderAgentContext
 import com.achulkov.evomolior.agents.factory.GraderAgentFactory
 import com.achulkov.evomolior.agents.factory.LlmBackendToolSupportPolicy
@@ -26,6 +27,7 @@ import com.achulkov.evomolior.competition.grader.GradingSheet
 import com.achulkov.evomolior.competition.grader.RubricDimension
 import com.achulkov.evomolior.core.budget.BudgetConfig
 import com.achulkov.evomolior.core.config.LlmBackend
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
 import com.achulkov.evomolior.core.contract.GraderMethodologyDraft
 import com.achulkov.evomolior.core.contract.GraderMethodologyBindingCatalog
 import com.achulkov.evomolior.core.contract.GraderMethodologyWireDraft
@@ -53,6 +55,7 @@ import com.achulkov.evomolior.core.grader.GraderBundleValidationFailure
 import com.achulkov.evomolior.core.grader.GraderScoreBundle
 import com.achulkov.evomolior.core.grader.GraderScoreBundleStatus
 import com.achulkov.evomolior.core.grader.GradingRequirement
+import com.achulkov.evomolior.core.grader.HiddenTestDefinition
 import com.achulkov.evomolior.core.grader.RequirementResult
 import com.achulkov.evomolior.core.grader.RequirementResultStatus
 import com.achulkov.evomolior.core.grader.SafeRegexMatcher
@@ -64,6 +67,7 @@ import com.achulkov.evomolior.substrate.grader.GraderAuthorityRepository
 import com.achulkov.evomolior.substrate.outlier.OutlierNoveltyRepository
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
 import io.github.aakira.napier.Napier
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -74,9 +78,11 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-private const val JUDGE_MAX_CRITERIA_ENTRY_CHARS = 900
+// Consolidated criteria revisions carry every dimension in one entry; 900 chars hid most of it.
+private const val JUDGE_MAX_CRITERIA_ENTRY_CHARS = 2_000
 private const val CRITERIA_SEED_MAX_KB_DOCS = 4
 private const val CRITERIA_SEED_MAX_KB_CHARS = 700
 private const val GRADER_KNOWLEDGE_MAX_KB_DOCS = 8
@@ -89,21 +95,33 @@ private const val DIRECT_AGENT_CRITERIA_SIGNATURE_PREFIX = "DIRECT_AGENT_OUTPUT"
 private val graderScoreJson = Json {
     ignoreUnknownKeys = false
     isLenient = false
+    encodeDefaults = true
 }
 
+@Serializable
 internal data class AuthoredTestOutcome(
     val testId: String,
     val description: String,
     val passed: Boolean,
     val mandatory: Boolean,
-    val penalty: Double
-)
+    val penalty: Double,
+    val expectedOutputPattern: String? = null,
+    val executionError: String? = null
+) {
+    val status: AuthoredTestExecutionStatus
+        get() = when {
+            executionError != null -> AuthoredTestExecutionStatus.ERROR
+            passed -> AuthoredTestExecutionStatus.PASS
+            else -> AuthoredTestExecutionStatus.FAIL
+        }
+}
 
 internal data class AuthoredTestAssessment(
-    val outcomes: List<AuthoredTestOutcome>
+    val outcomes: List<AuthoredTestOutcome>,
+    val targetSnapshotHash: String? = null
 ) {
     val promptContext: String = outcomes.joinToString("\n") { outcome ->
-        "- ${outcome.testId}: ${if (outcome.passed) "PASS" else "FAIL"}; " +
+        "- ${outcome.testId}: ${outcome.status}; " +
             "mandatory=${outcome.mandatory}; penalty=${outcome.penalty}; ${outcome.description}"
     }
 
@@ -111,12 +129,14 @@ internal data class AuthoredTestAssessment(
         scores: List<DimensionScore>
     ): List<DimensionScore> {
         if (scores.isEmpty()) return emptyList()
-        if (outcomes.any { !it.passed && it.mandatory }) {
+        if (outcomes.any { it.status != AuthoredTestExecutionStatus.PASS && it.mandatory }) {
             return scores.map { score ->
                 score.copy(
                     rawScore = 0.0,
-                    justification = "Mandatory grader-authored automated test failed: " +
-                        outcomes.filter { !it.passed && it.mandatory }.joinToString { it.testId }
+                    justification = "${score.justification} Mandatory grader-authored automated test failed: " +
+                        outcomes.filter {
+                            it.status != AuthoredTestExecutionStatus.PASS && it.mandatory
+                        }.joinToString { it.testId }
                 )
             }
         }
@@ -128,6 +148,34 @@ internal data class AuthoredTestAssessment(
                 justification = "${score.justification} Automated-test penalty: $penalty."
             )
         }
+    }
+}
+
+private data class RejectedMethodologyRepairContext(
+    val feedback: String? = null,
+    val priorDraft: GraderMethodologyWireDraft? = null
+)
+
+/** A sealed test result is authoritative only for its exact snapshot and executable predicate. */
+private fun AuthoredTestAssessment?.matchesFrozenTests(
+    freeze: GraderCriteriaFreeze,
+    frozenTests: List<HiddenTestDefinition>,
+    snapshotHash: String
+): Boolean {
+    if (frozenTests.size != freeze.hiddenTestHashes.size) return false
+    // No assessment is needed only when the freeze explicitly commits no tests.
+    if (this == null) return frozenTests.isEmpty()
+    if (targetSnapshotHash != snapshotHash || outcomes.size != frozenTests.size) return false
+    if (outcomes.map { it.testId }.distinct().size != outcomes.size) return false
+    val frozenById = frozenTests.associateBy { it.testId.value }
+    return outcomes.all { outcome ->
+        val pattern = outcome.expectedOutputPattern ?: return@all false
+        val frozenId = AtlasHashing.hashText(
+            "grader-hidden-test|${freeze.runId}|${freeze.round}|${freeze.graderGroupId}|${outcome.testId}"
+        )
+        val frozenTest = frozenById[frozenId] ?: return@all false
+        outcome.executionError == null &&
+            frozenTest.executorRef == "grader-regex:${outcome.testId}:${AtlasHashing.hashText(pattern)}"
     }
 }
 
@@ -159,6 +207,7 @@ internal data class AuthoredTestAssessment(
 class GraderRunner(
     private val openRouterApiKey: String,
     private val llmBackend: LlmBackend = LlmBackend.OPENROUTER,
+    private val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     private val substrateFactory: SubstrateDatabaseFactory,
     private val localAgentRunner: suspend (context: GraderAgentContext) -> String,
     private val graderAgentTimeoutMs: Long = 4 * 60_000L,
@@ -255,6 +304,7 @@ class GraderRunner(
             val factory = GraderAgentFactory(
                 openRouterApiKey = openRouterApiKey,
                 llmBackend = llmBackend,
+                codexReasoningEffort = codexReasoningEffort,
                 graderDb = graderDb,
                 graderBudgetConfig = graderBudgetConfigFor(graderGroupId),
                 graderGroupId = graderGroupId,
@@ -285,6 +335,7 @@ class GraderRunner(
                         scoringDimensions = scoringDimensions
                     )
                 } catch (e: Exception) {
+                    if (e is CancellationException) throw e
                     Napier.w(
                         "GraderRunner: evaluation failed for $targetGroupId " +
                         "by $graderGroupId round=$roundIndex: ${e.message}"
@@ -398,6 +449,7 @@ class GraderRunner(
                         val factory = GraderAgentFactory(
                             openRouterApiKey = openRouterApiKey,
                             llmBackend = llmBackend,
+                            codexReasoningEffort = codexReasoningEffort,
                             graderDb = graderDb,
                             graderBudgetConfig = graderBudgetConfigFor(graderGroupId),
                             graderGroupId = graderGroupId,
@@ -414,6 +466,36 @@ class GraderRunner(
                             graderGroupId = graderGroupId,
                             maxGeneration = roundIndex
                         )
+                        // Each round starts from the newest accepted criteria and improves them,
+                        // instead of re-researching every dimension from scratch.
+                        val baseline = PriorRoundCriteriaBaseline.load(
+                            db = graderDb,
+                            runId = runId,
+                            graderGroupId = graderGroupId,
+                            roundIndex = roundIndex
+                        )
+                        val boundBaseline = baseline?.methodology?.let { methodology ->
+                            methodologyBindingCatalog?.projectForRepair(methodology)
+                        }
+                        // Fresh research remains necessary when the leased frontier moved and the
+                        // accepted methodology can no longer be bound to this round's handles.
+                        val refineFromBaseline = baseline != null &&
+                            (methodologyBindingCatalog == null || boundBaseline != null)
+                        val baselineContext = baseline?.render(
+                            boundMethodology = boundBaseline,
+                            redact = methodologyBindingCatalog
+                                ?.let { catalog -> { text: String -> catalog.redactExactAuthority(text) } }
+                                ?: { text: String -> text }
+                        )
+                        if (baseline != null) {
+                            Napier.i(
+                                "GraderRunner: $graderGroupId round=$roundIndex revises accepted criteria " +
+                                    "(methodology gen=${baseline.methodologyGeneration}, " +
+                                    "documents gen=${baseline.documentsGeneration}, " +
+                                    "boundToCurrentFrontier=${boundBaseline != null}, " +
+                                    "stableRefinement=$refineFromBaseline)"
+                            )
+                        }
                         val civilization = GraderCivilizationController(
                             db = graderDb,
                             runId = runId,
@@ -421,7 +503,8 @@ class GraderRunner(
                         )
                         val generationPlan = civilization.planGeneration(
                             generation = roundIndex + 1,
-                            scoringDimensions = scoringDimensions
+                            scoringDimensions = scoringDimensions,
+                            refineFromBaseline = refineFromBaseline
                         )
                         ensureDeterministicCriteriaSeedPersisted(
                             graderDb = graderDb,
@@ -491,7 +574,8 @@ class GraderRunner(
                                 },
                                 graderAtlas = graderAtlas,
                                 graderView = graderView,
-                                workerAtlas = workerAtlas
+                                workerAtlas = workerAtlas,
+                                baselineCriteria = baselineContext
                             )
                             civilization.claim(
                                 assignment = assignment,
@@ -503,8 +587,10 @@ class GraderRunner(
                                     onProgress = onProgress,
                                     heartbeatMessage = "[$graderGroupId] $role still developing criteria for round $roundIndex"
                                 ) {
-                                    withTimeout(graderAgentTimeoutMs) { localAgentRunner(context) }
+                                    withTimeout(graderAgentTimeoutMs) { runAgent(context) }
                                 }
+                            } catch (e: CancellationException) {
+                                throw e
                             } catch (e: Exception) {
                                 Napier.w("GraderRunner: criteria $role failed for $graderGroupId: ${e.message}")
                                 "[$role criteria phase terminated: ${e.message?.take(200)}]"
@@ -556,29 +642,36 @@ class GraderRunner(
                                 agentId = structuredAuthorAgentId
                             )
                             val author = structuredMethodologyAuthor ?: run {
+                                val costRecorder = ProviderCallCostRecorder(
+                                    repository = costLedgerRepositoryProvider(runId),
+                                    runId = runId,
+                                    groupId = graderGroupId,
+                                    agentId = structuredAuthorAgentId
+                                )
                                 val productionAuthor = StructuredGraderMethodologyAuthor(
                                     apiKey = openRouterApiKey,
                                     llmBackend = llmBackend,
+                                    codexReasoningEffort = codexReasoningEffort,
                                     modelId = modelOverrideFor(Role.GraderBuilder)
                                         ?: com.achulkov.evomolior.core.config.ModelSelectionConfig
                                             .DEFAULT_GRADER_MODEL,
-                                    providerCostRecorder = ProviderCallCostRecorder(
-                                        repository = costLedgerRepositoryProvider(runId),
-                                        runId = runId,
-                                        groupId = graderGroupId,
-                                        agentId = structuredAuthorAgentId
-                                    )
+                                    providerCostRecorder = costRecorder
                                 )
-                                productionAuthor::author
+                                (productionAuthor::author).withCostCleanup(costRecorder)
                             }
-                            var validationError: String? = latestRejectedMethodologyFeedback(
+                            val rejectedRepair = latestRejectedMethodologyRepairContext(
                                 graderDb = graderDb,
                                 runId = runId,
                                 graderGroupId = graderGroupId,
-                                roundIndex = roundIndex
+                                roundIndex = roundIndex,
+                                bindingCatalog = requireNotNull(methodologyBindingCatalog)
                             )
-                            var priorDraft: GraderMethodologyWireDraft? = null
+                            var validationError: String? = rejectedRepair.feedback
+                            var priorDraft: GraderMethodologyWireDraft? = rejectedRepair.priorDraft
+                            var storageExhausted = false
                             repeat(TYPED_METHODOLOGY_REPAIR_ATTEMPTS) { repairIndex ->
+                                // A full volume fails every attempt locally; do not retry it.
+                                if (storageExhausted) return@repeat
                                 if (hasTypedMethodologyDraft(
                                         graderDb,
                                         runId,
@@ -599,9 +692,13 @@ class GraderRunner(
                                     runObjective = runObjective,
                                     scoringDimensions = scoringDimensions,
                                     bindingCatalog = requireNotNull(methodologyBindingCatalog),
-                                    priorCriteria = previousCriteria,
+                                    priorCriteria = listOfNotNull(
+                                        previousCriteria,
+                                        com.achulkov.evomolior.agents.factory.GRADER_AUTHORED_TEST_TARGET_CONTRACT
+                                    ).joinToString("\n\n"),
                                     priorDraft = priorDraft,
-                                    validationError = validationError
+                                    validationError = validationError,
+                                    baselineDraft = boundBaseline.takeIf { rejectedRepair.priorDraft == null }
                                 )
                                 val rawDraft = runCatching {
                                     withProgressHeartbeat(
@@ -614,6 +711,8 @@ class GraderRunner(
                                         }
                                     }
                                 }.onFailure { error ->
+                                    if (error is CancellationException) throw error
+                                    if (StorageExhaustion.isCause(error)) storageExhausted = true
                                     validationError = "model call failed: ${error.message}"
                                     Napier.w(
                                         "GraderRunner: structured methodology authorship failed for " +
@@ -639,6 +738,8 @@ class GraderRunner(
                             }
                         }
                         onProgress?.invoke("[$graderGroupId] criteria phase complete for round $roundIndex")
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         Napier.w("GraderRunner: criteria phase failed for $graderGroupId round=$roundIndex: ${e.message}")
                     }
@@ -699,6 +800,7 @@ class GraderRunner(
                         val factory = GraderAgentFactory(
                             openRouterApiKey = openRouterApiKey,
                             llmBackend = llmBackend,
+                            codexReasoningEffort = codexReasoningEffort,
                             graderDb = graderDb,
                             graderBudgetConfig = graderBudgetConfigFor(graderGroupId),
                             graderGroupId = graderGroupId,
@@ -724,6 +826,7 @@ class GraderRunner(
                                 }
                                 .sortedBy { it.submittedAtMs }
                         } catch (e: Exception) {
+                            if (e is CancellationException) throw e
                             Napier.w("GraderRunner: failed to read criteria for $graderGroupId: ${e.message}")
                             emptyList()
                         }
@@ -768,6 +871,7 @@ class GraderRunner(
                                         roundIndex
                                     )
                                 } catch (e: Exception) {
+                                    if (e is CancellationException) throw e
                                     Napier.w("GraderRunner: snapshot export failed for $targetGroupId: ${e.message}")
                                     "(snapshot unavailable: ${e.message?.take(150)})"
                                 }
@@ -790,7 +894,10 @@ class GraderRunner(
                                 automatedAssessments[targetGroupId]?.let { assessment ->
                                     appendLine()
                                     appendLine()
-                                    appendLine("=== GRADER-AUTHORED AUTOMATED TEST RESULTS ===")
+                                    appendLine(RolePromptBuilder.JUDGE_AUTOMATED_TEST_RESULTS_HEADER)
+                                    appendLine(
+                                        "Target: ROUND_CANON_SNAPSHOT (not the final publication candidate)."
+                                    )
                                     append(assessment.promptContext)
                                 }
                             }
@@ -854,6 +961,16 @@ class GraderRunner(
                             val scoresForGroup = automatedAssessments[targetGroupId]
                                 ?.applyTo(deduplicatedScores)
                                 ?: deduplicatedScores
+                            persistAuthoredGradingDiagnostic(
+                                runId = runId,
+                                roundIndex = roundIndex,
+                                graderGroupId = graderGroupId,
+                                targetGroupId = targetGroupId,
+                                snapshot = allGroupSnapshots.getValue(targetGroupId),
+                                assessment = automatedAssessments[targetGroupId],
+                                rawScores = deduplicatedScores,
+                                gatedScores = scoresForGroup
+                            )
                             if (scoresForGroup.isNotEmpty()) {
                                 authoritativeScoresByTarget[targetGroupId] = scoresForGroup
                                 graderGroupManager.submitScores(
@@ -887,6 +1004,7 @@ class GraderRunner(
                             nodeGradeResponses = nodeGradeResponses.toList()
                         )
                     } catch (e: Exception) {
+                        if (e is CancellationException) throw e
                         Napier.w("GraderRunner: judging phase failed for $graderGroupId round=$roundIndex: ${e.message}")
                         GraderJudgingOutput(
                             graderGroupId = graderGroupId,
@@ -910,7 +1028,80 @@ class GraderRunner(
         return judgeOutputs
     }
 
-    private suspend fun repairMissingDimensionScoresFromSealedAuthority(
+    internal suspend fun persistAuthoredGradingDiagnostic(
+        runId: String,
+        roundIndex: Int,
+        graderGroupId: String,
+        targetGroupId: String,
+        snapshot: String,
+        assessment: AuthoredTestAssessment?,
+        rawScores: List<DimensionScore>,
+        gatedScores: List<DimensionScore>
+    ) {
+        val freeze = graderAuthorityRepository.criteriaFreezeForRound(
+            runId, roundIndex, graderGroupId
+        )
+        val frozenTests = freeze?.let {
+            graderAuthorityRepository.hiddenTestsForFreeze(it)
+        }.orEmpty()
+        val frozenTestIds = frozenTests.map { it.testId.value }.toSet()
+        val snapshotHash = AtlasHashing.hashText(snapshot)
+        val diagnostic = AuthoredGradingDiagnostic(
+            runId = runId,
+            roundIndex = roundIndex,
+            graderGroupId = graderGroupId,
+            targetGroupId = targetGroupId,
+            targetSnapshotHash = snapshotHash,
+            criteriaFreezeHash = freeze?.freezeHash,
+            targetAuthorityStatus = when {
+                freeze == null -> AuthoredTargetAuthorityStatus.UNSEALED
+                freeze.hasValidHash() &&
+                    freeze.runId == runId &&
+                    freeze.round == roundIndex &&
+                    freeze.graderGroupId == graderGroupId &&
+                    freeze.targetSnapshotHashes[
+                        com.achulkov.evomolior.core.atlas.AtlasGroupId(targetGroupId)
+                    ] == snapshotHash &&
+                    assessment.matchesFrozenTests(freeze, frozenTests, snapshotHash) ->
+                    AuthoredTargetAuthorityStatus.MATCHED
+                else -> AuthoredTargetAuthorityStatus.MISMATCH
+            },
+            tests = assessment?.outcomes.orEmpty().map { outcome ->
+                AuthoredTestDiagnostic(
+                    outcome = outcome,
+                    frozenTestId = AtlasHashing.hashText(
+                        "grader-hidden-test|$runId|$roundIndex|$graderGroupId|${outcome.testId}"
+                    ).takeIf { it in frozenTestIds }
+                )
+            },
+            rawScores = rawScores,
+            gatedScores = gatedScores
+        )
+        substrateFactory.getGrader(runId, graderGroupId).eventLogDao().insert(
+            com.achulkov.evomolior.substrate.db.entity.EventLogEntryEntity(
+                id = java.util.UUID.randomUUID().toString(),
+                timestampMs = System.currentTimeMillis(),
+                eventType = "AUTHORED_GRADING_DIAGNOSTIC",
+                groupId = graderGroupId,
+                runId = runId,
+                generation = roundIndex + 1,
+                payloadJson = graderScoreJson.encodeToString(diagnostic)
+            )
+        )
+        Napier.i(
+            "GraderRunner grading diagnostic grader=$graderGroupId target=$targetGroupId " +
+                "snapshotHash=${diagnostic.targetSnapshotHash} freezeHash=${diagnostic.criteriaFreezeHash} " +
+                "targetAuthority=${diagnostic.targetAuthorityStatus} " +
+                "targetKind=${diagnostic.targetKind} gateStatus=${diagnostic.gateStatus} " +
+                "finalCandidateValidation=${diagnostic.finalCandidateValidationStatus} " +
+                "aggregation=${diagnostic.aggregationStatus} " +
+                "tests=${diagnostic.tests.joinToString { "${it.outcome.testId}:${it.status}" }} " +
+                "raw=${rawScores.joinToString { "${it.dimensionId}:${it.rawScore}" }} " +
+                "gated=${gatedScores.joinToString { "${it.dimensionId}:${it.rawScore}" }}"
+        )
+    }
+
+    internal suspend fun repairMissingDimensionScoresFromSealedAuthority(
         runId: String,
         roundIndex: Int,
         graderGroupId: String,
@@ -941,9 +1132,6 @@ class GraderRunner(
             )
             return
         }
-        onProgress?.invoke(
-            "[$graderGroupId] structured RoundJudge dimension repair for $targetGroupId"
-        )
         repairMissingDimensionScores(
             runId = runId,
             graderGroupId = graderGroupId,
@@ -996,20 +1184,30 @@ class GraderRunner(
         }
         val missingDimensions = scoringDimensions.filterNot { it.id in existingIds }
         if (missingDimensions.isEmpty()) return
+        // Report actual provider repair work, not the unconditional completeness probe.
+        onProgress?.invoke(
+            "[$graderGroupId] structured RoundJudge dimension repair for $targetGroupId " +
+                "missingDimensions=${missingDimensions.joinToString { it.id }}"
+        )
 
         val agentId = "dimension-score-structured-$graderGroupId-$targetGroupId"
-        val author = structuredDimensionScoreAuthor ?: StructuredDimensionScoreAuthor(
-            apiKey = openRouterApiKey,
-            llmBackend = llmBackend,
-            modelId = modelOverrideFor(Role.GraderCritic)
-                ?: com.achulkov.evomolior.core.config.ModelSelectionConfig.DEFAULT_GRADER_MODEL,
-            providerCostRecorder = ProviderCallCostRecorder(
+        val author = structuredDimensionScoreAuthor ?: run {
+            val costRecorder = ProviderCallCostRecorder(
                 repository = costLedgerRepositoryProvider(runId),
                 runId = runId,
                 groupId = graderGroupId,
                 agentId = agentId
             )
-        )::author
+            val productionAuthor = StructuredDimensionScoreAuthor(
+                apiKey = openRouterApiKey,
+                llmBackend = llmBackend,
+                codexReasoningEffort = codexReasoningEffort,
+                modelId = modelOverrideFor(Role.GraderCritic)
+                    ?: com.achulkov.evomolior.core.config.ModelSelectionConfig.DEFAULT_GRADER_MODEL,
+                providerCostRecorder = costRecorder
+            )
+            (productionAuthor::author).withCostCleanup(costRecorder)
+        }
         val missingIds = missingDimensions.map(ScoringDimension::id)
         var validationError: String? = null
         repeat(STRUCTURED_DIMENSION_SCORE_ATTEMPTS) { attempt ->
@@ -1027,7 +1225,8 @@ class GraderRunner(
                                 runObjective = runObjective,
                                 criteriaFreezeHash = criteriaFreezeHash,
                                 targetSnapshotHash = targetSnapshotHash,
-                                criteriaContext = criteriaContext,
+                                criteriaContext = criteriaContext + "\n\n" +
+                                    com.achulkov.evomolior.agents.factory.GRADER_RAW_SCORE_CONTRACT,
                                 targetSnapshot = targetSnapshot,
                                 alreadyAuthoredScores = existingScores,
                                 missingDimensions = missingDimensions,
@@ -1036,7 +1235,10 @@ class GraderRunner(
                         )
                     }
                 }
-            }.onFailure { validationError = "model call failed: ${it.message}" }
+            }.onFailure {
+                if (it is CancellationException) throw it
+                validationError = "model call failed: ${it.message}"
+            }
                 .getOrNull() ?: return@repeat
             val draft = runCatching {
                 graderScoreJson.decodeFromString<StructuredDimensionScoreRepairDraft>(raw)
@@ -1096,18 +1298,23 @@ class GraderRunner(
         responses: MutableList<NodeGraderResponse>
     ) {
         val agentId = "node-grade-structured-$graderGroupId"
-        val author = structuredNodeGradeAuthor ?: StructuredNodeGradeAuthor(
-            apiKey = openRouterApiKey,
-            llmBackend = llmBackend,
-            modelId = modelOverrideFor(Role.GraderCritic)
-                ?: com.achulkov.evomolior.core.config.ModelSelectionConfig.DEFAULT_GRADER_MODEL,
-            providerCostRecorder = ProviderCallCostRecorder(
+        val author = structuredNodeGradeAuthor ?: run {
+            val costRecorder = ProviderCallCostRecorder(
                 repository = costLedgerRepositoryProvider(runId),
                 runId = runId,
                 groupId = graderGroupId,
                 agentId = agentId
             )
-        )::author
+            val productionAuthor = StructuredNodeGradeAuthor(
+                apiKey = openRouterApiKey,
+                llmBackend = llmBackend,
+                codexReasoningEffort = codexReasoningEffort,
+                modelId = modelOverrideFor(Role.GraderCritic)
+                    ?: com.achulkov.evomolior.core.config.ModelSelectionConfig.DEFAULT_GRADER_MODEL,
+                providerCostRecorder = costRecorder
+            )
+            (productionAuthor::author).withCostCleanup(costRecorder)
+        }
         require(
             evaluationContexts.all {
                 it.graderGroupId == graderGroupId && it.hasValidHash()
@@ -1167,7 +1374,10 @@ class GraderRunner(
                             validationError = validationError
                         )
                     )
-                }.onFailure { validationError = "model call failed: ${it.message}" }
+                }.onFailure {
+                    if (it is CancellationException) throw it
+                    validationError = "model call failed: ${it.message}"
+                }
                     .getOrNull() ?: return@repeat
                 val draft = runCatching {
                     graderScoreJson.decodeFromString<StructuredNodeGradeDraft>(raw)
@@ -1347,15 +1557,9 @@ class GraderRunner(
                             score.rawScore.isFinite() &&
                             score.rawScore in 0.0..dimension.maxScore
                     }
+                val assessment = automatedAssessments[targetGroupId]
                 val testResultsComplete = frozenTestAuthorityComplete &&
-                    frozenTests.all { frozenTest ->
-                        val localTestId = localTestIdsByStableHash[frozenTest.testId]
-                        localTestId != null &&
-                            automatedAssessments[targetGroupId]
-                                ?.outcomes
-                                .orEmpty()
-                                .any { it.testId == localTestId }
-                    }
+                    assessment.matchesFrozenTests(freeze, frozenTests, snapshotHash)
                 val nodeScores = assignmentResponses.mapNotNull { (assignment, responses) ->
                     responses.singleOrNull()
                         ?.takeIf {
@@ -1410,8 +1614,8 @@ class GraderRunner(
                             ?.let(outcomesByLocalTestId::get)
                             ?.let { outcome ->
                                 AtlasHashing.hashText(
-                                    "${stableTestId.value}|${outcome.passed}|" +
-                                        "${outcome.mandatory}|${outcome.penalty}"
+                                    "${freeze.freezeHash}|$snapshotHash|${stableTestId.value}|" +
+                                        "${outcome.passed}|${outcome.mandatory}|${outcome.penalty}"
                                 )
                             }
                     }
@@ -1551,6 +1755,12 @@ class GraderRunner(
                         it.requirementId
                     }
                 )
+                Napier.i(
+                    "GraderRunner score bundle grader=$graderGroupId target=$targetGroupId " +
+                        "snapshotHash=$snapshotHash bundleHash=${bundle.payloadHash} " +
+                        "structuralStatus=$status scoreInput=GATED " +
+                        "validationFailures=${validationFailures.joinToString()}"
+                )
             }.onFailure { error ->
                 persistenceFailures += "$targetGroupId: ${error.message}"
                 Napier.w(
@@ -1607,6 +1817,7 @@ class GraderRunner(
                 val factory = GraderAgentFactory(
                     openRouterApiKey = openRouterApiKey,
                     llmBackend = llmBackend,
+                    codexReasoningEffort = codexReasoningEffort,
                     graderDb = graderDb,
                     graderBudgetConfig = graderBudgetConfigFor(graderGroupId),
                     graderGroupId = graderGroupId,
@@ -1624,9 +1835,10 @@ class GraderRunner(
                 )
                 val output = runCatching {
                     withTimeout(graderAgentTimeoutMs) {
-                        localAgentRunner(context)
+                        runAgent(context)
                     }
                 }.getOrElse { error ->
+                    if (error is CancellationException) throw error
                     Napier.w(
                         "Novelty assessor failed closed for grader=$graderGroupId " +
                             "proposal=${proposal.proposalHash}: ${error.message}"
@@ -1760,9 +1972,11 @@ class GraderRunner(
                     heartbeatMessage = "[$graderGroupId] RoundJudge still scoring round $roundIndex — $targetGroupId"
                 ) {
                     withTimeout(graderAgentTimeoutMs) {
-                        localAgentRunner(judgeContext)
+                        runAgent(judgeContext)
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Napier.w(
                     "GraderRunner: RoundJudge failed for $graderGroupId round=$roundIndex " +
@@ -2099,7 +2313,7 @@ class GraderRunner(
         allGroupSnapshots = allGroupSnapshots,
         nodeEvaluationContexts = nodeEvaluationContexts,
         roundIndex = roundIndex
-    )
+    ) + "\n\n" + com.achulkov.evomolior.agents.factory.GRADER_RAW_SCORE_CONTRACT
 
     internal suspend fun readFailureTelemetryContext(
         graderDb: com.achulkov.evomolior.substrate.db.EvoMoliorDatabase,
@@ -2112,6 +2326,7 @@ class GraderRunner(
                 .sortedBy { it.submittedAtMs }
                 .takeLast(10)
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Napier.w("GraderRunner: failed to read failure telemetry for $graderGroupId: ${e.message}")
             emptyList()
         }
@@ -2136,6 +2351,7 @@ class GraderRunner(
                 limit = CRITERIA_SEED_MAX_KB_DOCS
             ).filter { it.domain == "grader_seed" || it.domain == "evaluation" }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Napier.w("GraderRunner: failed to read grader seed context for $graderGroupId: ${e.message}")
             emptyList()
         }
@@ -2164,6 +2380,7 @@ class GraderRunner(
                 .take(GRADER_KNOWLEDGE_MAX_KB_DOCS)
                 .toList()
         }.getOrElse { error ->
+            if (error is CancellationException) throw error
             Napier.w("GraderRunner: failed to read compounded grader KB for $graderGroupId: ${error.message}")
             emptyList()
         }
@@ -2182,6 +2399,7 @@ class GraderRunner(
                 .take(GRADER_KNOWLEDGE_MAX_KG_FACTS)
                 .toList()
         }.getOrElse { error ->
+            if (error is CancellationException) throw error
             Napier.w("GraderRunner: failed to read compounded grader KG for $graderGroupId: ${error.message}")
             emptyList()
         }
@@ -2319,30 +2537,47 @@ class GraderRunner(
             }.getOrNull()?.requirements?.isNotEmpty() == true
         }
 
-    private suspend fun latestRejectedMethodologyFeedback(
+    private suspend fun latestRejectedMethodologyRepairContext(
         graderDb: com.achulkov.evomolior.substrate.db.EvoMoliorDatabase,
         runId: String,
         graderGroupId: String,
-        roundIndex: Int
-    ): String? = graderDb.stagingDao().getAll(runId, graderGroupId)
-        .asSequence()
-        .filter {
-            it.type == "PLAN_UPDATE" &&
-                it.status == "rejected" &&
-                it.generation == roundIndex + 1 &&
-                it.budgetSignature.startsWith(
-                    GRADER_METHODOLOGY_DRAFT_SIGNATURE_PREFIX
-                ) &&
-                !it.rejectionReason.isNullOrBlank()
-        }
-        .maxWithOrNull(
-            compareBy<StagingSubmissionEntity>(
-                { it.reviewedAtMs ?: Long.MIN_VALUE },
-                StagingSubmissionEntity::submittedAtMs
+        roundIndex: Int,
+        bindingCatalog: GraderMethodologyBindingCatalog
+    ): RejectedMethodologyRepairContext {
+        val rejected = graderDb.stagingDao().getAll(runId, graderGroupId)
+            .asSequence()
+            .filter {
+                it.type == "PLAN_UPDATE" &&
+                    it.status == "rejected" &&
+                    it.generation == roundIndex + 1 &&
+                    it.budgetSignature.startsWith(
+                        GRADER_METHODOLOGY_DRAFT_SIGNATURE_PREFIX
+                    )
+            }
+            .maxWithOrNull(
+                compareBy<StagingSubmissionEntity>(
+                    { it.reviewedAtMs ?: Long.MIN_VALUE },
+                    StagingSubmissionEntity::submittedAtMs,
+                    StagingSubmissionEntity::id
+                )
             )
+            ?: return RejectedMethodologyRepairContext()
+        val exactDraft = runCatching {
+            graderScoreJson.decodeFromString<GraderMethodologyDraft>(rejected.content)
+        }.getOrNull()
+        val priorDraft = exactDraft?.let(bindingCatalog::projectForRepair)
+        val feedback = if (priorDraft == null) {
+            "Prior Critic rejected a methodology that cannot be safely projected into the current " +
+                "sealed handle catalog. Author a fresh methodology against the sealed contracts."
+        } else {
+            "Prior Critic rejected the persisted methodology. Repair the supplied redacted prior " +
+                "draft against the sealed objective-specific methodology contract."
+        }
+        return RejectedMethodologyRepairContext(
+            feedback = feedback,
+            priorDraft = priorDraft
         )
-        ?.rejectionReason
-        ?.let { "Prior Critic verdict: $it" }
+    }
 
     private fun GraderMethodologyDraft.toGradingSheet(
         runId: String,
@@ -2385,18 +2620,22 @@ class GraderRunner(
         )
     }
 
-    private fun GraderMethodologyDraft.assess(snapshot: String): AuthoredTestAssessment {
+    internal fun GraderMethodologyDraft.assess(snapshot: String): AuthoredTestAssessment {
         val outcomes = automatedTests.map { test ->
-            val passed = SafeRegexMatcher.containsMatch(test.expectedOutputPattern, snapshot)
+            val error = SafeRegexMatcher.validationError(test.expectedOutputPattern)
+            val passed = error == null &&
+                SafeRegexMatcher.containsMatch(test.expectedOutputPattern, snapshot)
             AuthoredTestOutcome(
                 testId = test.testId,
                 description = test.description,
                 passed = passed,
                 mandatory = test.isMandatory,
-                penalty = if (passed) 0.0 else test.penaltyOnFailure
+                penalty = if (passed) 0.0 else test.penaltyOnFailure,
+                expectedOutputPattern = test.expectedOutputPattern,
+                executionError = error
             )
         }
-        return AuthoredTestAssessment(outcomes)
+        return AuthoredTestAssessment(outcomes, AtlasHashing.hashText(snapshot))
     }
 
     private suspend fun ensureCriteriaPersisted(
@@ -2741,6 +2980,23 @@ class GraderRunner(
     private fun String.compactText(maxChars: Int): String = if (length <= maxChars) this
     else take(maxChars) + "...[truncated]"
 
+    private suspend fun runAgent(context: GraderAgentContext): String = try {
+        localAgentRunner(context)
+    } finally {
+        // Koog's failure event is not guaranteed on cancellation. Settle only this agent's calls.
+        context.providerCostRecorder?.failedAll()
+    }
+
+    private fun <T> (suspend (T) -> String).withCostCleanup(
+        recorder: ProviderCallCostRecorder
+    ): suspend (T) -> String = { request ->
+        try {
+            this(request)
+        } finally {
+            recorder.failedAll()
+        }
+    }
+
     private suspend fun <T> withProgressHeartbeat(
         onProgress: ((String) -> Unit)?,
         heartbeatMessage: String,
@@ -2815,10 +3071,11 @@ class GraderRunner(
                     heartbeatMessage = "[$graderGroupId] $role still scoring target=$targetGroupId round=$roundIndex"
                 ) {
                     withTimeout(graderAgentTimeoutMs) {
-                        localAgentRunner(context)
+                        runAgent(context)
                     }
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Napier.w(
                     "GraderRunner: $role agent timed out or failed for $targetGroupId: ${e.message}"
                 )
@@ -2846,7 +3103,7 @@ class GraderRunner(
             Role.GraderBuilder,
             Role.GraderCritic
         )
-        private const val TYPED_METHODOLOGY_REPAIR_ATTEMPTS = 2
+        private const val TYPED_METHODOLOGY_REPAIR_ATTEMPTS = 3
         private const val STRUCTURED_DIMENSION_SCORE_ATTEMPTS = 2
         private const val STRUCTURED_NODE_GRADE_ATTEMPTS = 2
 

@@ -365,38 +365,119 @@ class EvoMoliorRunServiceArchitectureHealthTest {
     }
 
     @Test
-    fun `final winner tie break prefers substantive deliverable and substrate over empty first group`() {
+    fun `publication winner always requires resolved scoring authority`() {
         val root = createTempDirectory("run-service-final-winner-tiebreak-test-").toFile()
         val service = service(root)
         val method = service::class.declaredFunctions.first { it.name == "selectFinalWinnerId" }
             .apply { isAccessible = true }
+        val rankedScores = listOf(
+            com.achulkov.evomolior.core.model.RoundScore(
+                groupId = "group-0",
+                roundIndex = 5,
+                dimensionScores = emptyList(),
+                weightedTotal = 0.0,
+                rank = 1
+            ),
+            com.achulkov.evomolior.core.model.RoundScore(
+                groupId = "group-1",
+                roundIndex = 5,
+                dimensionScores = emptyList(),
+                weightedTotal = 0.0,
+                rank = 2
+            )
+        )
+        val unresolved = com.achulkov.evomolior.core.model.GradingResult(
+            roundIndex = 5,
+            scores = rankedScores,
+            winnerId = null,
+            resolution = com.achulkov.evomolior.core.model.ScoringResolution.ALL_ZERO_DEGENERACY
+        )
+        val resolved = com.achulkov.evomolior.core.model.GradingResult(
+            roundIndex = 5,
+            scores = rankedScores.mapIndexed { index, score ->
+                score.copy(weightedTotal = if (index == 0) 1.0 else 0.5)
+            },
+            winnerId = "group-0",
+            resolution = com.achulkov.evomolior.core.model.ScoringResolution.RESOLVED
+        )
         val groupSummaries = listOf(
             groupSummary("group-0", score = 0.0),
-            groupSummary("group-1", score = 0.0),
-            groupSummary("group-2", score = 0.0)
+            groupSummary("group-1", score = 0.0)
         )
         val submissionSummaries = mapOf(
-            "group-0" to "ROUND SUBMISSION SUMMARY\nEmpty tie-break winner.",
+            "group-0" to "ROUND SUBMISSION SUMMARY\nNo embedded deliverable.",
             "group-1" to """
                 ROUND SUBMISSION SUMMARY
                 FINAL DELIVERABLE HTML
-                <!doctype html><html><body>Substantive article.</body></html>
-            """.trimIndent(),
-            "group-2" to """
-                ROUND SUBMISSION SUMMARY
-                FINAL DELIVERABLE HTML
-                <!doctype html><html><body>Substantive article with KG support.</body></html>
+                <!doctype html><html><body>Policy-selected deliverable.</body></html>
             """.trimIndent()
         )
         val health = listOf(
             substrateHealth("group-0", kgCount = 0, activeToolCount = 0),
-            substrateHealth("group-1", kgCount = 0, activeToolCount = 0),
-            substrateHealth("group-2", kgCount = 2, activeToolCount = 0)
+            substrateHealth("group-1", kgCount = 1, activeToolCount = 0)
         )
+        fun config(purpose: com.achulkov.evomolior.core.config.CouncilExecutionPurpose) =
+            com.achulkov.evomolior.api.model.RunConfig(
+                runId = "winner-policy-${purpose.id}",
+                objective = "Resolve a final publication winner.",
+                groupCount = 2,
+                groupProfiles = listOf(GroupProfileType.Library, GroupProfileType.Factory),
+                rounds = 1,
+                roundDurationMinutes = 1,
+                maxAgentsPerGroup = 1,
+                scoringDimensions = listOf(
+                    ScoringDimension(
+                        id = "quality",
+                        name = "Quality",
+                        description = "Final publication quality.",
+                        weight = 1.0
+                    )
+                ),
+                openRouterApiKey = "sk-test",
+                llmBackend = if (
+                    purpose ==
+                    com.achulkov.evomolior.core.config.CouncilExecutionPurpose.APPENDIX_B_ACCEPTANCE
+                ) {
+                    com.achulkov.evomolior.core.config.LlmBackend.CODEX_CHATGPT
+                } else {
+                    com.achulkov.evomolior.core.config.LlmBackend.OPENROUTER
+                },
+                councilExecutionPurpose = purpose
+            )
 
-        val selected = method.call(service, groupSummaries, submissionSummaries, health)
-
-        assertEquals("group-2", selected)
+        assertNull(
+            method.call(
+                service,
+                config(com.achulkov.evomolior.core.config.CouncilExecutionPurpose.APPENDIX_B_ACCEPTANCE),
+                5,
+                unresolved,
+                groupSummaries,
+                submissionSummaries,
+                health
+            )
+        )
+        assertNull(
+            method.call(
+                service,
+                config(com.achulkov.evomolior.core.config.CouncilExecutionPurpose.STANDARD),
+                5,
+                unresolved,
+                groupSummaries,
+                submissionSummaries,
+                health
+            )
+        )
+        assertNull(
+            method.call(
+                service,
+                config(com.achulkov.evomolior.core.config.CouncilExecutionPurpose.APPENDIX_B_ACCEPTANCE),
+                5,
+                resolved,
+                groupSummaries,
+                submissionSummaries,
+                health
+            )
+        )
     }
 
     private fun groupSummary(

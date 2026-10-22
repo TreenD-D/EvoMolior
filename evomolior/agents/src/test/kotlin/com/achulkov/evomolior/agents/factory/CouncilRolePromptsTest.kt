@@ -1,13 +1,105 @@
 package com.achulkov.evomolior.agents.factory
 
+import com.achulkov.evomolior.core.atlas.PhysicalDimension
+import com.achulkov.evomolior.core.atlas.ToolOpportunityType
+import com.achulkov.evomolior.core.atlas.TypedFieldType
+import com.achulkov.evomolior.core.config.AcceptanceProfile
+import com.achulkov.evomolior.core.council.QuantitativeToolFieldLocation
+import com.achulkov.evomolior.core.council.QuantitativeToolFieldObligation
+import com.achulkov.evomolior.core.council.QuantitativeToolFieldShape
+import com.achulkov.evomolior.core.council.QuantitativeToolObligation
 import com.achulkov.evomolior.core.model.Role
+import com.achulkov.evomolior.core.repair.AggregationSemantics
+import com.achulkov.evomolior.core.repair.QuantitySpec
+import com.achulkov.evomolior.core.repair.TimeBasis
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
  * Verifies that each Council prompt carries the runtime envelope and its typed role contract.
  */
 class CouncilRolePromptsTest {
+
+    @Test
+    fun `task prompt renders exact operator quantitative tool contract`() {
+        val obligation = QuantitativeToolObligation(
+            horizonTimeBasis = TimeBasis.HOUR,
+            horizonIntervalCount = 72,
+            allowedOpportunityTypes = setOf(ToolOpportunityType.CALCULATION),
+            requiredOpportunityId = "bounded_energy_audit",
+            exactPromotionTestIds = setOf("runtime_boundary", "unit_boundary"),
+            maximumOpportunityRuntimeMillis = 8_000,
+            requiredFields = listOf(
+                QuantitativeToolFieldObligation(
+                    roleId = "shelter_area",
+                    fieldName = "shelter_area_m2",
+                    location = QuantitativeToolFieldLocation.INPUT,
+                    shape = QuantitativeToolFieldShape.SCALAR,
+                    quantitySpec = QuantitySpec(
+                        dimension = PhysicalDimension(mapOf("length" to 2)),
+                        unitId = "m2",
+                        scaleToSi = 1.0,
+                        aggregation = AggregationSemantics.INSTANTANEOUS
+                    )
+                ),
+                QuantitativeToolFieldObligation(
+                    roleId = "hourly_electrical_energy",
+                    fieldName = "hourly_electrical_energy_kwh",
+                    location = QuantitativeToolFieldLocation.OUTPUT,
+                    shape = QuantitativeToolFieldShape.HORIZON_SERIES,
+                    numericType = TypedFieldType.NUMBER,
+                    quantitySpec = QuantitySpec(
+                        dimension = PhysicalDimension(mapOf("energy" to 1)),
+                        unitId = "kWh",
+                        scaleToSi = 3_600_000.0,
+                        aggregation = AggregationSemantics.SUM_OVER_INTERVALS,
+                        timeBasis = TimeBasis.HOUR
+                    )
+                )
+            )
+        )
+        val envelope = councilTestExecutionEnvelope().copy(
+            maxRounds = 6,
+            acceptanceProfile = AcceptanceProfile.APPENDIX_B_FULL,
+            quantitativeToolObligation = obligation
+        )
+
+        val taskPrompt = CouncilRolePrompts.forRole(Role.CouncilTaskAnatomist, envelope)
+        val synthesisPrompt = CouncilRolePrompts.forRole(Role.CouncilSynthesis, envelope)
+
+        assertTrue(taskPrompt.contains("OPERATOR-OWNED QUANTITATIVE TOOL CONTRACT"))
+        assertTrue(taskPrompt.contains("\"shelter_area_m2\""))
+        assertTrue(taskPrompt.contains("\"hourly_electrical_energy_kwh\""))
+        assertTrue(taskPrompt.contains("\"horizonIntervalCount\": 72"))
+        assertTrue(taskPrompt.contains("\"requiredOpportunityId\": \"bounded_energy_audit\""))
+        assertTrue(taskPrompt.contains("\"runtime_boundary\""))
+        assertTrue(taskPrompt.contains("\"maximumOpportunityRuntimeMillis\": 8000"))
+        assertTrue(taskPrompt.contains("complete promotionTestIds set"))
+        assertTrue(taskPrompt.contains("inclusive ceiling"))
+        assertTrue(taskPrompt.contains("\"unitId\": \"kWh\""))
+        assertTrue(taskPrompt.contains("\"aggregation\": \"SUM_OVER_INTERVALS\""))
+        assertTrue(taskPrompt.contains("\"timeBasis\": \"HOUR\""))
+        assertTrue(taskPrompt.contains("INPUT means `requiredInputs`, OUTPUT means `requiredOutputs`"))
+        assertTrue(taskPrompt.contains("one top-level field"))
+        assertTrue(taskPrompt.contains("minimumItems and maximumItems"))
+        assertTrue(taskPrompt.contains("inside `items`"))
+        assertTrue(taskPrompt.contains("copy the complete"))
+        assertTrue(taskPrompt.contains("`quantitySpec` exactly"))
+        assertTrue(taskPrompt.contains("COPY-READY TASK ANATOMIST TOOL-OPPORTUNITY AUTHORITY"))
+        assertTrue(taskPrompt.contains("\"name\": \"shelter_area_m2\""))
+        assertTrue(taskPrompt.contains("\"type\": \"NUMBER\""))
+        assertTrue(taskPrompt.contains("\"name\": \"hourly_electrical_energy_kwh\""))
+        assertTrue(taskPrompt.contains("\"type\": \"NUMBER_ITEMS\""))
+        assertTrue(taskPrompt.contains("\"minimumItems\": 72"))
+        assertTrue(taskPrompt.contains("\"maximumItems\": 72"))
+        assertTrue(taskPrompt.contains("\"timeBasis\": null"))
+        assertTrue(taskPrompt.contains("never replace a numeric field"))
+        assertTrue(taskPrompt.contains("delete every conflicting prior field object"))
+        assertTrue(taskPrompt.contains("Never emit a `nodes`"))
+        assertTrue(taskPrompt.contains("ordinal-bearing partition arrays"))
+        assertFalse(synthesisPrompt.contains("OPERATOR-OWNED QUANTITATIVE TOOL CONTRACT"))
+    }
 
     @Test
     fun `every Council role prompt contains the exact execution envelope`() {
@@ -30,6 +122,7 @@ class CouncilRolePromptsTest {
             assertTrue(prompt.contains("one complete replacement object"), role.name)
             assertTrue(prompt.contains("preserve every unaffected field"), role.name)
             assertTrue(prompt.contains("relatedNodeContracts and generatedToolSchemas"), role.name)
+            assertTrue(prompt.contains("quantitativeToolContractAuthority"), role.name)
             assertTrue(prompt.contains("immutable"), role.name)
             assertTrue(prompt.contains("invalidOutput is diagnostic only"), role.name)
             assertTrue(prompt.contains("one conjunctive repair set"), role.name)
@@ -110,6 +203,25 @@ class CouncilRolePromptsTest {
         assertTrue(prompt.contains("test/model"))
         assertTrue(prompt.contains("Never assign a Council* role"))
         assertTrue(prompt.contains("model.<Role>"))
+        assertTrue(prompt.contains("exact Ecologist and PromptArchitect authorities"))
+        assertTrue(prompt.contains("every prompted runtime role"))
+        assertTrue(prompt.contains("family preference"))
+    }
+
+    @Test
+    fun `KG and seed prompts require exact directional relation authority`() {
+        val envelope = councilTestExecutionEnvelope()
+        val kgPrompt = CouncilRolePrompts.forRole(Role.CouncilKGArchitect, envelope)
+        val seedPrompt = CouncilRolePrompts.forRole(Role.CouncilSeedCurator, envelope)
+
+        assertTrue(kgPrompt.contains("dependencyOutputs as immutable cross-role authority"))
+        assertTrue(kgPrompt.contains("dependencyOutputs contains CouncilSeedCurator"))
+        assertTrue(kgPrompt.contains("exact declared relation ID"))
+        assertTrue(kgPrompt.contains("never emit a self-alias"))
+        assertTrue(seedPrompt.contains("dependencyOutputs as immutable cross-role authority"))
+        assertTrue(seedPrompt.contains("dependencyOutputs contains the exact KgArchitect authority"))
+        assertTrue(seedPrompt.contains("prefer the canonical relation ID"))
+        assertTrue(seedPrompt.contains("never invent"))
     }
 
     @Test
@@ -121,6 +233,8 @@ class CouncilRolePromptsTest {
         assertTrue(taskPrompt.contains("\"affectedNodeKeys\""))
         assertTrue(taskPrompt.contains("EvidenceKind="))
         assertTrue(taskPrompt.contains("maximumRounds distinct stageKey"))
+        assertTrue(taskPrompt.contains("at least one executable or promotion test ID"))
+        assertTrue(taskPrompt.contains("empty test authority cannot activate a run"))
         assertTrue(taskPrompt.contains("globally unique across nodes"))
         assertTrue(taskPrompt.contains("separate validation node needs distinct IDs"))
         assertTrue(taskPrompt.contains("toolOpportunity is non-null only on the node that authors"))

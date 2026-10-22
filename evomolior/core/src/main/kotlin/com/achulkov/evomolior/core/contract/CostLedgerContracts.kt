@@ -12,15 +12,17 @@ import kotlin.time.Instant
 enum class CostSubjectType {
     LLM_PROVIDER_CALL,
     TOOL_EXECUTION,
-    SIMULATION
+    SIMULATION,
+    PUBLICATION_BARRIER
 }
 
-/** Append-only lifecycle events for one atomic provider/tool cost reservation. */
+/** Append-only lifecycle events for provider/tool cost and terminal publication closure. */
 @Serializable
 enum class CostLedgerEntryKind {
     RESERVED,
     FINALIZED,
-    RELEASED
+    RELEASED,
+    PUBLICATION_CLOSED
 }
 
 /** Whether a monetary amount is known, unavailable, or irrelevant to the subject. */
@@ -60,7 +62,8 @@ data class MonetaryAmount(
  *
  * Reservations carry [reservedMaximumUsd] when a defensible monetary bound is available.
  * Finalizations carry exact token, monetary, compute, and wall-time observations. Releases carry
- * no invented cost. [entryHash] excludes itself.
+ * no invented cost. A publication closure is a terminal run-level barrier with no usage payload.
+ * [entryHash] excludes itself.
  */
 @Serializable
 data class CostLedgerEntry(
@@ -119,6 +122,12 @@ data class CostLedgerEntry(
         ) {
             "Reserved maximum cost must be finite and non-negative"
         }
+        require(
+            (kind == CostLedgerEntryKind.PUBLICATION_CLOSED) ==
+                (subjectType == CostSubjectType.PUBLICATION_BARRIER)
+        ) {
+            "Exactly publication closure entries require publication-barrier subject authority"
+        }
         when (kind) {
             CostLedgerEntryKind.RESERVED -> {
                 require(
@@ -157,6 +166,24 @@ data class CostLedgerEntry(
                         toolComputeMillis == null && wallTimeMillis == null
                 ) {
                     "Released reservations cannot invent usage or cost"
+                }
+            }
+
+            CostLedgerEntryKind.PUBLICATION_CLOSED -> {
+                require(
+                    groupId == null &&
+                        agentId == null &&
+                        modelProviderId == null &&
+                        modelId == null &&
+                        reservedMaximumUsd == null &&
+                        inputTokens == null &&
+                        outputTokens == null &&
+                        toolComputeMillis == null &&
+                        wallTimeMillis == null &&
+                        providerCost.status == MonetaryAmountStatus.NOT_APPLICABLE &&
+                        toolCost.status == MonetaryAmountStatus.NOT_APPLICABLE
+                ) {
+                    "Publication closure cannot carry worker identity, usage, or monetary values"
                 }
             }
         }

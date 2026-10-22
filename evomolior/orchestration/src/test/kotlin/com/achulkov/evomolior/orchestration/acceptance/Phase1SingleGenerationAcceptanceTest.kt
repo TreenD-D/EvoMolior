@@ -92,7 +92,8 @@ class Phase1SingleGenerationAcceptanceTest {
                     initialTrustScore = 0.9
                 )
             },
-            toolsMountHostPath = toolsRoot.absolutePath
+            toolsMountHostPath = toolsRoot.absolutePath,
+            legacyDirectToolPromotionEnabled = true
         )
 
         val summary = pipeline.processPendingSubmissions()

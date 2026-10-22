@@ -404,6 +404,63 @@ class SealedTestSuiteEvaluatorV3Test {
     }
 
     @Test
+    fun `v3 mixed suite separates output addressable and immutable run authority`() {
+        val (fixture, promotionExecution) = mixedFixture()
+        val evaluator = SealedTestSuiteEvaluator()
+        val inputWithoutPromotion = SealedTestEvaluationInputV3(
+            runId = RUN_ID,
+            groupId = GROUP_ID,
+            roundIndex = 0,
+            finalOutput = SealedTestOutputArtifactV3(
+                TEXT_OUTPUT.relativePath,
+                TEXT_OUTPUT.mediaType,
+                "alpha"
+            )
+        )
+
+        val complete = evaluator.assessGroup(
+            fixture.encoded,
+            fixture.context,
+            inputWithoutPromotion,
+            DIMENSIONS
+        )
+        val outputAddressable = evaluator.assessGroup(
+            fixture.encoded,
+            fixture.context,
+            inputWithoutPromotion,
+            DIMENSIONS,
+            SealedTestEvaluationSelection.FINAL_OUTPUT_ADDRESSABLE
+        )
+        val missingRunAuthority = evaluator.assessGroup(
+            fixture.encoded,
+            fixture.context,
+            inputWithoutPromotion,
+            DIMENSIONS,
+            SealedTestEvaluationSelection.RUN_AUTHORITY
+        )
+        val satisfiedRunAuthority = evaluator.assessGroup(
+            fixture.encoded,
+            fixture.context,
+            inputWithoutPromotion.copy(promotionExecutions = listOf(promotionExecution)),
+            DIMENSIONS,
+            SealedTestEvaluationSelection.RUN_AUTHORITY
+        )
+
+        assertEquals(1, complete.automatedTestsPassed)
+        assertEquals(1, complete.automatedTestsFailed)
+        assertTrue(complete.mandatoryFailure)
+        assertEquals(1, outputAddressable.automatedTestsPassed)
+        assertEquals(0, outputAddressable.automatedTestsFailed)
+        assertFalse(outputAddressable.mandatoryFailure)
+        assertEquals(0, missingRunAuthority.automatedTestsPassed)
+        assertEquals(1, missingRunAuthority.automatedTestsFailed)
+        assertTrue(missingRunAuthority.mandatoryFailure)
+        assertEquals(1, satisfiedRunAuthority.automatedTestsPassed)
+        assertEquals(0, satisfiedRunAuthority.automatedTestsFailed)
+        assertFalse(satisfiedRunAuthority.mandatoryFailure)
+    }
+
+    @Test
     fun `v3 grading sheet exposes plan commitments and normalized dimensions`() {
         val fixture = textFixture(
             "contains" to GeneralAssertionV1.TextContains("alpha", caseSensitive = true)
@@ -514,6 +571,83 @@ class SealedTestSuiteEvaluatorV3Test {
             context = context,
             encoded = SealedTestSuiteV3Codec.encode(suite, context)
         )
+    }
+
+    @OptIn(kotlin.time.ExperimentalTime::class)
+    private fun mixedFixture(): Pair<SuiteFixture, ToolExecutionRecord> {
+        val general = generalFixture(
+            outputSpec = TEXT_OUTPUT,
+            definitions = listOf(
+                "general" to GeneralTestDefinitionV1(
+                    target = GeneralTestTargetV1.FinalOutputText,
+                    assertion = GeneralAssertionV1.TextContains("alpha", caseSensitive = true)
+                )
+            )
+        ).suite.tests.single()
+        val promotionInput = TypedJsonValue.ObjectValue(
+            listOf(TypedJsonObjectEntry("value", TypedJsonValue.StringValue("input")))
+        )
+        val promotionOutput = TypedJsonValue.ObjectValue(
+            listOf(TypedJsonObjectEntry("ok", TypedJsonValue.BooleanValue(true)))
+        )
+        val promotion = SealedTestSuiteV3Authority.promotionTest(
+            testId = "promotion",
+            nodeId = "node-promotion",
+            opportunityId = "opportunity",
+            fixtureSchemaHash = PROMOTION_SCHEMA.schemaKey,
+            acceptedArtifactTypes = setOf(ArtifactType.TOOL),
+            input = promotionInput,
+            expectedOutput = promotionOutput
+        )
+        val context = SealedTestSuiteV3ValidationContext(
+            finalOutputSpec = TEXT_OUTPUT,
+            atlasHash = ATLAS_HASH,
+            tests = listOf(
+                SealedTestIdentityAuthorityV3.General(
+                    testId = general.testId,
+                    nodeId = general.nodeId
+                ),
+                SealedTestIdentityAuthorityV3.Promotion(
+                    testId = promotion.testId,
+                    nodeId = promotion.nodeId,
+                    opportunityId = promotion.opportunityId,
+                    fixtureSchema = PROMOTION_SCHEMA
+                )
+            ).sortedBy(SealedTestIdentityAuthorityV3::testId)
+        )
+        val suite = SealedTestSuiteV3Authority.seal(
+            rubricSchemaVersion = RUBRIC_VERSION,
+            tests = listOf(general, promotion),
+            context = context
+        )
+        val execution = ToolExecutionRecord(
+            executionId = "mixed-promotion-execution",
+            runId = RUN_ID,
+            toolVersionId = ToolVersionId("tool-v1"),
+            opportunityId = promotion.opportunityId,
+            groupId = AtlasGroupId(GROUP_ID),
+            agentId = AtlasAgentId("critic"),
+            round = 0,
+            nodeId = NodeId(promotion.nodeId),
+            purpose = ToolExecutionPurpose.PROMOTION_TEST,
+            inputHash = AtlasHashing.hashText(
+                TypedJsonValueCodec.toCanonicalJson(promotionInput)
+            ),
+            outputHash = "output-hash",
+            outputJson = TypedJsonValueCodec.toJsonElement(promotionOutput),
+            outputArtifactId = "promotion-output:tool-v1:${promotion.testId}",
+            startedAt = kotlin.time.Instant.fromEpochMilliseconds(1),
+            completedAt = kotlin.time.Instant.fromEpochMilliseconds(2),
+            durationMillis = 1,
+            exitCode = 0,
+            result = ToolExecutionResult.SUCCEEDED,
+            sandboxRecordHash = "sandbox-hash"
+        ).withComputedHash()
+        return SuiteFixture(
+            suite = suite,
+            context = context,
+            encoded = SealedTestSuiteV3Codec.encode(suite, context)
+        ) to execution
     }
 
     private fun rawEncode(suite: SealedTestSuiteV3): String =

@@ -1,0 +1,90 @@
+{
+  "schema_version": "arc2-evomolior-run-verification-v1",
+  "run_id": "arc2-inference-novelty-20260810-r7",
+  "input": {
+    "authority": "/Volumes/CrucialX9_1TB/arc2-em/docs",
+    "artifact_count": 189,
+    "read_only": true
+  },
+  "configuration": {
+    "rounds": 6,
+    "worker_group_count": 4,
+    "max_agents_per_group": 5,
+    "backend": "CODEX_CHATGPT",
+    "reasoning_effort": "medium",
+    "action_credit_budget": 12000,
+    "iso_latency": true
+  },
+  "execution_evidence": {
+    "round_start_records": 6,
+    "worker_quiescence_completion_records": 6,
+    "round_phase_events": 102,
+    "archived_rounds": [0, 1, 2, 3, 4, 5],
+    "allocation_records": 24,
+    "agents_per_allocation": [5],
+    "interim_snapshot_count": 24,
+    "ownerless_accepted_state_decisions": 0
+  },
+  "terminal_state": {
+    "status": "COMPLETED",
+    "execution_status": "COMPLETED",
+    "acceptance_status": "PROVISIONAL",
+    "outcome_class": "PROVISIONAL_DECISION_PACKAGE",
+    "terminal_reason": "Strict accepted publication authority was unavailable",
+    "completed_at": "2026-08-10T10:22:22.314397Z",
+    "duration_ms": 11153909,
+    "process_exit_code": 0
+  },
+  "publication": {
+    "native_primary_artifact": "runs/arc2-inference-novelty-20260810-r7/primary/arc2-inference-novelty-report.html",
+    "native_recovery_bundle": "runs/arc2-inference-novelty-20260810-r7/recovery-results.zip",
+    "native_outcome_manifest_hash": "d80beda01bcd5c170905db5d77fc5be756203378be87b0336e1b7b90a096d71b",
+    "native_recovery_artifact_count": 20,
+    "published_report": "documentation/kaggle-arc/arc2-inference-novelty-20260809/arc2-inference-novelty-report.html",
+    "published_report_status": "PROVISIONAL_NON_ACCEPTED",
+    "published_report_path_correction": {
+      "from": "ARC2_A2_2_INTERFACE_FREEZE.md",
+      "to": "A2_2_INTERFACE_FREEZE.md",
+      "occurrences": 3,
+      "reason": "The supplied authority uses the latter exact relative path."
+    }
+  },
+  "evidence_paths": {
+    "summary": "runs/arc2-inference-novelty-20260810-r7/summary.json",
+    "debug_log": "runs/arc2-inference-novelty-20260810-r7/debug-log.txt",
+    "persisted_state": "runs/arc2-inference-novelty-20260810-r7/.evomolior-data/evomolior/runs/arc2-inference-novelty-20260810-r7/control/persisted-run-state.json",
+    "atlas_database": "runs/arc2-inference-novelty-20260810-r7/.evomolior-data/evomolior/runs/arc2-inference-novelty-20260810-r7/control/atlas/substrate.db",
+    "report_validation": "documentation/kaggle-arc/arc2-inference-novelty-20260809/report-validation.json"
+  },
+  "verification": {
+    "focused_tests": {
+      "jdk": 17,
+      "status": "PASS",
+      "classes": [
+        "NodeCaptureResolverTest",
+        "SealedRoundDeliverableSnapshotCompilerTest",
+        "CouncilSpecialistClosureValidatorTest",
+        "StartingFieldCompilerTest",
+        "CouncilRolePromptsTest"
+      ]
+    },
+    "repository_test_caveat": {
+      "status": "FAIL_TIMEOUT",
+      "test": "EvoMoliorRunServiceEndToEndFlowTest.full diagnostic mode publishes a provisional package without acceptance authority",
+      "timeout_ms": 60000,
+      "reproduced_in_isolation": true,
+      "task_owned_file": false
+    },
+    "html_validator": {
+      "status": "PASS",
+      "validator": "validate_and_extract_report.py",
+      "legacy_tidy_usable_for_html5": false
+    }
+  },
+  "caveats": [
+    "The run produced no strict accepted winner authority.",
+    "Mandatory sealed-suite acceptance failed, so the native outcome is a provisional decision package.",
+    "The final report must not be represented as private-set, leaderboard, promotion, or submission-readiness evidence.",
+    "The CLI outputs/ copy is a deterministic static fallback; the substantive recovered report is the native primary/ artifact."
+  ]
+}

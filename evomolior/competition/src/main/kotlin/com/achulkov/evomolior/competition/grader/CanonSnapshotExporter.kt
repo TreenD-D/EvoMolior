@@ -31,6 +31,14 @@ object CanonSnapshotExporter {
     private const val JUDGE_MAX_CONTENT_CHARS = 600
 
     /**
+     * Shared KB content budget for judge snapshots. Every document keeps at least
+     * [JUDGE_MAX_CONTENT_CHARS]; unused share flows to longer documents, so a single substantial
+     * report is visible to RoundJudge instead of its first 600 characters (October 2026 runs
+     * scored every dimension "insufficient evidence" for a 39,670-character report).
+     */
+    const val JUDGE_KB_CONTENT_BUDGET_CHARS = 24_000
+
+    /**
      * Produces the exact compact snapshot used for criteria freezes and RoundJudge evaluation.
      *
      * @param db Target group substrate.
@@ -52,8 +60,36 @@ object CanonSnapshotExporter {
         maxKbDocs = JUDGE_MAX_KB_DOCS,
         maxKgFacts = JUDGE_MAX_KG_FACTS,
         maxStagingEntries = JUDGE_MAX_STAGING_ENTRIES,
-        maxContentChars = JUDGE_MAX_CONTENT_CHARS
+        maxContentChars = JUDGE_MAX_CONTENT_CHARS,
+        kbContentBudgetChars = JUDGE_KB_CONTENT_BUDGET_CHARS
     )
+
+    /**
+     * Allocates per-document character limits from [budget] by water-filling: short documents
+     * keep their full length, each document gets at least `min(length, floor)`, and leftover
+     * budget is shared equally among documents that are still truncated.
+     *
+     * @param lengths Document lengths in snapshot order.
+     * @param floor Minimum characters retained per document.
+     * @param budget Total characters across all documents; never below the per-document floors.
+     * @return Character limit for each document, in input order.
+     */
+    fun allocateContentLimits(lengths: List<Int>, floor: Int, budget: Int): List<Int> {
+        val limits = lengths.map { minOf(it, floor) }.toMutableList()
+        var remaining = budget - limits.sum()
+        while (remaining > 0) {
+            val growable = lengths.indices.filter { limits[it] < lengths[it] }
+            if (growable.isEmpty()) break
+            val share = maxOf(1, remaining / growable.size)
+            for (index in growable) {
+                if (remaining <= 0) break
+                val grant = minOf(share, lengths[index] - limits[index], remaining)
+                limits[index] += grant
+                remaining -= grant
+            }
+        }
+        return limits
+    }
 
     /**
      * Produces a structured text snapshot of the given group's substrate for grader consumption.
@@ -72,7 +108,8 @@ object CanonSnapshotExporter {
         maxKbDocs: Int = MAX_KB_DOCS,
         maxKgFacts: Int = MAX_KG_FACTS,
         maxStagingEntries: Int = MAX_STAGING_ENTRIES,
-        maxContentChars: Int = MAX_CONTENT_CHARS
+        maxContentChars: Int = MAX_CONTENT_CHARS,
+        kbContentBudgetChars: Int? = null
     ): String = withContext(Dispatchers.IO) {
         try {
             val kbDocs = db.knowledgeBaseDao().search(
@@ -117,13 +154,18 @@ object CanonSnapshotExporter {
                 if (kbDocs.isEmpty()) {
                     appendLine("[empty — no KB documents yet]")
                 } else {
+                    val kbLimits = kbContentBudgetChars
+                        ?.let { allocateContentLimits(kbDocs.map { it.content.length }, maxContentChars, it) }
+                        ?: kbDocs.map { maxContentChars }
                     kbDocs.forEachIndexed { i, doc ->
                         appendLine()
                         appendLine("${i + 1}. [domain=${doc.domain}] trust=${
                             String.format(java.util.Locale.ROOT, "%.2f", doc.trustScore)
                         } gen=${doc.generation}")
-                        val content = if (doc.content.length > maxContentChars) {
-                            doc.content.take(maxContentChars) + "...[truncated]"
+                        val limit = kbLimits[i]
+                        val content = if (doc.content.length > limit) {
+                            doc.content.take(limit) +
+                                "...[truncated: ${doc.content.length - limit} of ${doc.content.length} chars omitted]"
                         } else {
                             doc.content
                         }

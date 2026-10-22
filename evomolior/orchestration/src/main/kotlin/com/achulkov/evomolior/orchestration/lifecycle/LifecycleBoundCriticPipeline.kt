@@ -4,6 +4,8 @@ import com.achulkov.evomolior.core.budget.BudgetDeductResult
 import com.achulkov.evomolior.core.budget.BudgetLedger
 import com.achulkov.evomolior.core.budget.BudgetLedgerSnapshot
 import com.achulkov.evomolior.core.model.ActionType
+import com.achulkov.evomolior.core.repair.ToolRepairDiagnosticV1
+import com.achulkov.evomolior.orchestration.repair.StructuredToolPromotionOutcome
 import com.achulkov.evomolior.substrate.db.EvoMoliorDatabase
 import com.achulkov.evomolior.substrate.db.entity.KnowledgeBaseEntryEntity
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
@@ -52,6 +54,7 @@ class LifecycleBoundCriticPipeline(
         var outcome = "completed"
         var summary = CriticSummary(promoted = 0, rejected = 0, arbitrated = 0)
         var errorMessage: String? = null
+        var pipeline: CriticPipeline? = null
 
         try {
             val pendingBeforeReview = db.stagingDao().getPending(runId, groupId)
@@ -64,7 +67,9 @@ class LifecycleBoundCriticPipeline(
             } else {
                 summary = withContext(Dispatchers.Default) {
                     withTimeout(ttlMs) {
-                        pipelineFactory(criticAgentId, setOf(criticAgentId)).processPendingSubmissions()
+                        pipelineFactory(criticAgentId, setOf(criticAgentId))
+                            .also { pipeline = it }
+                            .processPendingSubmissions()
                     }
                 }
                 if (deductResult == BudgetDeductResult.FLOOR_REACHED || budgetLedger.isAtFloor) {
@@ -81,6 +86,9 @@ class LifecycleBoundCriticPipeline(
             outcome = "failed"
             errorMessage = e.message
         } finally {
+            // The timeout scope has settled; its normal return may have been cancelled even
+            // though earlier reviews completed. Use the same counts for telemetry and the note.
+            summary = pipeline?.summarySnapshot() ?: summary
             val finishedAtMs = System.currentTimeMillis()
             withContext(NonCancellable) {
                 writeAndPromoteDeathNote(
@@ -92,7 +100,14 @@ class LifecycleBoundCriticPipeline(
                 )
             }
         }
-        return CriticLifecycleSummary(summary, outcome, deathNoteWritten = true, budgetLedger.snapshot())
+        return CriticLifecycleSummary(
+            summary = summary,
+            lifecycleOutcome = outcome,
+            deathNoteWritten = true,
+            budgetSnapshot = budgetLedger.snapshot(),
+            repairDiagnostics = pipeline?.toolRepairDiagnosticsSnapshot().orEmpty(),
+            promotionOutcomes = pipeline?.toolPromotionOutcomesSnapshot().orEmpty()
+        )
     }
 
     private suspend fun writeAndPromoteDeathNote(
@@ -195,5 +210,7 @@ data class CriticLifecycleSummary(
     val summary: CriticSummary,
     val lifecycleOutcome: String,
     val deathNoteWritten: Boolean,
-    val budgetSnapshot: BudgetLedgerSnapshot
+    val budgetSnapshot: BudgetLedgerSnapshot,
+    val repairDiagnostics: List<ToolRepairDiagnosticV1> = emptyList(),
+    val promotionOutcomes: Map<String, StructuredToolPromotionOutcome> = emptyMap()
 )

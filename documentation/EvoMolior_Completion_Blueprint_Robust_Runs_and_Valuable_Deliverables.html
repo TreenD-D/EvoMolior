@@ -1,0 +1,1928 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EvoMolior Completion Blueprint</title><meta name="description" content="Implementation blueprint for robust EvoMolior runs, flexible deliverables, lifecycle linearizability, tool repair, and strict acceptance closure."><style>
+:root { --bg:#f5f7fb; --panel:#ffffff; --panel2:#eef3fb; --text:#172033; --muted:#5f6b80; --line:#d8dfeb; --accent:#136f8a; --accent2:#6c47b8; --good:#177245; --warn:#9a5b00; --bad:#a12b36; --code:#101827; --codeText:#dbe8ff; --shadow:0 14px 40px rgba(20,35,60,.09); }
+:root[data-theme="dark"] { --bg:#09101c; --panel:#111b2b; --panel2:#152238; --text:#e9f0fc; --muted:#aebbd0; --line:#293a55; --accent:#5fd5ee; --accent2:#a98cff; --good:#6ee7a8; --warn:#ffc76b; --bad:#ff8794; --code:#070d17; --codeText:#d8e8ff; --shadow:0 18px 48px rgba(0,0,0,.32); }
+*{box-sizing:border-box} html{scroll-behavior:smooth} body{margin:0;background:var(--bg);color:var(--text);font:16px/1.63 Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif} a{color:var(--accent)}
+.topbar{position:sticky;top:0;z-index:20;display:flex;justify-content:space-between;align-items:center;padding:11px 22px;background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.brand{display:flex;gap:11px;align-items:center;font-weight:760}.mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;color:white;background:linear-gradient(135deg,#19a9c6,#7c55d4);box-shadow:0 5px 18px rgba(59,123,215,.32)}
+.actions{display:flex;gap:8px}.actions button,.toc-toggle{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:9px;padding:8px 11px;cursor:pointer;font-weight:650}.progress{height:3px;position:fixed;z-index:30;left:0;top:0;background:linear-gradient(90deg,#17b6cd,#8d5ce3);width:0}
+.layout{display:grid;grid-template-columns:310px minmax(0,1fr);max-width:1520px;margin:auto}.sidebar{position:sticky;top:58px;height:calc(100vh - 58px);overflow:auto;border-right:1px solid var(--line);padding:22px 18px;background:var(--panel)}.sidebar h2{margin:0 0 12px;font-size:1rem}.search{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--text);margin-bottom:12px}.sidebar ol{list-style:none;padding:0;margin:0}.sidebar li{margin:2px 0}.sidebar li.l3{padding-left:13px}.sidebar li.l4{padding-left:26px}.sidebar a{display:block;padding:5px 8px;border-radius:7px;text-decoration:none;color:var(--muted);font-size:.87rem;line-height:1.28}.sidebar a:hover,.sidebar a.active{background:var(--panel2);color:var(--text)}
+main{min-width:0;padding:30px 38px 80px}.article{max-width:1080px;margin:auto}.meta{border:1px solid var(--line);background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 10%,var(--panel)),color-mix(in srgb,var(--accent2) 10%,var(--panel)));border-radius:14px;padding:15px 18px;color:var(--muted);margin-bottom:25px}.article>h1:first-of-type{font-size:clamp(2.3rem,5vw,4.4rem);line-height:1.04;margin:.2em 0 .18em;background:linear-gradient(110deg,var(--text),var(--accent),var(--accent2));-webkit-background-clip:text;color:transparent}.article>h2:nth-of-type(1){border:0;margin-top:0;color:var(--muted);font-size:1.25rem}
+h1,h2,h3,h4{line-height:1.2;scroll-margin-top:76px} h2{font-size:1.85rem;margin-top:2.6em;padding-top:.3em;border-top:1px solid var(--line)} h3{font-size:1.28rem;margin-top:2em} h4{font-size:1.05rem}.heading-anchor{opacity:0;margin-left:8px;text-decoration:none;font-weight:500}.article h1:hover .heading-anchor,.article h2:hover .heading-anchor,.article h3:hover .heading-anchor,.article h4:hover .heading-anchor{opacity:.65}
+p,li{max-width:92ch} strong{font-weight:750} blockquote{margin:22px 0;padding:15px 20px;border-left:5px solid var(--accent);border-radius:0 12px 12px 0;background:var(--panel2);color:var(--text)}
+hr{border:0;border-top:1px solid var(--line);margin:45px 0} table{width:100%;border-collapse:separate;border-spacing:0;margin:19px 0 28px;display:block;overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}thead{background:var(--panel2)}th,td{padding:10px 12px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);vertical-align:top;min-width:130px}th:last-child,td:last-child{border-right:0}tr:last-child td{border-bottom:0}th{text-align:left;font-size:.88rem;letter-spacing:.015em}td{font-size:.94rem}
+pre{position:relative;background:var(--code);color:var(--codeText);padding:17px 19px;border-radius:12px;overflow:auto;box-shadow:var(--shadow);font-size:.88rem;line-height:1.5}code{font-family:"SFMono-Regular",Consolas,monospace}p code,li code,td code{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:.08em .34em;font-size:.9em}pre code{background:none;border:0;padding:0}.copy{position:absolute;right:8px;top:8px;border:1px solid #34435c;background:#17243a;color:#dce8fb;border-radius:7px;padding:5px 8px;cursor:pointer;font-size:.75rem}
+ul,ol{padding-left:1.35em}.article>ul,.article>ol{margin-bottom:1.4em}.callout{border:1px solid var(--line);background:var(--panel);box-shadow:var(--shadow);border-radius:13px;padding:16px 18px;margin:20px 0}.footer{margin-top:55px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem}
+@media(max-width:940px){.layout{display:block}.sidebar{position:fixed;left:0;top:56px;bottom:0;width:min(88vw,330px);height:auto;z-index:25;transform:translateX(-102%);transition:.2s;box-shadow:var(--shadow)}.sidebar.open{transform:none}main{padding:25px 17px 65px}.toc-toggle{display:block}.brand span:last-child{display:none}}
+@media(min-width:941px){.toc-toggle{display:none}}
+@media print{.topbar,.sidebar,.progress,.heading-anchor,.copy{display:none!important}.layout{display:block}main{padding:0}.article{max-width:none}.article>h1:first-of-type{color:#111;background:none;-webkit-text-fill-color:initial}h2{break-before:page}h2:first-of-type{break-before:auto}table,pre,blockquote{break-inside:avoid;box-shadow:none}body{background:#fff;color:#111}}
+</style></head><body><div class="progress" id="progress"></div><header class="topbar"><div class="brand"><span class="mark">EM</span><span>EvoMolior completion blueprint</span></div><div class="actions"><button class="toc-toggle" id="tocBtn">Contents</button><button id="printBtn">Print / PDF</button><button id="themeBtn">Dark</button></div></header><div class="layout"><aside class="sidebar" id="sidebar"><h2>Contents</h2><input class="search" id="search" type="search" placeholder="Filter sections…"><ol id="toc"></ol></aside><main><article class="article"><div class="meta">Self-contained HTML5 implementation document · Grounded in the 24 July 2026 v21 strict-run report, runtime log, and the maintained competitive progressive-disclosure plan · Proposed contracts are clearly separated from observed evidence.</div><h1 id="evomolior-completion-blueprint">EvoMolior Completion Blueprint<a class="heading-anchor" href="#evomolior-completion-blueprint" aria-label="Link to section">#</a></h1>
+<h2 id="robust-runs-flexible-deliverables-and-strict-acceptance-closure">Robust runs, flexible deliverables, and strict acceptance closure<a class="heading-anchor" href="#robust-runs-flexible-deliverables-and-strict-acceptance-closure" aria-label="Link to section">#</a></h2>
+<p><strong>Evidence cut:</strong> 24 July 2026<br />
+<strong>Status:</strong> implementation blueprint derived from the v21 strict-run report, its runtime log, the maintained progressive-disclosure plans, and the earlier EvoMolior architecture action plan.<br />
+<strong>Architectural invariant:</strong> retain the existing product loop:</p>
+<pre><code class="language-text">input
+  → Genesis Council
+  → competitive worker/delivery groups
+    + parallel competitive grader groups
+  → sealed end-round check-in and evaluation
+  → capture, resource, disclosure, repair, and lineage update
+  → next round
+  → final publication or explicit non-accepted recovery publication
+</code></pre>
+<blockquote>
+<p>The project no longer needs another architectural reset. It needs a reliability-and-deliverable completion layer that makes the existing civilization linearizable, repair-capable, and useful to its receiver under both success and failure.</p>
+</blockquote>
+<hr />
+<h3 id="executive-decision">Executive decision<a class="heading-anchor" href="#executive-decision" aria-label="Link to section">#</a></h3>
+<p>The latest strict run materially changes the remaining work. Earlier failures were dominated by startup schema transport, Council compilation, test executability, incomplete grader authority, and missing runtime paths. In v21, the system instead demonstrated that it can:</p>
+<ul>
+<li>package and admit an immutable distribution;</li>
+<li>complete Genesis Council and compile eight executable sealed tests;</li>
+<li>run two worker societies for all six rounds;</li>
+<li>run three grader civilizations in every round;</li>
+<li>complete exact broad-score submissions without a final grader outage;</li>
+<li>preserve all round summaries;</li>
+<li>reject mandatory-failing candidates rather than inventing a winner;</li>
+<li>produce an explicit non-acceptance recovery archive.</li>
+</ul>
+<p>The run still failed because two low-level control contracts and one product-output contract remain incomplete:</p>
+<ol>
+<li><strong>Lifecycle state is not linearizable.</strong> A stale budget-monitor write can overwrite a newer frozen exit state, causing repeated immutable-exit conflicts.</li>
+<li><strong>Tool repair is not a first-class typed learning loop.</strong> The system can detect many contract defects, but it cannot safely communicate enough semantic information for later agents to repair a hidden-test failure.</li>
+<li><strong>Recovery publication is administratively correct but receiver-useless when no scoring candidate exists.</strong> The system preserves summaries but does not compile them into a decision package.</li>
+</ol>
+<p>These are now the critical path. The next implementation should be organized around six closure programs:</p>
+<table>
+<thead>
+<tr>
+  <th>Program</th>
+  <th>Outcome</th>
+  <th style="text-align:right">Priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Lifecycle linearizability</td>
+  <td>Exactly one durable exit identity and a deterministic quiescence boundary</td>
+  <td style="text-align:right">P0</td>
+</tr>
+<tr>
+  <td>Tool contract transport</td>
+  <td>Agents edit implementations, not immutable runtime contracts</td>
+  <td style="text-align:right">P0</td>
+</tr>
+<tr>
+  <td>Typed semantic repair</td>
+  <td>Safe, bounded, cross-generation feedback that enables repair without leaking private fixtures</td>
+  <td style="text-align:right">P0</td>
+</tr>
+<tr>
+  <td>Deliverable compiler</td>
+  <td>Receiver-oriented semantic packages rendered to multiple formats</td>
+  <td style="text-align:right">P0</td>
+</tr>
+<tr>
+  <td>Recovery publication</td>
+  <td>Useful provisional deliverables without creating winner or acceptance authority</td>
+  <td style="text-align:right">P0</td>
+</tr>
+<tr>
+  <td>Deterministic acceptance simulator</td>
+  <td>Reproduce the entire six-round success and failure paths before another expensive provider run</td>
+  <td style="text-align:right">P0</td>
+</tr>
+</tbody>
+</table>
+<p>A fresh strict provider run should occur only after all six programs pass a clean, immutable, deterministic gate cycle. The v21 run must remain immutable and must never be resumed or reclassified.</p>
+<hr />
+<h2 id="1-evidence-synthesis-and-status-delta">1. Evidence synthesis and status delta<a class="heading-anchor" href="#1-evidence-synthesis-and-status-delta" aria-label="Link to section">#</a></h2>
+<h3 id="1-1-what-v21-proves">1.1 What v21 proves<a class="heading-anchor" href="#1-1-what-v21-proves" aria-label="Link to section">#</a></h3>
+<p>The latest run is meaningful integration evidence even though it is rejected. Its strongest result is that the project has crossed from “many disconnected or pre-runtime boundaries” into “a nearly complete production control loop with two remaining correctness defects and one product-quality gap.”</p>
+<table>
+<thead>
+<tr>
+  <th>Capability</th>
+  <th>v21 observation</th>
+  <th>Interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Council field generation</td>
+  <td>Completed</td>
+  <td>The field compiler and strict provider path are operational for this workload</td>
+</tr>
+<tr>
+  <td>Sealed test ABI</td>
+  <td>8 executable tests preflighted</td>
+  <td>The v71/v72 producer/evaluator split is no longer the current blocker</td>
+</tr>
+<tr>
+  <td>Worker lifecycle</td>
+  <td>Two groups completed six rounds</td>
+  <td>Core mortality and multi-round orchestration are operational</td>
+</tr>
+<tr>
+  <td>Grader execution</td>
+  <td>36 RoundJudge launches and 36 completed score submissions</td>
+  <td>Final failure was not caused by missing broad-score cardinality</td>
+</tr>
+<tr>
+  <td>Fail-closed scoring</td>
+  <td>Both groups mandatory-failed; no winner invented</td>
+  <td>Evaluation authority behaved correctly</td>
+</tr>
+<tr>
+  <td>Publication safety</td>
+  <td>Normal publication did not start without a valid candidate</td>
+  <td>Existing publication barrier retained integrity</td>
+</tr>
+<tr>
+  <td>Recovery integrity</td>
+  <td>CRC-valid recovery ZIP with explicit non-acceptance</td>
+  <td>Failure is no longer silent or falsely successful</td>
+</tr>
+<tr>
+  <td>Receiver value on failure</td>
+  <td>No receiver-facing artifact</td>
+  <td>Product contract remains incomplete</td>
+</tr>
+</tbody>
+</table>
+<h3 id="1-2-exact-failure-inventory-from-the-runtime-log">1.2 Exact failure inventory from the runtime log<a class="heading-anchor" href="#1-2-exact-failure-inventory-from-the-runtime-log" aria-label="Link to section">#</a></h3>
+<p>The log provides a narrow and actionable failure distribution rather than a vague “model quality” diagnosis.</p>
+<h4 id="lifecycle">Lifecycle<a class="heading-anchor" href="#lifecycle" aria-label="Link to section">#</a></h4>
+<table>
+<thead>
+<tr>
+  <th>Signal</th>
+  <th style="text-align:right">Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>Agent exit identity is immutable</code></td>
+  <td style="text-align:right">296</td>
+</tr>
+<tr>
+  <td><code>Exit finalization deferred</code></td>
+  <td style="text-align:right">296</td>
+</tr>
+<tr>
+  <td>Persistently affected agent</td>
+  <td style="text-align:right">1 Critic</td>
+</tr>
+</tbody>
+</table>
+<p>The critical ordering was:</p>
+<pre><code class="language-text">TTL expires
+  → durable killed-exit authority persisted
+  → agent still executing
+  → budget monitor writes an older LiveAgentEntry back into the map
+  → cancellation completes
+  → late completion creates a different exitedAt
+  → substrate correctly rejects immutable-exit mismatch
+  → retry loop repeats through later rounds
+</code></pre>
+<h4 id="tool-authoring-and-promotion">Tool authoring and promotion<a class="heading-anchor" href="#tool-authoring-and-promotion" aria-label="Link to section">#</a></h4>
+<table>
+<thead>
+<tr>
+  <th>Failure class</th>
+  <th style="text-align:right">Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Contract schema mismatch</td>
+  <td style="text-align:right">16</td>
+</tr>
+<tr>
+  <td>Missing input schema</td>
+  <td style="text-align:right">3</td>
+</tr>
+<tr>
+  <td>Non-canonical number in expected output</td>
+  <td style="text-align:right">4</td>
+</tr>
+<tr>
+  <td>Public self-test expected-output mismatch</td>
+  <td style="text-align:right">2</td>
+</tr>
+<tr>
+  <td>Private promotion mismatch: <code>unexpected_output</code></td>
+  <td style="text-align:right">5</td>
+</tr>
+<tr>
+  <td>Active promoted tool at final evaluation</td>
+  <td style="text-align:right">0</td>
+</tr>
+</tbody>
+</table>
+<p>One public Critic identified the key semantic defect precisely: the implementation summed hourly watts and labelled the total as kWh without dividing by 1000. The private promotion interface correctly withheld hidden expected and actual values, but the safe repair channel discarded this useful unit-conversion diagnosis.</p>
+<h4 id="sealed-test-trajectory">Sealed-test trajectory<a class="heading-anchor" href="#sealed-test-trajectory" aria-label="Link to section">#</a></h4>
+<table>
+<thead>
+<tr>
+  <th style="text-align:right">Round</th>
+  <th style="text-align:right">Group A</th>
+  <th style="text-align:right">Group B</th>
+  <th>Mandatory failure</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td style="text-align:right">0</td>
+  <td style="text-align:right">2/8</td>
+  <td style="text-align:right">2/8</td>
+  <td>Both</td>
+</tr>
+<tr>
+  <td style="text-align:right">1</td>
+  <td style="text-align:right">4/8</td>
+  <td style="text-align:right">5/8</td>
+  <td>Both</td>
+</tr>
+<tr>
+  <td style="text-align:right">2</td>
+  <td style="text-align:right">5/8</td>
+  <td style="text-align:right">3/8</td>
+  <td>Both</td>
+</tr>
+<tr>
+  <td style="text-align:right">3</td>
+  <td style="text-align:right">5/8</td>
+  <td style="text-align:right">3/8</td>
+  <td>Both</td>
+</tr>
+<tr>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">5/8</td>
+  <td style="text-align:right">3/8</td>
+  <td>Both</td>
+</tr>
+<tr>
+  <td style="text-align:right">5</td>
+  <td style="text-align:right">4/8</td>
+  <td style="text-align:right">4/8</td>
+  <td>Both</td>
+</tr>
+</tbody>
+</table>
+<p>This is not monotonic convergence. It indicates that useful artifacts existed, but the run lacked a stable repair mechanism that could convert persistent test failures into a promoted tool and downstream evidence.</p>
+<h3 id="1-3-what-should-not-be-reopened">1.3 What should not be reopened<a class="heading-anchor" href="#1-3-what-should-not-be-reopened" aria-label="Link to section">#</a></h3>
+<p>The following boundaries have sufficient current evidence to remain regression-protected rather than redesigned:</p>
+<ul>
+<li>the macro Council → competitive workers/graders → sealed check-in loop;</li>
+<li>the receiver-oriented Node Atlas and redacted WorkerView architecture;</li>
+<li>exact grader cardinality and no-zero-fill policy;</li>
+<li>criteria freeze before worker evidence reveal;</li>
+<li>fail-closed capture, disclosure, and publication;</li>
+<li>compiled executable sealed tests;</li>
+<li>immutable distribution admission;</li>
+<li>cost-reservation publication gate;</li>
+<li>final archive quiescence requirement;</li>
+<li>Outlier separation from ordinary work and Legacy;</li>
+<li>exact tool promotion tests and private-fixture secrecy.</li>
+</ul>
+<p>The completion plan extends these mechanisms; it does not weaken them.</p>
+<hr />
+<h2 id="2-target-product-contract-every-run-returns-a-useful-honest-outcome">2. Target product contract: every run returns a useful, honest outcome<a class="heading-anchor" href="#2-target-product-contract-every-run-returns-a-useful-honest-outcome" aria-label="Link to section">#</a></h2>
+<p>The product should expose three terminal outcome classes. A binary <code>COMPLETED</code> versus <code>FAILED</code> view is too coarse for a research civilization that may create substantial useful evidence before missing one strict acceptance condition.</p>
+<pre><code class="language-kotlin">@Serializable
+enum class RunOutcomeClass {
+    ACCEPTED_DECISION_PACKAGE,
+    PROVISIONAL_DECISION_PACKAGE,
+    STARTUP_DIAGNOSTIC_PACKAGE,
+}
+</code></pre>
+<h3 id="2-1-accepted-decision-package">2.1 Accepted decision package<a class="heading-anchor" href="#2-1-accepted-decision-package" aria-label="Link to section">#</a></h3>
+<p>Created only when all normal authority gates pass:</p>
+<ul>
+<li>accepted scoring candidate and winner/source authority;</li>
+<li>all mandatory sealed tests pass;</li>
+<li>required node coverage and final lineage are complete;</li>
+<li>active reservations are zero;</li>
+<li>registered exits reconcile exactly;</li>
+<li>all non-daemon agents are quiescent;</li>
+<li>publication state reaches <code>ARCHIVED</code>;</li>
+<li>manifest verification succeeds.</li>
+</ul>
+<p>This package carries normal final-reference and acceptance authority.</p>
+<h3 id="2-2-provisional-decision-package">2.2 Provisional decision package<a class="heading-anchor" href="#2-2-provisional-decision-package" aria-label="Link to section">#</a></h3>
+<p>Created after meaningful worker/grader rounds when strict acceptance fails. It must:</p>
+<ul>
+<li>state clearly that no accepted winner exists;</li>
+<li>preserve all mandatory failures and missing authority;</li>
+<li>compile public committed evidence from every eligible group;</li>
+<li>compare alternatives without silently ranking them as accepted;</li>
+<li>identify receiver-safe conclusions, contested conclusions, and blocked conclusions;</li>
+<li>identify the exact missing evidence or tool authority needed to upgrade the result;</li>
+<li>never create a normal winner, final reference, accepted metric packet, or acceptance archive.</li>
+</ul>
+<p>This is the principal missing v21 product feature.</p>
+<h3 id="2-3-startup-diagnostic-package">2.3 Startup diagnostic package<a class="heading-anchor" href="#2-3-startup-diagnostic-package" aria-label="Link to section">#</a></h3>
+<p>Created when the run fails before worker activation. It should include:</p>
+<ul>
+<li>failing phase and typed error codes;</li>
+<li>candidate field/test hashes where safe;</li>
+<li>exact declared/compiled/preflight cardinality;</li>
+<li>admission/distribution identity;</li>
+<li>operator-actionable remediation;</li>
+<li>no private fixture content;</li>
+<li>no receiver decision claims.</li>
+</ul>
+<h3 id="2-4-meaning-of-a-proper-deliverable">2.4 Meaning of a “proper deliverable”<a class="heading-anchor" href="#2-4-meaning-of-a-proper-deliverable" aria-label="Link to section">#</a></h3>
+<p>A deliverable is proper when it is receiver-oriented rather than a dump of agent prose. It must have:</p>
+<ol>
+<li>an explicit audience and decision/use;</li>
+<li>required semantic components;</li>
+<li>evidence and uncertainty lineage;</li>
+<li>a declared authority class for every component;</li>
+<li>deterministic tables and metrics where possible;</li>
+<li>at least one human-readable format;</li>
+<li>at least one machine-readable format;</li>
+<li>a manifest binding every emitted file;</li>
+<li>stable rendering independent of the final LLM’s formatting preferences;</li>
+<li>a usable failure form that does not imply acceptance.</li>
+</ol>
+<hr />
+<h2 id="3-updated-target-architecture">3. Updated target architecture<a class="heading-anchor" href="#3-updated-target-architecture" aria-label="Link to section">#</a></h2>
+<p>The macro architecture stays unchanged. Four new cross-cutting layers close the current gaps.</p>
+<pre><code class="language-text">INPUT + ARTIFACTS
+      |
+      v
+GENESIS COUNCIL
+  ReceiverContract + NodeAtlas + GraderAtlas
+  Sealed tests + DeliverableBlueprint + ToolOpportunity contracts
+      |
+      v
+ROUND N AUTHORITY SNAPSHOT
+      |
+      +---------------------------+
+      |                           |
+      v                           v
+COMPETITIVE WORKER GROUPS     COMPETITIVE GRADER GROUPS
+bounded mortal agents         criteria/methodology authors
+contributions/dead ends       hidden tests and requirements
+promoted tools/evidence       criteria frozen before reveal
+      |                           |
+      +-------------+-------------+
+                    v
+SEALED ROUND BARRIER
+Critic promotion → evidence packets → exact bundles → node grades
+capture/yields → disclosure → typed repair diagnostics → lineage
+                    |
+                    v
+INTERIM DELIVERABLE SNAPSHOT
+receiver-oriented semantic package, not yet final authority
+                    |
+          next round or terminal policy
+                    |
+     +--------------+----------------+
+     |                               |
+     v                               v
+ACCEPTED PUBLICATION          PROVISIONAL RECOVERY PUBLICATION
+strict winner/lineage         no winner; comparative public evidence
+manifest v4                   recovery manifest and caveat contract
+</code></pre>
+<h4 id="new-cross-cutting-layers">New cross-cutting layers<a class="heading-anchor" href="#new-cross-cutting-layers" aria-label="Link to section">#</a></h4>
+<ol>
+<li><strong>Agent runtime cells:</strong> linearizable lifecycle and telemetry updates.</li>
+<li><strong>Tool contract and repair plane:</strong> immutable contract handles, generated workspaces, typed safe diagnostics, and repair-consumption lineage.</li>
+<li><strong>Deliverable semantic plane:</strong> a receiver package assembled throughout the run and rendered independently of normal acceptance.</li>
+<li><strong>Deterministic scenario harness:</strong> a scripted end-to-end proving ground for success, rejection, cancellation, and recovery.</li>
+</ol>
+<hr />
+<h2 id="4-workstream-a-make-lifecycle-state-linearizable">4. Workstream A — Make lifecycle state linearizable<a class="heading-anchor" href="#4-workstream-a-make-lifecycle-state-linearizable" aria-label="Link to section">#</a></h2>
+<h3 id="4-1-design-rule">4.1 Design rule<a class="heading-anchor" href="#4-1-design-rule" aria-label="Link to section">#</a></h3>
+<p><code>LiveAgentEntry</code> must no longer be a value repeatedly replaced in a concurrent map by unrelated code paths. The map should contain one stable per-agent runtime cell. All state transitions occur through that cell’s atomic reducer.</p>
+<pre><code class="language-kotlin">class AgentRuntimeCell(
+    initial: AgentRuntimeState,
+) {
+    private val mutex = Mutex()
+    private var state: AgentRuntimeState = initial
+
+    suspend fun &lt;T&gt; mutate(
+        operation: String,
+        transform: (AgentRuntimeState) -&gt; MutationResult&lt;T&gt;,
+    ): T = mutex.withLock {
+        val result = transform(state)
+        validateTransition(state, result.next)
+        state = result.next
+        result.value
+    }
+
+    suspend fun snapshot(): AgentRuntimeState =
+        mutex.withLock { state }
+}
+</code></pre>
+<p><code>ConcurrentHashMap&lt;AgentId, AgentRuntimeCell&gt;</code> remains suitable for cell registration and lookup. It should not be used as the lifecycle-state mutation mechanism.</p>
+<h3 id="4-2-monotonic-state-model">4.2 Monotonic state model<a class="heading-anchor" href="#4-2-monotonic-state-model" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+enum class AgentRuntimePhase {
+    CREATED,
+    RUNNING,
+    TERMINATION_REQUESTED,
+    EXIT_AUTHORITY_FROZEN,
+    EXECUTION_FINISHED,
+    ACCOUNTING_FINALIZED,
+    QUIESCENT,
+}
+
+@Serializable
+data class AgentRuntimeState(
+    val agentId: String,
+    val runId: String,
+    val groupId: String,
+    val role: Role,
+    val phase: AgentRuntimePhase,
+    val killRequested: Boolean,
+    val executionFinished: Boolean,
+    val exitAuthority: AgentExitRecord?,
+    val deathCallbackEmitted: Boolean,
+    val budgetSnapshot: AgentBudgetSnapshot?,
+    val ledgerRegistered: Boolean,
+    val ttlCheckpoints: Set&lt;Int&gt;,
+    val costSettlement: CostSettlementState,
+    val version: Long,
+)
+</code></pre>
+<h4 id="required-invariants">Required invariants<a class="heading-anchor" href="#required-invariants" aria-label="Link to section">#</a></h4>
+<ul>
+<li><code>phase</code> may move only forward.</li>
+<li><code>killRequested</code> may move only <code>false → true</code>.</li>
+<li><code>executionFinished</code> may move only <code>false → true</code>.</li>
+<li><code>exitAuthority</code> is write-once and byte-immutable.</li>
+<li><code>exitedAt</code> is generated once, when exit authority is frozen.</li>
+<li>budget, ledger, and TTL telemetry cannot change lifecycle fields.</li>
+<li>death callback is emitted exactly once.</li>
+<li>lease/WIP cleanup uses the frozen <code>wasKilled</code> and exit reason.</li>
+<li>a durable exit does not imply quiescence until the runner actually finishes.</li>
+<li>cost settlement must complete before <code>QUIESCENT</code>.</li>
+</ul>
+<h3 id="4-3-mutation-apis">4.3 Mutation APIs<a class="heading-anchor" href="#4-3-mutation-apis" aria-label="Link to section">#</a></h3>
+<p>No caller should receive a mutable or copyable whole state object. Expose intent-specific methods:</p>
+<pre><code class="language-kotlin">suspend fun registerLedger(snapshot: AgentBudgetSnapshot)
+suspend fun publishBudget(snapshot: AgentBudgetSnapshot)
+suspend fun addTtlCheckpoint(percent: Int)
+suspend fun requestTermination(reason: TerminationReason): AgentExitRecord
+suspend fun markExecutionFinished(completion: RunnerCompletion)
+suspend fun markCostSettled(settlementId: String)
+suspend fun markDeathCallbackEmitted()
+suspend fun markQuiescent()
+</code></pre>
+<p>Each implementation derives the next state from the current state inside the cell lock. A previously captured <code>AgentRuntimeState</code> must never be written back.</p>
+<h3 id="4-4-exit-ordering">4.4 Exit ordering<a class="heading-anchor" href="#4-4-exit-ordering" aria-label="Link to section">#</a></h3>
+<p>The required order is:</p>
+<pre><code class="language-text">1. Atomically freeze AgentExitRecord in runtime cell.
+2. Persist the exact record idempotently.
+3. Finalize Atlas lease and WIP from the frozen record.
+4. Request runner cancellation or graceful termination.
+5. Await actual runner completion.
+6. Mark executionFinished using the same frozen exit authority.
+7. Complete non-cancellable cost settlement.
+8. Emit the once-only death callback.
+9. Reconcile durable registration-to-exit counts.
+10. Mark the cell QUIESCENT and remove only after archival snapshot.
+</code></pre>
+<p>Late completion must <strong>read</strong> the frozen exit authority. It must never create a new exit timestamp or termination identity.</p>
+<h3 id="4-5-persistence-behavior">4.5 Persistence behavior<a class="heading-anchor" href="#4-5-persistence-behavior" aria-label="Link to section">#</a></h3>
+<p>The substrate’s immutable-exit check is correct and must remain strict. Add an idempotent repository result:</p>
+<pre><code class="language-kotlin">sealed interface PersistExitResult {
+    data object Inserted : PersistExitResult
+    data object AlreadyPresentExact : PersistExitResult
+    data class Conflict(
+        val existingHash: String,
+        val attemptedHash: String,
+    ) : PersistExitResult
+}
+</code></pre>
+<p><code>AlreadyPresentExact</code> is normal during recovery or duplicate delivery. <code>Conflict</code> is a fatal runtime invariant failure, not a retryable warning.</p>
+<p>The current repeated five-second retry loop should be removed. A conflict cannot heal by retrying the same mismatched identity.</p>
+<h3 id="4-6-required-tests">4.6 Required tests<a class="heading-anchor" href="#4-6-required-tests" aria-label="Link to section">#</a></h3>
+<h4 id="deterministic-barrier-regression">Deterministic barrier regression<a class="heading-anchor" href="#deterministic-barrier-regression" aria-label="Link to section">#</a></h4>
+<p><code>LifecycleExitLinearizabilityTest.ttl kill concurrent with budget publication preserves one exit</code></p>
+<ol>
+<li>Start an in-process worker with a registered ledger.</li>
+<li>Pause the worker at a controlled cancellation barrier.</li>
+<li>Trigger TTL termination and persist the frozen exit.</li>
+<li>Concurrently publish budget, ledger, and TTL-checkpoint updates.</li>
+<li>Release cancellation.</li>
+<li>Assert exactly one durable exit record and hash.</li>
+<li>Assert no immutable conflict and no deferred retry.</li>
+<li>Assert exactly one death callback.</li>
+<li>Assert lease/WIP cleanup uses the frozen <code>wasKilled</code>.</li>
+<li>Assert active reservation count is zero.</li>
+<li>Assert the runner is finished before quiescence.</li>
+</ol>
+<h4 id="property-stress-regression">Property/stress regression<a class="heading-anchor" href="#property-stress-regression" aria-label="Link to section">#</a></h4>
+<p>Randomly interleave:</p>
+<ul>
+<li>budget publication;</li>
+<li>checkpoint publication;</li>
+<li>graceful completion;</li>
+<li>TTL kill;</li>
+<li>operator abort;</li>
+<li>cost settlement;</li>
+<li>death callback;</li>
+<li>monitor scans.</li>
+</ul>
+<p>For at least thousands of deterministic schedules, assert the monotonic invariants and one exit identity.</p>
+<h4 id="restart-regression">Restart regression<a class="heading-anchor" href="#restart-regression" aria-label="Link to section">#</a></h4>
+<p>Freeze and persist exit authority, terminate the process before runner completion, reload the run, and ensure recovery reuses the exact persisted exit while waiting for/cleaning orphan execution state.</p>
+<h3 id="4-7-observability-and-release-gate">4.7 Observability and release gate<a class="heading-anchor" href="#4-7-observability-and-release-gate" aria-label="Link to section">#</a></h3>
+<p>Add first-class metrics:</p>
+<table>
+<thead>
+<tr>
+  <th>Metric</th>
+  <th style="text-align:right">Strict target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>exit_identity_conflict_count</code></td>
+  <td style="text-align:right">0</td>
+</tr>
+<tr>
+  <td><code>exit_finalization_retry_count</code></td>
+  <td style="text-align:right">0</td>
+</tr>
+<tr>
+  <td><code>registered_without_exit_count</code></td>
+  <td style="text-align:right">0</td>
+</tr>
+<tr>
+  <td><code>exit_without_registered_agent_count</code></td>
+  <td style="text-align:right">0</td>
+</tr>
+<tr>
+  <td><code>live_execution_after_archive_barrier</code></td>
+  <td style="text-align:right">0</td>
+</tr>
+<tr>
+  <td><code>death_callback_duplicate_count</code></td>
+  <td style="text-align:right">0</td>
+</tr>
+<tr>
+  <td><code>max_exit_to_quiescence_ms</code></td>
+  <td style="text-align:right">Available and bounded</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-workstream-b-stop-making-agents-transcribe-immutable-tool-contracts">5. Workstream B — Stop making agents transcribe immutable tool contracts<a class="heading-anchor" href="#5-workstream-b-stop-making-agents-transcribe-immutable-tool-contracts" aria-label="Link to section">#</a></h2>
+<p>The v21 failure distribution shows that too much model capacity is being spent reproducing runtime-owned schemas and identifiers. This is the same class of failure previously solved for grader methodologies with short handles.</p>
+<h3 id="5-1-tool-opportunity-binding-catalog">5.1 Tool opportunity binding catalog<a class="heading-anchor" href="#5-1-tool-opportunity-binding-catalog" aria-label="Link to section">#</a></h3>
+<p>Generate a runtime-only catalog from the exact WorkerView and active Atlas lease:</p>
+<pre><code class="language-kotlin">@Serializable
+data class ToolOpportunityBindingCatalog(
+    val catalogId: String,
+    val runId: String,
+    val groupId: String,
+    val round: Int,
+    val workerViewHash: String,
+    val bindings: List&lt;ToolOpportunityBinding&gt;,
+    val catalogHash: String,
+)
+
+@Serializable
+data class ToolOpportunityBinding(
+    val handle: String,                 // e.g. &quot;T1&quot;
+    val nodeId: String,
+    val opportunityId: String,
+    val opportunityHash: String,
+    val inputSchemaHash: String,
+    val outputSchemaHash: String,
+    val publicTestIds: List&lt;String&gt;,
+    val runtimeKind: ToolRuntimeKind,
+    val projectSkeletonHash: String,
+)
+</code></pre>
+<p>The model sees the short handle and human-readable contract. The runtime resolves the handle one-way to exact IDs and hashes. Persist only exact authority.</p>
+<p>Unknown, stale, foreign, duplicate, or out-of-scope handles fail closed. No fuzzy resolution is allowed.</p>
+<h3 id="5-2-generated-immutable-workspace">5.2 Generated immutable workspace<a class="heading-anchor" href="#5-2-generated-immutable-workspace" aria-label="Link to section">#</a></h3>
+<p>For every tool-authoring agent, materialize a project workspace:</p>
+<pre><code class="language-text">/tool-workspace/
+  contract/
+    tool-contract.json          # read-only, runtime-generated
+    input-schema.json           # read-only
+    output-schema.json          # read-only
+    public-tests.json           # read-only sealed public cases
+    README.md                   # generated concise instructions
+  src/
+    main.py | main.sh | formula.json
+  tests/
+    author-tests.json           # model-editable supplemental tests
+  artifacts/
+    local-results.json
+</code></pre>
+<p>The agent edits implementation and supplemental tests. It does not copy <code>inputSchema</code>, <code>outputSchema</code>, opportunity IDs, or committed public test IDs into a new payload.</p>
+<h3 id="5-3-candidate-wire-contract">5.3 Candidate wire contract<a class="heading-anchor" href="#5-3-candidate-wire-contract" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+data class ToolCandidateWireDraft(
+    val opportunityHandle: String,
+    val sourceArtifactPath: String,
+    val entryPoint: String,
+    val supplementalTestsPath: String?,
+    val declaredAssumptions: List&lt;String&gt;,
+    val consumedRepairDiagnosticIds: List&lt;String&gt;,
+)
+</code></pre>
+<p>The runtime compiles this into the exact existing domain submission:</p>
+<pre><code class="language-text">wire draft
+  + binding catalog
+  + immutable contract files
+  + content hashes
+  → ToolSubmission
+  → existing deterministic preflight
+  → existing Critic/private promotion authority
+</code></pre>
+<p>This should eliminate the dominant <code>schema_mismatch</code> and <code>missing_input_schema</code> categories without weakening validation.</p>
+<h3 id="5-4-canonical-numeric-serialization">5.4 Canonical numeric serialization<a class="heading-anchor" href="#5-4-canonical-numeric-serialization" aria-label="Link to section">#</a></h3>
+<p>Do not ask the model to reason about JSON lexical number canonicalization in every candidate. Supply one runtime serializer for test values and local outputs.</p>
+<ul>
+<li>parse model-authored typed values;</li>
+<li>encode through the same canonical serializer used by promotion;</li>
+<li>reject non-finite numbers before encoding;</li>
+<li>preserve INTEGER versus NUMBER distinctions from the sealed schema;</li>
+<li>display corrected public canonicalization errors immediately while the agent is alive.</li>
+</ul>
+<p>The model still authors expected semantics; the runtime owns the byte representation.</p>
+<h3 id="5-5-contract-transport-acceptance">5.5 Contract transport acceptance<a class="heading-anchor" href="#5-5-contract-transport-acceptance" aria-label="Link to section">#</a></h3>
+<p>A candidate transport path passes only if:</p>
+<ul>
+<li>the model cannot change the opportunity or schemas;</li>
+<li>all exact IDs are resolved from a capability-bound handle;</li>
+<li>source and tests are content-hashed;</li>
+<li>the compiled submission independently reproduces the sealed contract hash;</li>
+<li>the model-facing prompt contains no private promotion fixture;</li>
+<li>the existing production validator receives the same domain object as before.</li>
+</ul>
+<h3 id="5-6-tests">5.6 Tests<a class="heading-anchor" href="#5-6-tests" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>ToolOpportunityBindingCatalogTest</code>: stale/foreign/duplicate handles reject.</li>
+<li><code>ToolCandidateWireCompilerTest</code>: schemas and opportunity IDs come only from runtime authority.</li>
+<li><code>ToolWorkspaceTamperTest</code>: edits under <code>contract/</code> fail hash verification.</li>
+<li><code>ToolCanonicalNumberCompilerTest</code>: NUMBER and INTEGER values serialize consistently.</li>
+<li><code>ToolTransportRegressionV21Test</code>: literal v21 schema-mismatch and missing-schema drafts compile correctly or fail before model review with a single actionable wire error.</li>
+</ul>
+<hr />
+<h2 id="6-workstream-c-make-semantic-tool-repair-a-typed-safe-subsystem">6. Workstream C — Make semantic tool repair a typed, safe subsystem<a class="heading-anchor" href="#6-workstream-c-make-semantic-tool-repair-a-typed-safe-subsystem" aria-label="Link to section">#</a></h2>
+<h3 id="6-1-why-a-first-class-subsystem-is-necessary">6.1 Why a first-class subsystem is necessary<a class="heading-anchor" href="#6-1-why-a-first-class-subsystem-is-necessary" aria-label="Link to section">#</a></h3>
+<p>Adding one more regex for one more Critic phrase will recreate the same failure later. Tool repair needs its own versioned authority, disclosure policy, persistence, prompt adapter, scheduling policy, and causal measurement.</p>
+<h3 id="6-2-core-contract">6.2 Core contract<a class="heading-anchor" href="#6-2-core-contract" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+data class ToolRepairDiagnosticV1(
+    val diagnosticId: String,
+    val runId: String,
+    val groupId: String,
+    val nodeId: String,
+    val opportunityId: String,
+    val opportunityHash: String,
+    val candidateHash: String,
+    val source: ToolRepairSource,
+    val disclosureClass: ToolRepairDisclosureClass,
+    val code: ToolRepairCode,
+    val createdRound: Int,
+    val visibleFromRound: Int,
+    val rationaleCommitment: String?,
+    val diagnosticHash: String,
+)
+
+@Serializable
+enum class ToolRepairSource {
+    PUBLIC_PREFLIGHT,
+    CRITIC_SEMANTIC_REVIEW,
+    PRIVATE_PROMOTION_AUTHORITY,
+}
+
+@Serializable
+enum class ToolRepairDisclosureClass {
+    PUBLIC_EXACT,
+    SAFE_SEMANTIC_CATEGORY,
+    PRIVATE_FAILURE_ONLY,
+}
+</code></pre>
+<h3 id="6-3-initial-closed-code-set">6.3 Initial closed code set<a class="heading-anchor" href="#6-3-initial-closed-code-set" aria-label="Link to section">#</a></h3>
+<p>The code set should be derived from supported tool semantics, not from individual log prose.</p>
+<pre><code class="language-kotlin">@Serializable
+enum class ToolRepairCode {
+    CONTRACT_SCHEMA_MISMATCH,
+    MISSING_REQUIRED_CONTRACT_FIELD,
+    NON_CANONICAL_NUMBER,
+    PUBLIC_TEST_EXPECTED_OUTPUT_MISMATCH,
+    INPUT_NOT_INFLUENCING_OUTPUT,
+    POWER_TO_ENERGY_UNIT_CONVERSION,
+    RATE_VERSUS_TOTAL_CONFUSION,
+    AGGREGATION_WINDOW_MISMATCH,
+    DIMENSIONAL_MISMATCH,
+    PERCENT_NORMALIZATION_ERROR,
+    SIGN_CONVENTION_ERROR,
+    TEMPORAL_INDEX_ALIGNMENT_ERROR,
+    BOUNDARY_CONDITION_ERROR,
+    SCOPE_MISMATCH,
+    OUTPUT_SEMANTICS_MISMATCH,
+    PRIVATE_TEST_FAILED_UNCLASSIFIED,
+}
+</code></pre>
+<p>The immediate required code is <code>POWER_TO_ENERGY_UNIT_CONVERSION</code>.</p>
+<h3 id="6-4-safe-disclosure-policy">6.4 Safe disclosure policy<a class="heading-anchor" href="#6-4-safe-disclosure-policy" aria-label="Link to section">#</a></h3>
+<p>A disclosed diagnostic may contain:</p>
+<ul>
+<li>the enum code;</li>
+<li>a generic remediation statement from a checked-in dictionary;</li>
+<li>the affected public output field handle, if that field is already visible;</li>
+<li>the relevant public unit/dimension metadata;</li>
+<li>source class and round.</li>
+</ul>
+<p>It must not contain:</p>
+<ul>
+<li>private input values;</li>
+<li>private expected or actual outputs;</li>
+<li>private numeric differences;</li>
+<li>hidden test names when those names are private;</li>
+<li>paths, URLs, stack traces, or exception text;</li>
+<li>raw Critic prose;</li>
+<li>another group’s implementation;</li>
+<li>model-private reasoning.</li>
+</ul>
+<h3 id="6-5-typed-critic-semantic-output">6.5 Typed Critic semantic output<a class="heading-anchor" href="#6-5-typed-critic-semantic-output" aria-label="Link to section">#</a></h3>
+<p>The tool Critic should return a typed review:</p>
+<pre><code class="language-kotlin">@Serializable
+data class ToolSemanticReview(
+    val verdict: ToolSemanticVerdict,
+    val publicFindings: List&lt;PublicToolFinding&gt;,
+    val safeRepairCodes: Set&lt;ToolRepairCode&gt;,
+    val privateRationaleCommitment: String,
+)
+</code></pre>
+<p>The deterministic boundary validates that every safe code is compatible with the public contract. Arbitrary prose is stored only as private review material and is never pattern-matched into worker context.</p>
+<h3 id="6-6-quantity-and-unit-semantics">6.6 Quantity and unit semantics<a class="heading-anchor" href="#6-6-quantity-and-unit-semantics" aria-label="Link to section">#</a></h3>
+<p>The power-to-energy failure should also be preventable or classifiable through typed unit metadata.</p>
+<pre><code class="language-kotlin">@Serializable
+data class QuantitySpec(
+    val dimension: PhysicalDimension,
+    val unitId: String,             // &quot;W&quot;, &quot;kW&quot;, &quot;Wh&quot;, &quot;kWh&quot;, &quot;C&quot;, etc.
+    val scaleToSi: Double,
+    val aggregation: AggregationSemantics,
+    val timeBasis: TimeBasis?,
+)
+
+@Serializable
+enum class AggregationSemantics {
+    INSTANTANEOUS,
+    PER_INTERVAL_RATE,
+    SUM_OVER_INTERVALS,
+    AVERAGE_OVER_INTERVALS,
+    MAXIMUM,
+}
+</code></pre>
+<p>Council compilation should reject contradictions such as:</p>
+<pre><code class="language-text">field unit = kWh
+implementation/reference semantics = sum(W × hour)
+conversion factor = absent
+</code></pre>
+<p>For Python tools that cannot be fully dimension-checked statically, the reference semantics and public tests should still carry typed quantity expectations so the Critic can emit a safe category.</p>
+<h3 id="6-7-prompt-correction">6.7 Prompt correction<a class="heading-anchor" href="#6-7-prompt-correction" aria-label="Link to section">#</a></h3>
+<p>Remove any statement that workers will receive private expected and actual outputs. Replace it with:</p>
+<pre><code class="language-text">Your public tests prove local consistency only. Private promotion authority is separate.
+Private fixtures and exact private outputs are never disclosed.
+You may receive:
+- exact public contract/schema diagnostics;
+- public canonical-number diagnostics;
+- public reference semantics and quantity metadata;
+- bounded safe semantic repair codes from a previous generation.
+Treat these codes as hypotheses to test, not as hidden fixture values.
+</code></pre>
+<h3 id="6-8-repair-lifecycle-and-causal-credit">6.8 Repair lifecycle and causal credit<a class="heading-anchor" href="#6-8-repair-lifecycle-and-causal-credit" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+data class ToolRepairAttemptRecord(
+    val attemptId: String,
+    val opportunityId: String,
+    val candidateHash: String,
+    val authorAgentId: String,
+    val round: Int,
+    val consumedDiagnosticIds: List&lt;String&gt;,
+    val preflightResult: ToolValidationStatus,
+    val criticResult: ToolSemanticVerdict?,
+    val promotionResult: ToolPromotionStatus,
+    val attemptHash: String,
+)
+</code></pre>
+<p>A diagnostic is useful only if a later candidate consumes it and changes the relevant behavior. Fitness should reward:</p>
+<ul>
+<li>a diagnostic that enabled a later promotion;</li>
+<li>a repair candidate that promoted;</li>
+<li>a repair candidate that converted a hidden failure into a different, narrower failure;</li>
+<li>a structured dead end that prevents repeated identical attempts.</li>
+</ul>
+<p>It should not reward the mere production of diagnostics.</p>
+<h3 id="6-9-scheduling-and-diversity">6.9 Scheduling and diversity<a class="heading-anchor" href="#6-9-scheduling-and-diversity" aria-label="Link to section">#</a></h3>
+<p>When a mandatory tool node remains open with repair diagnostics:</p>
+<ul>
+<li>keep it high in the group’s next-round portfolio;</li>
+<li>assign a worker with exact repair context;</li>
+<li>cap lineage attempts to prevent infinite repetition;</li>
+<li>require the two competing groups to receive distinct sealed <code>ApproachVector</code>s when explicit replication would otherwise produce correlated retries.</li>
+</ul>
+<p>Example strategy vectors:</p>
+<pre><code class="language-text">Group A: dimensional-analysis-first; derive units and reference calculations before code.
+Group B: property-test-first; build invariants and boundary cases before implementation.
+</code></pre>
+<p>The approaches are sealed before the candidate is produced and become part of experiment lineage.</p>
+<h3 id="6-10-end-to-end-repair-regression">6.10 End-to-end repair regression<a class="heading-anchor" href="#6-10-end-to-end-repair-regression" aria-label="Link to section">#</a></h3>
+<p><code>PowerToEnergyRepairAcceptanceTest</code> should prove:</p>
+<ol>
+<li>First candidate passes public shape checks but fails private promotion.</li>
+<li>Private values remain inaccessible.</li>
+<li>Critic safely emits <code>POWER_TO_ENERGY_UNIT_CONVERSION</code>.</li>
+<li>The diagnostic is visible only in a later permitted generation.</li>
+<li>A new agent consumes the code.</li>
+<li>The corrected implementation divides the watt-hour total by 1000 for kWh output.</li>
+<li>Existing private fixture passes.</li>
+<li>The tool promotes.</li>
+<li>A different later mortal agent executes it on the sealed reuse node.</li>
+<li>A simulation record enters a later evidence packet and affects grade/capture.</li>
+</ol>
+<hr />
+<h2 id="7-workstream-d-compile-flexible-high-value-deliverables">7. Workstream D — Compile flexible, high-value deliverables<a class="heading-anchor" href="#7-workstream-d-compile-flexible-high-value-deliverables" aria-label="Link to section">#</a></h2>
+<h3 id="7-1-separate-semantic-package-from-rendering">7.1 Separate semantic package from rendering<a class="heading-anchor" href="#7-1-separate-semantic-package-from-rendering" aria-label="Link to section">#</a></h3>
+<p>The final product should not be “whatever file the final writer happens to produce.” Build one typed semantic package and render it through deterministic adapters.</p>
+<pre><code class="language-kotlin">@Serializable
+data class DeliverableBlueprint(
+    val blueprintId: String,
+    val receiverContractHash: String,
+    val audience: String,
+    val decisionOrUse: String,
+    val primaryFormat: DeliverableFormat,
+    val companionFormats: Set&lt;DeliverableFormat&gt;,
+    val componentSpecs: List&lt;DeliverableComponentSpec&gt;,
+    val evidencePolicy: DeliverableEvidencePolicy,
+    val recoveryPolicy: DeliverableRecoveryPolicy,
+    val blueprintHash: String,
+)
+
+@Serializable
+enum class DeliverableFormat {
+    MARKDOWN,
+    HTML5,
+    JSON,
+    CSV_BUNDLE,
+}
+</code></pre>
+<p>PDF/DOCX can be later renderer adapters. They should not alter semantic authority.</p>
+<h3 id="7-2-component-model">7.2 Component model<a class="heading-anchor" href="#7-2-component-model" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+enum class DeliverableComponentKind {
+    EXECUTIVE_SUMMARY,
+    DECISION_MATRIX,
+    RECOMMENDATION,
+    EVIDENCE_LEDGER,
+    ASSUMPTIONS,
+    UNCERTAINTIES,
+    RISK_REGISTER,
+    IMPLEMENTATION_PLAN,
+    ACTION_CHECKLIST,
+    TOOL_AND_SIMULATION_RESULTS,
+    ALTERNATIVE_VIEWS,
+    LIMITATIONS_AND_NEXT_EVIDENCE,
+    TECHNICAL_APPENDIX,
+}
+
+@Serializable
+data class DeliverableComponentSpec(
+    val componentId: String,
+    val kind: DeliverableComponentKind,
+    val required: Boolean,
+    val sourceNodeIds: Set&lt;String&gt;,
+    val minimumAuthority: ComponentAuthorityClass,
+    val rendererHints: Map&lt;String, String&gt;,
+)
+
+@Serializable
+enum class ComponentAuthorityClass {
+    ACCEPTED,
+    PROVISIONAL,
+    WITHHELD,
+}
+</code></pre>
+<h3 id="7-3-semantic-decision-package">7.3 Semantic decision package<a class="heading-anchor" href="#7-3-semantic-decision-package" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+data class ReceiverDecisionPackage(
+    val packageId: String,
+    val runId: String,
+    val outcomeClass: RunOutcomeClass,
+    val receiverContractHash: String,
+    val blueprintHash: String,
+    val components: List&lt;DeliverableComponent&gt;,
+    val evidenceLedger: List&lt;DeliverableEvidenceLink&gt;,
+    val knownFailures: List&lt;FailedAcceptanceGate&gt;,
+    val generatedAt: Instant,
+    val packageHash: String,
+)
+</code></pre>
+<p>Every component carries:</p>
+<ul>
+<li>authority class;</li>
+<li>source nodes and evidence packets;</li>
+<li>exact grades and test status;</li>
+<li>tool/simulation execution references;</li>
+<li>confidence/uncertainty state;</li>
+<li>content hash;</li>
+<li>whether an LLM transformed the content or it was deterministically assembled.</li>
+</ul>
+<h3 id="7-4-deterministic-versus-model-authored-content">7.4 Deterministic versus model-authored content<a class="heading-anchor" href="#7-4-deterministic-versus-model-authored-content" aria-label="Link to section">#</a></h3>
+<p>Use deterministic assembly for:</p>
+<ul>
+<li>test results;</li>
+<li>node coverage;</li>
+<li>option comparison rows;</li>
+<li>numerical metrics;</li>
+<li>evidence tables;</li>
+<li>risk registers with typed source rows;</li>
+<li>assumptions and uncertainties;</li>
+<li>accepted/provisional badges;</li>
+<li>missing-authority lists;</li>
+<li>manifests and provenance.</li>
+</ul>
+<p>Use the final LLM only for:</p>
+<ul>
+<li>receiver-language synthesis;</li>
+<li>connecting accepted components;</li>
+<li>explaining trade-offs already present in evidence;</li>
+<li>producing concise narrative transitions.</li>
+</ul>
+<p>The LLM must not invent values for missing tool results or silently upgrade provisional evidence.</p>
+<h3 id="7-5-round-by-round-interim-snapshots">7.5 Round-by-round interim snapshots<a class="heading-anchor" href="#7-5-round-by-round-interim-snapshots" aria-label="Link to section">#</a></h3>
+<p>At every sealed round boundary, compile an <code>InterimDeliverableSnapshot</code> in the control plane:</p>
+<pre><code class="language-kotlin">@Serializable
+data class InterimDeliverableSnapshot(
+    val runId: String,
+    val round: Int,
+    val groupId: String,
+    val acceptedComponentIds: List&lt;String&gt;,
+    val provisionalComponentIds: List&lt;String&gt;,
+    val failedGateIds: List&lt;String&gt;,
+    val evidenceRefs: List&lt;String&gt;,
+    val snapshotHash: String,
+)
+</code></pre>
+<p>Workers do not receive hidden root content from this snapshot. It exists to:</p>
+<ul>
+<li>measure progress toward the receiver outcome;</li>
+<li>feed final publication;</li>
+<li>guarantee a useful recovery source;</li>
+<li>prevent late failure from losing earlier receiver-relevant work.</li>
+</ul>
+<h3 id="7-6-standard-package-layout">7.6 Standard package layout<a class="heading-anchor" href="#7-6-standard-package-layout" aria-label="Link to section">#</a></h3>
+<h4 id="accepted-package">Accepted package<a class="heading-anchor" href="#accepted-package" aria-label="Link to section">#</a></h4>
+<pre><code class="language-text">results.zip
+  README.md
+  decision-package.html
+  decision-package.md
+  executive-brief.md
+  option-comparison.csv
+  evidence-ledger.csv
+  assumptions-and-uncertainties.md
+  risk-register.md
+  implementation-checklist.md
+  tool-results/
+  run-metrics-v1.json
+  manifest.json
+  authority/
+    final-reference.json
+    publication-history.json
+</code></pre>
+<h4 id="provisional-recovery-package">Provisional recovery package<a class="heading-anchor" href="#provisional-recovery-package" aria-label="Link to section">#</a></h4>
+<pre><code class="language-text">recovery-results.zip
+  README-NON-ACCEPTED.md
+  provisional-decision-package.html
+  provisional-decision-package.md
+  source-comparison.csv
+  evidence-ledger.csv
+  failed-mandatory-tests.md
+  missing-authority.md
+  assumptions-and-uncertainties.md
+  recommended-next-evidence.md
+  round-summaries/
+  run-metrics-v1.json
+  recovery-manifest.json
+</code></pre>
+<h3 id="7-7-example-municipal-emergency-manager-package">7.7 Example: municipal emergency-manager package<a class="heading-anchor" href="#7-7-example-municipal-emergency-manager-package" aria-label="Link to section">#</a></h3>
+<p>Even when the simulator failed promotion, a useful provisional package could have contained:</p>
+<ol>
+<li><strong>Decision context:</strong> 500 m² shelter, heat-risk objective, compared interventions.</li>
+<li><strong>Provisional option matrix:</strong> reflective coating versus heat-pump retrofit, with only public supported values.</li>
+<li><strong>Safe immediate actions:</strong> actions supported independently of the failed simulator.</li>
+<li><strong>Blocked calculation:</strong> cooling-demand result withheld because the promoted simulator authority is absent.</li>
+<li><strong>Known semantic defect:</strong> power-to-energy conversion unresolved in the last candidate.</li>
+<li><strong>Evidence disagreements:</strong> side-by-side group claims without declaring a winner.</li>
+<li><strong>Operational risks and assumptions:</strong> receiver-relevant risks extracted from accepted public evidence.</li>
+<li><strong>Next evidence:</strong> exact tests/data needed to promote the simulator and make the decision accepted.</li>
+<li><strong>Authority banner:</strong> <code>PROVISIONAL_NON_ACCEPTED — DO NOT TREAT AS AN ACCEPTED RECOMMENDATION</code>.</li>
+</ol>
+<p>That is substantially more valuable than a recovery notice while remaining honest.</p>
+<hr />
+<h2 id="8-workstream-e-separate-accepted-and-recovery-publication-state-machines">8. Workstream E — Separate accepted and recovery publication state machines<a class="heading-anchor" href="#8-workstream-e-separate-accepted-and-recovery-publication-state-machines" aria-label="Link to section">#</a></h2>
+<h3 id="8-1-accepted-publication-path">8.1 Accepted publication path<a class="heading-anchor" href="#8-1-accepted-publication-path" aria-label="Link to section">#</a></h3>
+<p>Retain the strict barrier:</p>
+<pre><code class="language-text">FINAL_CANDIDATES_SEALED
+  → WINNER_OR_FINAL_POLICY_RESOLVED
+  → FINAL_WRITER_RUNNING
+  → OUTPUT_STAGED
+  → OUTPUT_VALIDATED
+  → COST_FINALIZED
+  → DEATH_NOTE_FINALIZED
+  → ALL_NON_DAEMON_AGENTS_TERMINATED
+  → MANIFEST_HASHED
+  → ARCHIVED
+</code></pre>
+<h3 id="8-2-recovery-publication-path">8.2 Recovery publication path<a class="heading-anchor" href="#8-2-recovery-publication-path" aria-label="Link to section">#</a></h3>
+<p>Add a separate state machine. Do not reuse accepted-state records with null winner fields.</p>
+<pre><code class="language-text">WORK_CYCLE_CLOSED_WITHOUT_ACCEPTANCE
+  → RECOVERY_SOURCE_SET_SEALED
+  → PROVISIONAL_PACKAGE_ASSEMBLED
+  → PROVISIONAL_PACKAGE_VALIDATED
+  → RECOVERY_COST_AND_EXIT_RECONCILED
+  → RECOVERY_MANIFEST_HASHED
+  → ARCHIVED_RECOVERED
+</code></pre>
+<pre><code class="language-kotlin">@Serializable
+data class RecoverySourceSet(
+    val runId: String,
+    val sourceSnapshotHashes: List&lt;String&gt;,
+    val sourceGroupIds: List&lt;String&gt;,
+    val publicEvidenceRefs: List&lt;String&gt;,
+    val exclusionReasons: Map&lt;String, String&gt;,
+    val sourceSetHash: String,
+)
+</code></pre>
+<p>When <code>scoringCandidate=none</code>, include all groups with valid public committed snapshots. Label them <code>NON_ACCEPTED_SOURCE_A</code>, <code>NON_ACCEPTED_SOURCE_B</code>, and so on. Never infer a winner from blind rank, broad score, artifact volume, or completion order.</p>
+<h3 id="8-3-recovery-comparison-rules">8.3 Recovery comparison rules<a class="heading-anchor" href="#8-3-recovery-comparison-rules" aria-label="Link to section">#</a></h3>
+<p>The comparison assembler may state:</p>
+<ul>
+<li>where groups agree;</li>
+<li>where they disagree;</li>
+<li>which claims have accepted evidence;</li>
+<li>which tests passed or failed;</li>
+<li>which tool/simulation authority is missing;</li>
+<li>which conclusions are provisional or withheld;</li>
+<li>what evidence would discriminate between alternatives.</li>
+</ul>
+<p>It may not state:</p>
+<ul>
+<li>that one group won;</li>
+<li>that a mandatory-failing recommendation is accepted;</li>
+<li>hidden test details;</li>
+<li>private grader rationale;</li>
+<li>fabricated calculations;</li>
+<li>metrics whose denominators are unavailable.</li>
+</ul>
+<h3 id="8-4-startup-diagnostic-path">8.4 Startup diagnostic path<a class="heading-anchor" href="#8-4-startup-diagnostic-path" aria-label="Link to section">#</a></h3>
+<pre><code class="language-text">ADMISSION_OR_COUNCIL_FAILURE
+  → REJECTION_AUTHORITY_FROZEN
+  → STARTUP_DIAGNOSTIC_ASSEMBLED
+  → DIAGNOSTIC_MANIFEST_HASHED
+  → ARCHIVED_REJECTED_PRE_RUNTIME
+</code></pre>
+<p>This package should be small and engineering-oriented rather than receiver-oriented.</p>
+<h3 id="8-5-manifest-v4-additions">8.5 Manifest v4 additions<a class="heading-anchor" href="#8-5-manifest-v4-additions" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+data class RunManifestV4(
+    val runId: String,
+    val outcomeClass: RunOutcomeClass,
+    val admissionDistributionHash: String,
+    val startingFieldHash: String?,
+    val workerAtlasHash: String?,
+    val graderAtlasHash: String?,
+    val sealedTestSuiteHash: String?,
+    val deliverableBlueprintHash: String,
+    val decisionPackageHash: String?,
+    val recoverySourceSetHash: String?,
+    val lifecycleReconciliationHash: String,
+    val metricsHash: String,
+    val publicationHistoryHash: String,
+    val entries: List&lt;ManifestEntry&gt;,
+)
+</code></pre>
+<p>The verifier must reject a recovery package that contains accepted final-reference authority or an accepted package that lacks a winner/source/writer chain.</p>
+<h3 id="8-6-recovery-acceptance-tests">8.6 Recovery acceptance tests<a class="heading-anchor" href="#8-6-recovery-acceptance-tests" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>NoCandidateRecoveryDecisionPackageTest</code>: two mandatory-failing groups yield a comparison package, no winner.</li>
+<li><code>RecoveryDoesNotCreateFinalReferenceTest</code>: normal final-reference tables remain empty.</li>
+<li><code>RecoveryPrivateFixtureLeakTest</code>: package contains no hidden values or raw private rationales.</li>
+<li><code>RecoveryComponentCoverageTest</code>: all required recovery components exist and are non-empty.</li>
+<li><code>AcceptedAndRecoveryManifestSeparationTest</code>: cross-class artifacts fail verification.</li>
+</ul>
+<hr />
+<h2 id="9-workstream-f-integrate-repair-and-deliverables-into-the-round-loop">9. Workstream F — Integrate repair and deliverables into the round loop<a class="heading-anchor" href="#9-workstream-f-integrate-repair-and-deliverables-into-the-round-loop" aria-label="Link to section">#</a></h2>
+<p>The round loop should have an explicit closure order. Repair feedback and deliverable snapshots should not be incidental side effects.</p>
+<pre><code class="language-text">ROUND START
+  1. Freeze matched worker/Grader Atlas pair.
+  2. Apply due yields and permitted repair diagnostics.
+  3. Compile group portfolios and agent runtime cells.
+  4. Freeze grader frontier and methodology work.
+
+PARALLEL EXECUTION
+  5. Spawn mortal worker agents with immutable node authority.
+  6. Spawn grader criteria agents without worker evidence.
+  7. Accept public same-lifetime tool preflight feedback.
+  8. Terminate/complete agents through linearizable runtime cells.
+
+SEALED ROUND END
+  9. Run Critic promotion and typed semantic review.
+ 10. Seal evidence packets and tool/simulation records.
+ 11. Freeze grader criteria.
+ 12. Reveal exact worker evidence to graders.
+ 13. Persist exact grader bundles and deterministic sealed-test outcomes.
+ 14. Resolve grades, capture, yields, disclosure, and Outlier authority.
+ 15. Publish safe ToolRepairDiagnostic records for future permitted rounds.
+ 16. Compile interim deliverable snapshots.
+ 17. Archive the round phase ledger.
+
+NEXT ROUND OR TERMINAL
+ 18. Activate next-round Atlas amendments and diagnostics.
+ 19. Continue, accepted publication, or provisional recovery publication.
+</code></pre>
+<h4 id="same-lifetime-versus-cross-generation-feedback">Same-lifetime versus cross-generation feedback<a class="heading-anchor" href="#same-lifetime-versus-cross-generation-feedback" aria-label="Link to section">#</a></h4>
+<ul>
+<li><strong>Public deterministic preflight:</strong> may be returned immediately to the living tool author.</li>
+<li><strong>Public Critic semantic category:</strong> normally visible next generation, unless current policy explicitly permits same-round repair before the Critic boundary closes.</li>
+<li><strong>Private promotion category:</strong> visible only in later permitted generations and only as a safe code.</li>
+<li><strong>Private values:</strong> never visible.</li>
+</ul>
+<p>Make this policy explicit in <code>ToolRepairDiagnostic.visibleFromRound</code>; do not rely on incidental timing.</p>
+<hr />
+<h2 id="10-deterministic-six-round-acceptance-simulator">10. Deterministic six-round acceptance simulator<a class="heading-anchor" href="#10-deterministic-six-round-acceptance-simulator" aria-label="Link to section">#</a></h2>
+<p>Another provider-backed two-hour run should not be the first environment to exercise the exact race and repair path. Build a deterministic full-pipeline scenario with scripted model actors and real production repositories.</p>
+<h3 id="10-1-scenario-contract">10.1 Scenario contract<a class="heading-anchor" href="#10-1-scenario-contract" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+data class StrictAcceptanceScenarioV1(
+    val scenarioId: String,
+    val rounds: Int = 6,
+    val workerGroups: Int = 2,
+    val graderGroups: Int = 3,
+    val injectLifecycleRace: Boolean,
+    val firstToolFailure: ToolRepairCode,
+    val requireLaterAgentUse: Boolean,
+    val requireSimulationInfluence: Boolean,
+    val terminalPolicy: ScenarioTerminalPolicy,
+)
+</code></pre>
+<h3 id="10-2-success-scenario">10.2 Success scenario<a class="heading-anchor" href="#10-2-success-scenario" aria-label="Link to section">#</a></h3>
+<p>The scripted scenario must execute the real production sequence:</p>
+<ol>
+<li>Council compiles a valid two-stage Atlas, eight executable tests, and one feasible tool path.</li>
+<li>Round 0 creates atomic evidence and one first tool candidate.</li>
+<li>Candidate fails private authority with a safe unit-conversion diagnostic.</li>
+<li>A TTL kill occurs concurrently with a budget update.</li>
+<li>Exactly one exit identity persists and the runner reaches quiescence.</li>
+<li>Round 1 repair worker consumes the diagnostic and submits a corrected candidate.</li>
+<li>Tool passes private promotion and becomes the sole active version for the opportunity.</li>
+<li>A different later mortal agent receives the exact validation/use card.</li>
+<li><code>VALIDATION_TEST</code> and later <code>AGENT_USE</code> remain distinct.</li>
+<li>Successful execution produces a simulation record.</li>
+<li>The record enters a later evidence packet and affects grade/capture.</li>
+<li>Mandatory nodes pass and disclosure advances.</li>
+<li>Final package references accepted nodes, tool execution, uncertainty, and receiver decision.</li>
+<li>All costs settle and all agents become quiescent.</li>
+<li>Manifest v4 verifies and publication ends <code>ARCHIVED</code>.</li>
+</ol>
+<h3 id="10-3-no-candidate-scenario">10.3 No-candidate scenario<a class="heading-anchor" href="#10-3-no-candidate-scenario" aria-label="Link to section">#</a></h3>
+<p>A second scenario deliberately keeps both groups mandatory-failing:</p>
+<ul>
+<li>exact graders complete;</li>
+<li>no candidate is selected;</li>
+<li>accepted publication does not start;</li>
+<li>provisional package compares both groups;</li>
+<li>no winner/final-reference authority exists;</li>
+<li>recovery manifest verifies;</li>
+<li>private fixtures remain absent.</li>
+</ul>
+<h3 id="10-4-fault-matrix">10.4 Fault matrix<a class="heading-anchor" href="#10-4-fault-matrix" aria-label="Link to section">#</a></h3>
+<table>
+<thead>
+<tr>
+  <th>Injected fault</th>
+  <th>Required result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Budget update races TTL kill</td>
+  <td>One exit identity; no retry loop</td>
+</tr>
+<tr>
+  <td>Tool contract directory modified</td>
+  <td>Candidate rejected before promotion</td>
+</tr>
+<tr>
+  <td>Repair handle is stale</td>
+  <td>Fail closed; no fuzzy mapping</td>
+</tr>
+<tr>
+  <td>Diagnostic contains a number/path</td>
+  <td>Disclosure validator rejects it</td>
+</tr>
+<tr>
+  <td>Duplicate grader bundle</td>
+  <td>Round freezes; no mutation</td>
+</tr>
+<tr>
+  <td>Missing exact node evidence</td>
+  <td>Replayable <code>NO_EVIDENCE</code>, never synthetic score</td>
+</tr>
+<tr>
+  <td>Active cost reservation at publication</td>
+  <td>Publication blocks</td>
+</tr>
+<tr>
+  <td>Final writer exits without Death Note</td>
+  <td>Publication blocks or recovery path activates</td>
+</tr>
+<tr>
+  <td>No scoring candidate</td>
+  <td>Provisional package, no winner</td>
+</tr>
+<tr>
+  <td>Manifest entry tampered</td>
+  <td>Verification fails</td>
+</tr>
+</tbody>
+</table>
+<h3 id="10-5-why-this-is-not-a-mock-only-substitute">10.5 Why this is not a mock-only substitute<a class="heading-anchor" href="#10-5-why-this-is-not-a-mock-only-substitute" aria-label="Link to section">#</a></h3>
+<p>Use scripted model outputs, but keep real:</p>
+<ul>
+<li><code>EvoMoliorRunService</code> phase orchestration;</li>
+<li>Room repositories and migrations;</li>
+<li>Atlas transactions;</li>
+<li>LifecycleManager and runtime cells;</li>
+<li>ToolSubSandbox execution;</li>
+<li>Critic/promotion validators;</li>
+<li>grader bundle persistence/resolution;</li>
+<li>publication/recovery services;</li>
+<li>cost ledger;</li>
+<li>manifest/archive verification.</li>
+</ul>
+<p>The simulator is a deterministic acceptance environment, not evidence of model quality. A provider-backed run remains required after it passes.</p>
+<hr />
+<h2 id="11-metrics-and-observability">11. Metrics and observability<a class="heading-anchor" href="#11-metrics-and-observability" aria-label="Link to section">#</a></h2>
+<h3 id="11-1-preserve-availability-explicitly">11.1 Preserve availability explicitly<a class="heading-anchor" href="#11-1-preserve-availability-explicitly" aria-label="Link to section">#</a></h3>
+<pre><code class="language-kotlin">@Serializable
+enum class MetricAvailability {
+    AVAILABLE,
+    UNAVAILABLE,
+    NOT_APPLICABLE,
+}
+
+@Serializable
+data class RunMetricObservation(
+    val metricId: String,
+    val status: MetricAvailability,
+    val numerator: Double? = null,
+    val denominator: Double? = null,
+    val value: Double? = null,
+    val unit: String? = null,
+    val evidenceRefs: List&lt;String&gt;,
+    val unavailableReason: String? = null,
+)
+</code></pre>
+<p>Unknown must never become zero.</p>
+<h3 id="11-2-existing-strict-metrics">11.2 Existing strict metrics<a class="heading-anchor" href="#11-2-existing-strict-metrics" aria-label="Link to section">#</a></h3>
+<p>The accepted run must export all existing Section 18.2 observations, including useful exits, atomic node completion, mandatory coverage, portfolio overlap, tool-native activity, reuse, simulation influence, KG acceptance, claim grounding, grader validity/novelty/calibration, capture concentration, reward usefulness, final lineage, cost per accepted node, and score replay error.</p>
+<h3 id="11-3-add-closure-specific-metrics">11.3 Add closure-specific metrics<a class="heading-anchor" href="#11-3-add-closure-specific-metrics" aria-label="Link to section">#</a></h3>
+<table>
+<thead>
+<tr>
+  <th>Metric</th>
+  <th>Purpose</th>
+  <th style="text-align:right">Strict target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>exit_identity_conflicts</code></td>
+  <td>Lifecycle correctness</td>
+  <td style="text-align:right">0</td>
+</tr>
+<tr>
+  <td><code>exit_finalization_retries</code></td>
+  <td>Detect retry-loop regressions</td>
+  <td style="text-align:right">0</td>
+</tr>
+<tr>
+  <td><code>tool_contract_transport_failure_rate</code></td>
+  <td>Measure handle/workspace improvement</td>
+  <td style="text-align:right">Low and decreasing</td>
+</tr>
+<tr>
+  <td><code>tool_repair_diagnostics_emitted</code></td>
+  <td>Activity, not success</td>
+  <td style="text-align:right">Available</td>
+</tr>
+<tr>
+  <td><code>tool_repair_diagnostic_consumption_rate</code></td>
+  <td>Later agents actually use feedback</td>
+  <td style="text-align:right">Available</td>
+</tr>
+<tr>
+  <td><code>repair_to_promotion_rate</code></td>
+  <td>Diagnostic effectiveness</td>
+  <td style="text-align:right">Positive</td>
+</tr>
+<tr>
+  <td><code>repeated_identical_tool_failure_rate</code></td>
+  <td>Detect non-learning loops</td>
+  <td style="text-align:right">Near zero after one disclosed diagnosis</td>
+</tr>
+<tr>
+  <td><code>receiver_component_coverage</code></td>
+  <td>Proper deliverable completeness</td>
+  <td style="text-align:right">100% required components</td>
+</tr>
+<tr>
+  <td><code>interim_snapshot_coverage</code></td>
+  <td>Recovery readiness</td>
+  <td style="text-align:right">One per group per sealed round</td>
+</tr>
+<tr>
+  <td><code>recovery_component_coverage</code></td>
+  <td>Provisional package usefulness</td>
+  <td style="text-align:right">100% required recovery components</td>
+</tr>
+<tr>
+  <td><code>provisional_claim_with_authority_rate</code></td>
+  <td>Prevent unsupported recovery claims</td>
+  <td style="text-align:right">100%</td>
+</tr>
+<tr>
+  <td><code>accepted_package_deterministic_content_rate</code></td>
+  <td>Reduce final-writer invention</td>
+  <td style="text-align:right">Available and tracked</td>
+</tr>
+</tbody>
+</table>
+<h3 id="11-4-mechanism-activation-report">11.4 Mechanism activation report<a class="heading-anchor" href="#11-4-mechanism-activation-report" aria-label="Link to section">#</a></h3>
+<p>Every run should state whether each major mechanism was:</p>
+<pre><code class="language-text">NOT_CONFIGURED
+CONFIGURED_NOT_REACHED
+ATTEMPTED_FAILED
+ACTIVATED_NO_DOWNSTREAM_USE
+ACTIVATED_WITH_DOWNSTREAM_USE
+</code></pre>
+<p>For tool compounding, this prevents “tool mentioned in final prose” from being confused with actual promoted and later-executed infrastructure.</p>
+<hr />
+<h2 id="12-model-and-backend-implications">12. Model and backend implications<a class="heading-anchor" href="#12-model-and-backend-implications" aria-label="Link to section">#</a></h2>
+<h3 id="12-1-what-the-latest-run-says-about-the-current-model-setup">12.1 What the latest run says about the current model setup<a class="heading-anchor" href="#12-1-what-the-latest-run-says-about-the-current-model-setup" aria-label="Link to section">#</a></h3>
+<p>The all-Luna, medium-effort configuration can now sustain:</p>
+<ul>
+<li>strict Council generation;</li>
+<li>six-round worker execution;</li>
+<li>three grader civilizations;</li>
+<li>exact broad-score cardinality;</li>
+<li>long provider-backed orchestration.</li>
+</ul>
+<p>The remaining semantic tool failure does not by itself prove that the model family is inadequate. The system still asks the model to perform avoidable transport work and provides insufficient safe feedback after a hidden failure.</p>
+<h3 id="12-2-correct-order-of-intervention">12.2 Correct order of intervention<a class="heading-anchor" href="#12-2-correct-order-of-intervention" aria-label="Link to section">#</a></h3>
+<ol>
+<li>Remove immutable-contract transcription through handles and generated workspaces.</li>
+<li>Add typed semantic diagnostics and unit metadata.</li>
+<li>Add strategy differentiation between replicated groups.</li>
+<li>Measure promotion and repair success.</li>
+<li>Only then decide whether a stronger or fine-tuned Builder/Critic is necessary.</li>
+</ol>
+<p>Fine-tuning before stabilizing the protocol risks training the model to reproduce temporary wire formats and current failure modes.</p>
+<h3 id="12-3-when-selective-stronger-models-become-justified">12.3 When selective stronger models become justified<a class="heading-anchor" href="#12-3-when-selective-stronger-models-become-justified" aria-label="Link to section">#</a></h3>
+<p>Route selectively when the post-protocol evidence shows one of these:</p>
+<ul>
+<li>tool candidates pass transport but repeatedly fail semantic private tests;</li>
+<li>complex simulations exceed the cheap model’s implementation reliability;</li>
+<li>Council repair frequently exhausts attempts on coherent typed contracts;</li>
+<li>grader requirements remain shallow or highly correlated;</li>
+<li>final synthesis cannot preserve accepted lineage.</li>
+</ul>
+<p>The high-volume leaf work can remain on cheaper models; stronger calls should concentrate on Council Synthesis, Builder repair, semantic Critic review, and final receiver synthesis.</p>
+<h3 id="12-4-same-family-correlation">12.4 Same-family correlation<a class="heading-anchor" href="#12-4-same-family-correlation" aria-label="Link to section">#</a></h3>
+<p>When two groups are assigned the same mandatory tool node using the same model family, prompt-only differences may not create sufficient independence. Use explicit sealed strategy vectors now, and later role/group adapters when the fine-tuning infrastructure is ready.</p>
+<p>Do not describe multiple same-family graders as fully independent. Preserve the existing low-independence label until an external family or calibrated evaluator is introduced.</p>
+<hr />
+<h2 id="13-persistence-and-schema-additions">13. Persistence and schema additions<a class="heading-anchor" href="#13-persistence-and-schema-additions" aria-label="Link to section">#</a></h2>
+<p>A new Room schema version should add append-only tables rather than overloading staging prose.</p>
+<h3 id="13-1-suggested-tables">13.1 Suggested tables<a class="heading-anchor" href="#13-1-suggested-tables" aria-label="Link to section">#</a></h3>
+<h4 id="agent-runtime-state-events"><code>agent_runtime_state_events</code><a class="heading-anchor" href="#agent-runtime-state-events" aria-label="Link to section">#</a></h4>
+<ul>
+<li>event ID;</li>
+<li>agent/run/group;</li>
+<li>prior and next phase;</li>
+<li>state version;</li>
+<li>transition type;</li>
+<li>state hash;</li>
+<li>timestamp.</li>
+</ul>
+<p>The current runtime cell remains the live authority; events support audit and recovery.</p>
+<h4 id="tool-repair-diagnostics"><code>tool_repair_diagnostics</code><a class="heading-anchor" href="#tool-repair-diagnostics" aria-label="Link to section">#</a></h4>
+<ul>
+<li>exact fields from <code>ToolRepairDiagnosticV1</code>;</li>
+<li>unique diagnostic hash;</li>
+<li>disclosure state;</li>
+<li>source-review commitment.</li>
+</ul>
+<h4 id="tool-repair-attempts"><code>tool_repair_attempts</code><a class="heading-anchor" href="#tool-repair-attempts" aria-label="Link to section">#</a></h4>
+<ul>
+<li>candidate hash;</li>
+<li>consumed diagnostic IDs;</li>
+<li>validation/promotion outcome;</li>
+<li>later lifecycle linkage.</li>
+</ul>
+<h4 id="deliverable-blueprints"><code>deliverable_blueprints</code><a class="heading-anchor" href="#deliverable-blueprints" aria-label="Link to section">#</a></h4>
+<ul>
+<li>versioned Council/receiver blueprint;</li>
+<li>exact hash and parent version.</li>
+</ul>
+<h4 id="interim-deliverable-snapshots"><code>interim_deliverable_snapshots</code><a class="heading-anchor" href="#interim-deliverable-snapshots" aria-label="Link to section">#</a></h4>
+<ul>
+<li>per group and round;</li>
+<li>semantic components and evidence references;</li>
+<li>snapshot hash.</li>
+</ul>
+<h4 id="decision-packages"><code>decision_packages</code><a class="heading-anchor" href="#decision-packages" aria-label="Link to section">#</a></h4>
+<ul>
+<li>outcome class;</li>
+<li>semantic package JSON;</li>
+<li>package hash;</li>
+<li>renderer output refs.</li>
+</ul>
+<h4 id="publication-outcome-events"><code>publication_outcome_events</code><a class="heading-anchor" href="#publication-outcome-events" aria-label="Link to section">#</a></h4>
+<ul>
+<li>separate accepted/recovery/startup state machines;</li>
+<li>no nullable winner ambiguity.</li>
+</ul>
+<h3 id="13-2-migration-rules">13.2 Migration rules<a class="heading-anchor" href="#13-2-migration-rules" aria-label="Link to section">#</a></h3>
+<ul>
+<li>Existing historical runs remain readable.</li>
+<li>Do not reinterpret historical recovery notices as provisional decision packages.</li>
+<li>Historical exits remain immutable; migration may add projections, not rewrite identity.</li>
+<li>Unknown old diagnostics remain private unclassified records.</li>
+<li>New accepted runs require manifest v4; old manifests retain their original verifier.</li>
+</ul>
+<hr />
+<h2 id="14-module-by-module-implementation-map">14. Module-by-module implementation map<a class="heading-anchor" href="#14-module-by-module-implementation-map" aria-label="Link to section">#</a></h2>
+<p>The exact names can follow repository conventions; the responsibilities should remain separated.</p>
+<table>
+<thead>
+<tr>
+  <th>Module</th>
+  <th>Required implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>core</code></td>
+  <td>Runtime state contracts, tool binding/diagnostic contracts, quantity semantics, deliverable blueprint/package contracts, outcome state machines, metrics</td>
+</tr>
+<tr>
+  <td><code>substrate</code></td>
+  <td>New tables/DAOs, migrations, exact idempotency and hash constraints, query projections for snapshots/packages</td>
+</tr>
+<tr>
+  <td><code>orchestration</code></td>
+  <td><code>AgentRuntimeCell</code>, lifecycle reducer, termination ordering, repair scheduler, strategy-vector assignment, runtime-state reconciliation</td>
+</tr>
+<tr>
+  <td><code>agents</code></td>
+  <td>Tool candidate wire tool, generated workspace prompt, corrected private-test language, typed Critic semantic review, diagnostic renderer</td>
+</tr>
+<tr>
+  <td><code>sandbox</code></td>
+  <td>Workspace read-only contract enforcement, exact source/test execution, unchanged private fixture isolation</td>
+</tr>
+<tr>
+  <td><code>competition</code></td>
+  <td>Repair-aware portfolio priority, strategy diversity, exact grader/capture preservation, mechanism activation status</td>
+</tr>
+<tr>
+  <td><code>api</code></td>
+  <td>Round snapshot compilation, accepted/recovery publication services, decision-package compiler, renderers, metrics export, strict scenario harness</td>
+</tr>
+<tr>
+  <td><code>runtime</code></td>
+  <td>Inject new repositories/services, immutable distribution configuration, outcome-specific archive service</td>
+</tr>
+<tr>
+  <td><code>cli</code></td>
+  <td>Outcome display, artifact paths, admission checks, clean exit semantics, no reserved-shell-variable wrapper bug</td>
+</tr>
+<tr>
+  <td>desktop/Compose</td>
+  <td>Accepted/provisional/startup status badges, receiver-package viewer, lifecycle conflict/repair metrics</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="15-commit-by-commit-execution-plan">15. Commit-by-commit execution plan<a class="heading-anchor" href="#15-commit-by-commit-execution-plan" aria-label="Link to section">#</a></h2>
+<p>Keep patches reviewable. Do not combine lifecycle concurrency, tool semantics, and publication rendering into one giant change.</p>
+<table>
+<thead>
+<tr>
+  <th style="text-align:right">Commit</th>
+  <th>Scope</th>
+  <th>Required exit condition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td style="text-align:right">0</td>
+  <td>Branch hygiene and evidence freeze</td>
+  <td>Generated/cache paths excluded; authored diff inventoried; wrapper <code>status</code> bug fixed; clean source manifest reproducible</td>
+</tr>
+<tr>
+  <td style="text-align:right">1</td>
+  <td>Introduce <code>AgentRuntimeCell</code> and monotonic state</td>
+  <td>Existing lifecycle tests pass; no direct whole-entry replacement remains</td>
+</tr>
+<tr>
+  <td style="text-align:right">2</td>
+  <td>Rewrite ledger/budget/checkpoint/kill/completion mutations</td>
+  <td>Barrier race and stress tests prove one exit identity</td>
+</tr>
+<tr>
+  <td style="text-align:right">3</td>
+  <td>Add lifecycle reconciliation metrics and fatal conflict handling</td>
+  <td>Retry loop removed; quiescence uses runner completion</td>
+</tr>
+<tr>
+  <td style="text-align:right">4</td>
+  <td>Add tool opportunity binding catalog and handle resolver</td>
+  <td>Model wire contains no exact long IDs or copied schemas</td>
+</tr>
+<tr>
+  <td style="text-align:right">5</td>
+  <td>Add generated immutable tool workspace and wire compiler</td>
+  <td>v21 schema/missing-schema transport failures eliminated in regression</td>
+</tr>
+<tr>
+  <td style="text-align:right">6</td>
+  <td>Add canonical typed-value serialization</td>
+  <td>NUMBER/INTEGER public test bytes match promotion serializer</td>
+</tr>
+<tr>
+  <td style="text-align:right">7</td>
+  <td>Add <code>ToolRepairDiagnosticV1</code> and typed Critic output</td>
+  <td>No raw prose pattern matching remains in repair context</td>
+</tr>
+<tr>
+  <td style="text-align:right">8</td>
+  <td>Add quantity/unit semantics and immediate watts→kWh code</td>
+  <td>Council/repair tests cover the v21 semantic defect</td>
+</tr>
+<tr>
+  <td style="text-align:right">9</td>
+  <td>Add repair-attempt lineage and repair-aware portfolio priority</td>
+  <td>Later candidate consumption is measurable; identical loops bounded</td>
+</tr>
+<tr>
+  <td style="text-align:right">10</td>
+  <td>Add <code>DeliverableBlueprint</code> and semantic package compiler</td>
+  <td>Required components compile from accepted/provisional authority</td>
+</tr>
+<tr>
+  <td style="text-align:right">11</td>
+  <td>Add deterministic Markdown/HTML/JSON/CSV renderers</td>
+  <td>Same package hash yields stable semantic outputs</td>
+</tr>
+<tr>
+  <td style="text-align:right">12</td>
+  <td>Add per-round interim snapshots</td>
+  <td>One receiver-oriented snapshot per group per sealed round</td>
+</tr>
+<tr>
+  <td style="text-align:right">13</td>
+  <td>Add separate recovery publication state machine and manifest v4</td>
+  <td>No-candidate run emits useful provisional package without winner</td>
+</tr>
+<tr>
+  <td style="text-align:right">14</td>
+  <td>Export all metrics and mechanism activation states</td>
+  <td>Required observations have explicit availability and evidence refs</td>
+</tr>
+<tr>
+  <td style="text-align:right">15</td>
+  <td>Add deterministic six-round success and no-candidate scenarios</td>
+  <td>Full production path passes with lifecycle race and tool repair injection</td>
+</tr>
+<tr>
+  <td style="text-align:right">16</td>
+  <td>Independent review and serialized full graph</td>
+  <td>No blocker/high issue; all tests sequential on JDK 17</td>
+</tr>
+<tr>
+  <td style="text-align:right">17</td>
+  <td>Build clean immutable distribution</td>
+  <td><code>sourceTreeClean=true</code>; manifest and launcher verify</td>
+</tr>
+<tr>
+  <td style="text-align:right">18</td>
+  <td>Bounded provider qualification run</td>
+  <td>Tool repair and proper deliverable path exercised; not yet Appendix-B acceptance unless every strict gate passes</td>
+</tr>
+<tr>
+  <td style="text-align:right">19</td>
+  <td>Fresh authorized six-round strict successor</td>
+  <td>All conjunctive conditions pass in one archive</td>
+</tr>
+<tr>
+  <td style="text-align:right">20</td>
+  <td>Matched iterative single-agent comparison and roadmap reconciliation</td>
+  <td>Claims reflect accepted evidence, unavailable metrics, and failure cases</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="16-test-plan">16. Test plan<a class="heading-anchor" href="#16-test-plan" aria-label="Link to section">#</a></h2>
+<h3 id="16-1-focused-unit-and-contract-tests">16.1 Focused unit and contract tests<a class="heading-anchor" href="#16-1-focused-unit-and-contract-tests" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>AgentRuntimeStateTransitionTest</code></li>
+<li><code>AgentExitAuthorityWriteOnceTest</code></li>
+<li><code>ToolOpportunityBindingCatalogTest</code></li>
+<li><code>ToolWorkspaceContractImmutabilityTest</code></li>
+<li><code>ToolCandidateWireCompilerTest</code></li>
+<li><code>ToolRepairDiagnosticDisclosureTest</code></li>
+<li><code>QuantitySemanticsTest</code></li>
+<li><code>DeliverableBlueprintValidationTest</code></li>
+<li><code>ReceiverDecisionPackageHashTest</code></li>
+<li><code>RunManifestV4OutcomeSeparationTest</code></li>
+</ul>
+<h3 id="16-2-concurrency-and-property-tests">16.2 Concurrency and property tests<a class="heading-anchor" href="#16-2-concurrency-and-property-tests" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>LifecycleExitLinearizabilityTest</code></li>
+<li><code>LifecycleMutationInterleavingPropertyTest</code></li>
+<li><code>CostSettlementCancellationTest</code></li>
+<li><code>RepairDiagnosticDeduplicationTest</code></li>
+<li><code>ConcurrentRecoveryPublicationTest</code></li>
+</ul>
+<h3 id="16-3-production-integration-tests">16.3 Production integration tests<a class="heading-anchor" href="#16-3-production-integration-tests" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>PowerToEnergyRepairAcceptanceTest</code></li>
+<li><code>PromoteThenExecuteByLaterAgentTest</code></li>
+<li><code>SimulationInfluencesLaterNodeTest</code></li>
+<li><code>RoundSnapshotToAcceptedPackageTest</code></li>
+<li><code>NoCandidateRecoveryDecisionPackageTest</code></li>
+<li><code>PublicationQuiescenceWithRuntimeCellsTest</code></li>
+</ul>
+<h3 id="16-4-full-strict-scenario-tests">16.4 Full strict scenario tests<a class="heading-anchor" href="#16-4-full-strict-scenario-tests" aria-label="Link to section">#</a></h3>
+<ul>
+<li><code>StrictAppendixBDeterministicSuccessScenarioTest</code></li>
+<li><code>StrictAppendixBNoCandidateRecoveryScenarioTest</code></li>
+<li><code>StrictAppendixBStartupRejectionScenarioTest</code></li>
+<li><code>StrictAppendixBTamperedArchiveScenarioTest</code></li>
+</ul>
+<h3 id="16-5-test-discipline">16.5 Test discipline<a class="heading-anchor" href="#16-5-test-discipline" aria-label="Link to section">#</a></h3>
+<ul>
+<li>JDK 17;</li>
+<li>sequential Gradle invocation;</li>
+<li>one worker for fragile acceptance graphs;</li>
+<li>repository-volume JVM/Codex temporary paths;</li>
+<li>no source, documentation, build, or Gradle mutation while a provider acceptance JVM is live;</li>
+<li>execute from an immutable installed distribution, never a mutable source-classpath <code>gradlew ... run</code> path;</li>
+<li>preserve rejected runs and never reuse run IDs.</li>
+</ul>
+<hr />
+<h2 id="17-provider-run-authorization-ladder">17. Provider-run authorization ladder<a class="heading-anchor" href="#17-provider-run-authorization-ladder" aria-label="Link to section">#</a></h2>
+<p>This blueprint is not itself authorization to launch another strict run.</p>
+<h3 id="gate-a-source-closure">Gate A — Source closure<a class="heading-anchor" href="#gate-a-source-closure" aria-label="Link to section">#</a></h3>
+<ul>
+<li>lifecycle reducer complete;</li>
+<li>typed tool transport and repair complete;</li>
+<li>deliverable/recovery compiler complete;</li>
+<li>metrics complete;</li>
+<li>deterministic success and failure scenarios pass.</li>
+</ul>
+<h3 id="gate-b-independent-static-closure">Gate B — Independent static closure<a class="heading-anchor" href="#gate-b-independent-static-closure" aria-label="Link to section">#</a></h3>
+<ul>
+<li>focused suites;</li>
+<li>full serialized nine-module graph;</li>
+<li>Section 18.1 matrix;</li>
+<li>Compose/runtime/CLI compilation;</li>
+<li>independent review;</li>
+<li>whitespace/static-document gates;</li>
+<li>clean source manifest.</li>
+</ul>
+<h3 id="gate-c-immutable-package-closure">Gate C — Immutable package closure<a class="heading-anchor" href="#gate-c-immutable-package-closure" aria-label="Link to section">#</a></h3>
+<ul>
+<li>clean source tree or explicitly reviewed authored patch set;</li>
+<li>generated/cache files excluded;</li>
+<li>exact binary/config/provider hashes;</li>
+<li>admission checks and lock;</li>
+<li>temporary/disk/provider health checks;</li>
+<li>launcher exit semantics verified.</li>
+</ul>
+<h3 id="gate-d-bounded-provider-qualification">Gate D — Bounded provider qualification<a class="heading-anchor" href="#gate-d-bounded-provider-qualification" aria-label="Link to section">#</a></h3>
+<p>Use a fresh ID and a deliberately bounded profile to prove:</p>
+<ul>
+<li>handle-based tool candidate transport;</li>
+<li>one safe semantic repair across generations;</li>
+<li>useful accepted or provisional deliverable rendering;</li>
+<li>zero lifecycle exit conflicts.</li>
+</ul>
+<p>A qualification failure should update tests; it should not automatically trigger repeated expensive runs.</p>
+<h3 id="gate-e-fresh-strict-successor">Gate E — Fresh strict successor<a class="heading-anchor" href="#gate-e-fresh-strict-successor" aria-label="Link to section">#</a></h3>
+<p>Launch only after explicit operator authorization. Do not resume v21. Accept only the complete conjunctive archive.</p>
+<hr />
+<h2 id="18-final-definition-of-done">18. Final definition of done<a class="heading-anchor" href="#18-final-definition-of-done" aria-label="Link to section">#</a></h2>
+<h3 id="18-1-runtime-correctness">18.1 Runtime correctness<a class="heading-anchor" href="#18-1-runtime-correctness" aria-label="Link to section">#</a></h3>
+<ul>
+<li>exactly one durable exit identity for every registered ordinary agent;</li>
+<li>zero lifecycle identity conflicts and zero exit-finalization retries;</li>
+<li>all non-daemon executions finished before normal or recovery archive closure;</li>
+<li>all cost reservations settled;</li>
+<li>exact grader cardinality and replay error zero;</li>
+<li>no private fixture leakage.</li>
+</ul>
+<h3 id="18-2-tool-compounding">18.2 Tool compounding<a class="heading-anchor" href="#18-2-tool-compounding" aria-label="Link to section">#</a></h3>
+<ul>
+<li>at least one Council-sealed tool/simulator candidate passes private promotion;</li>
+<li>only one active version exists per opportunity;</li>
+<li>a different later mortal agent executes it under exact node authority;</li>
+<li>validation and <code>AGENT_USE</code> are distinct when the Atlas requires both;</li>
+<li>the execution creates a simulation/tool-result record;</li>
+<li>that record enters later evidence and changes grade, capture, integration, or receiver decision lineage;</li>
+<li>repair diagnostics and consumption lineage are persisted.</li>
+</ul>
+<h3 id="18-3-deliverable-value">18.3 Deliverable value<a class="heading-anchor" href="#18-3-deliverable-value" aria-label="Link to section">#</a></h3>
+<ul>
+<li>the Council seals a receiver-oriented <code>DeliverableBlueprint</code>;</li>
+<li>every sealed round produces recoverable interim snapshots;</li>
+<li>accepted completion emits all required package components;</li>
+<li>non-accepted completion emits a provisional decision package, not only an administrative notice;</li>
+<li>every claim/component is accepted, provisional, or withheld explicitly;</li>
+<li>machine-readable evidence and human-readable output agree;</li>
+<li>renderer failure cannot erase semantic package authority.</li>
+</ul>
+<h3 id="18-4-archive-and-metrics">18.4 Archive and metrics<a class="heading-anchor" href="#18-4-archive-and-metrics" aria-label="Link to section">#</a></h3>
+<ul>
+<li>exit marker 0 for accepted completion;</li>
+<li>summary and pipeline summary <code>COMPLETED</code>;</li>
+<li>winner/source/writer authority present;</li>
+<li><code>results.zip</code> and <code>pipeline-results.zip</code> verify;</li>
+<li>manifest v4 verifies every entry and outcome-specific invariant;</li>
+<li>all 21 Section 18.2 observations exist with valid availability/evidence;</li>
+<li>admission bytes match archive commitments;</li>
+<li>publication history ends <code>ARCHIVED</code>.</li>
+</ul>
+<h3 id="18-5-product-evidence">18.5 Product evidence<a class="heading-anchor" href="#18-5-product-evidence" aria-label="Link to section">#</a></h3>
+<p>After strict acceptance, rerun the matched arms:</p>
+<ol>
+<li>iterative single agent;</li>
+<li>one worker group;</li>
+<li>full competitive society.</li>
+</ol>
+<p>Use the same sources, Atlas, tools, tests, output contract, model family, seeds, and iso-cost/iso-latency policy. Report quality, failure rate, accepted-node coverage, tool reuse, novelty, receiver component coverage, cost, and latency. Do not call increased artifact volume an improvement.</p>
+<hr />
+<h2 id="19-expected-outcomes-and-falsifiable-hypotheses">19. Expected outcomes and falsifiable hypotheses<a class="heading-anchor" href="#19-expected-outcomes-and-falsifiable-hypotheses" aria-label="Link to section">#</a></h2>
+<p>These are implementation hypotheses, not guaranteed results.</p>
+<table>
+<thead>
+<tr>
+  <th>Hypothesis</th>
+  <th>Expected mechanism</th>
+  <th>Falsification criterion</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>H1: handle-based tool transport removes most schema-copy failures</td>
+  <td>Runtime injects immutable contracts</td>
+  <td>Schema/missing-contract failures remain common after migration</td>
+</tr>
+<tr>
+  <td>H2: typed semantic diagnostics enable cross-generation repair</td>
+  <td>Later agents receive safe actionable categories</td>
+  <td>Diagnostic-consuming candidates do not outperform matched no-diagnostic attempts</td>
+</tr>
+<tr>
+  <td>H3: lifecycle cells eliminate immutable-exit conflicts</td>
+  <td>All mutations derive from current state</td>
+  <td>Any deterministic interleaving produces two exit identities</td>
+</tr>
+<tr>
+  <td>H4: interim snapshots guarantee useful failure output</td>
+  <td>Receiver package is compiled each round</td>
+  <td>A post-round failure still produces only an administrative notice</td>
+</tr>
+<tr>
+  <td>H5: strategy vectors reduce correlated group failures</td>
+  <td>Replicated groups test materially distinct hypotheses</td>
+  <td>Groups continue producing near-identical candidate defects</td>
+</tr>
+<tr>
+  <td>H6: deterministic package assembly improves trust and flexibility</td>
+  <td>Semantic package is independent of renderer</td>
+  <td>Output formats disagree on values, authority, or evidence lineage</td>
+</tr>
+</tbody>
+</table>
+<p>Likely practical outcome if the plan succeeds:</p>
+<ul>
+<li>provider runs fail less often for infrastructure reasons;</li>
+<li>tool agents spend more capacity on implementation and validation rather than schema transcription;</li>
+<li>semantic failures become accumulated institutional knowledge rather than repeated dead ends;</li>
+<li>strict accepted runs can finally demonstrate the full tool → later use → simulation → capture → final lineage chain;</li>
+<li>rejected runs still return a receiver-usable, clearly provisional decision package;</li>
+<li>benchmark results become credible because failure rates, denominators, and deliverable value are observable.</li>
+</ul>
+<hr />
+<h2 id="20-immediate-implementation-checklist">20. Immediate implementation checklist<a class="heading-anchor" href="#20-immediate-implementation-checklist" aria-label="Link to section">#</a></h2>
+<h3 id="first-source-slice">First source slice<a class="heading-anchor" href="#first-source-slice" aria-label="Link to section">#</a></h3>
+<ul>
+<li>[ ] Replace <code>LiveAgentEntry</code> whole-value mutation with stable runtime cells.</li>
+<li>[ ] Remove every <code>liveAgents[id] = captured.copy(...)</code> pattern.</li>
+<li>[ ] Add barrier-driven v21 lifecycle regression.</li>
+<li>[ ] Make exit conflict fatal and non-retryable.</li>
+<li>[ ] Export lifecycle reconciliation metrics.</li>
+</ul>
+<h3 id="second-source-slice">Second source slice<a class="heading-anchor" href="#second-source-slice" aria-label="Link to section">#</a></h3>
+<ul>
+<li>[ ] Add tool binding catalog and short handles.</li>
+<li>[ ] Generate read-only tool contract workspace.</li>
+<li>[ ] Compile candidate wire draft into exact domain submission.</li>
+<li>[ ] Centralize canonical numeric encoding.</li>
+<li>[ ] Add literal v21 transport regressions.</li>
+</ul>
+<h3 id="third-source-slice">Third source slice<a class="heading-anchor" href="#third-source-slice" aria-label="Link to section">#</a></h3>
+<ul>
+<li>[ ] Add <code>ToolRepairDiagnosticV1</code>.</li>
+<li>[ ] Replace Critic prose pattern matching with typed safe output.</li>
+<li>[ ] Add <code>POWER_TO_ENERGY_UNIT_CONVERSION</code>.</li>
+<li>[ ] Add quantity/aggregation metadata.</li>
+<li>[ ] Correct worker prompt.</li>
+<li>[ ] Persist diagnostic consumption and outcome lineage.</li>
+</ul>
+<h3 id="fourth-source-slice">Fourth source slice<a class="heading-anchor" href="#fourth-source-slice" aria-label="Link to section">#</a></h3>
+<ul>
+<li>[ ] Add <code>DeliverableBlueprint</code> and semantic package model.</li>
+<li>[ ] Add per-round interim snapshots.</li>
+<li>[ ] Add deterministic renderers.</li>
+<li>[ ] Add separate accepted/recovery/startup outcome state machines.</li>
+<li>[ ] Make no-candidate recovery produce a provisional receiver package.</li>
+</ul>
+<h3 id="fifth-source-slice">Fifth source slice<a class="heading-anchor" href="#fifth-source-slice" aria-label="Link to section">#</a></h3>
+<ul>
+<li>[ ] Add deterministic six-round success scenario.</li>
+<li>[ ] Add no-candidate recovery scenario.</li>
+<li>[ ] Add startup rejection scenario.</li>
+<li>[ ] Export all metrics and mechanism activation state.</li>
+<li>[ ] Run independent review and full clean gates.</li>
+</ul>
+<h3 id="integration-and-release-slice">Integration and release slice<a class="heading-anchor" href="#integration-and-release-slice" aria-label="Link to section">#</a></h3>
+<ul>
+<li>[ ] Remove generated/cache artifacts from authored change set.</li>
+<li>[ ] Split the large worktree into coherent subsystem commits.</li>
+<li>[ ] Build a clean immutable distribution with <code>sourceTreeClean=true</code>.</li>
+<li>[ ] Update the canonical roadmap with v20/v21 as rejected historical evidence without closing Step 15.</li>
+<li>[ ] Obtain explicit authorization before any fresh provider qualification or strict run.</li>
+</ul>
+<hr />
+<h2 id="appendix-a-evidence-anchors">Appendix A — Evidence anchors<a class="heading-anchor" href="#appendix-a-evidence-anchors" aria-label="Link to section">#</a></h2>
+<p>The blueprint is grounded primarily in:</p>
+<ul>
+<li><code>step15-v21-strict-failure-and-project-state-report-20260724.md</code>;</li>
+<li><code>remediation-v72-step15-provider-run-v21-strict-20260724.log</code>;</li>
+<li><code>remediation-v72-step15-provider-run-v21-strict-20260724.exit</code>;</li>
+<li><code>EvoMolior_Competitive_Progressive_Disclosure_Action_Plan.html</code>;</li>
+<li><code>competitive-progressive-disclosure-section18-appendix-b-plan.md</code>;</li>
+<li><code>competitive-progressive-disclosure-action-plan-goal.md</code>;</li>
+<li>the current roadmap snapshot and earlier architecture deep dive.</li>
+</ul>
+<p>Source-derived observations are presented as run facts. Contracts, module maps, commit sequencing, and thresholds introduced here are proposed implementation decisions unless already present in the source reports.</p>
+<h2 id="appendix-b-non-negotiable-preserved-decisions">Appendix B — Non-negotiable preserved decisions<a class="heading-anchor" href="#appendix-b-non-negotiable-preserved-decisions" aria-label="Link to section">#</a></h2>
+<ul>
+<li>Council remains the field compiler.</li>
+<li>Competitive worker and grader groups remain the normal run architecture.</li>
+<li>Ordinary agents remain bounded and mortal.</li>
+<li>Outliers receive no ordinary node or Legacy.</li>
+<li>Missing/malformed grader authority never zero-fills.</li>
+<li>Capture follows exact node grade, not completion order.</li>
+<li>Hidden promotion fixtures remain private.</li>
+<li>Deterministic validation may validate or compile model-authored work; it may not invent the implementation or grader semantics.</li>
+<li>Final publication remains quiescent and manifest-bound.</li>
+<li>Recovery usefulness must not weaken acceptance authority.</li>
+</ul>
+<div class="footer">EvoMolior completion blueprint · Evidence cut 24 July 2026 · This document does not authorize a new provider run.</div></article></main></div><script>
+(() => {
+ const root=document.documentElement, side=document.getElementById('sidebar');
+ const theme=document.getElementById('themeBtn');
+ let saved; try{saved=localStorage.getItem('em-completion-theme')}catch(e){}
+ const initial=saved||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'); root.dataset.theme=initial; theme.textContent=initial==='dark'?'Light':'Dark';
+ theme.onclick=()=>{const n=root.dataset.theme==='dark'?'light':'dark';root.dataset.theme=n;theme.textContent=n==='dark'?'Light':'Dark';try{localStorage.setItem('em-completion-theme',n)}catch(e){}};
+ document.getElementById('printBtn').onclick=()=>print(); document.getElementById('tocBtn').onclick=()=>side.classList.toggle('open');
+ const hs=[...document.querySelectorAll('.article h2,.article h3,.article h4')], toc=document.getElementById('toc');
+ hs.forEach(h=>{const li=document.createElement('li');li.className='l'+h.tagName.slice(1);const a=document.createElement('a');a.href='#'+h.id;a.textContent=h.childNodes[0]?.textContent?.trim()||h.textContent.replace('#','').trim();a.dataset.id=h.id;a.onclick=()=>side.classList.remove('open');li.append(a);toc.append(li)});
+ document.getElementById('search').oninput=e=>{const q=e.target.value.toLowerCase().trim();[...toc.children].forEach(li=>li.style.display=!q||li.textContent.toLowerCase().includes(q)?'':'none')};
+ const links=[...toc.querySelectorAll('a')];new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)links.forEach(a=>a.classList.toggle('active',a.dataset.id===e.target.id))}),{rootMargin:'-18% 0px -73% 0px'}).observe?.(hs[0]);
+ const obs=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)links.forEach(a=>a.classList.toggle('active',a.dataset.id===e.target.id))}),{rootMargin:'-18% 0px -73% 0px'});hs.forEach(h=>obs.observe(h));
+ document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';b.onclick=async()=>{await navigator.clipboard.writeText(pre.innerText.replace(/^Copy\n/,''));b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1000)};pre.append(b)});
+ const progress=document.getElementById('progress');const update=()=>{const m=document.documentElement.scrollHeight-innerHeight;progress.style.width=(m>0?scrollY/m*100:0)+'%'};addEventListener('scroll',update,{passive:true});update();
+})();
+</script></body></html>

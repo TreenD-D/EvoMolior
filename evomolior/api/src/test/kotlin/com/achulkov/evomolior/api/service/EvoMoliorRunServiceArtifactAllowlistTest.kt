@@ -82,8 +82,8 @@ class EvoMoliorRunServiceArtifactAllowlistTest {
             )
         )
         val objective = """
-            Use Qwen DashScope sources for the Track 3 submission.
-            Direct source: https://qwencloud-hackathon.devpost.com/resources
+            Use Qwen DashScope sources for the provider integration guide.
+            Direct source: https://reference.example.com/resources
         """.trimIndent()
 
         val hosts = com.achulkov.evomolior.sandbox.network.SourceAccessPolicy.initialAllowedHosts(
@@ -93,7 +93,7 @@ class EvoMoliorRunServiceArtifactAllowlistTest {
 
         assertTrue("artifact.example.com" in hosts)
         assertTrue("preview.example.org" in hosts)
-        assertTrue("qwencloud-hackathon.devpost.com" in hosts)
+        assertTrue("reference.example.com" in hosts)
         assertTrue("dashscope.aliyuncs.com" in hosts)
         assertTrue("help.aliyun.com" in hosts)
     }

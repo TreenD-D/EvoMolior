@@ -518,6 +518,7 @@ data class CriticDecisionRecord(
     val resolvedReview: CriticReview,
     val resultAuthority: ContributionAuthorityRef?,
     val decidedAt: Instant,
+    val reviewerAgentIds: Set<String> = setOf(resolvedReview.criticAgentId),
     val decisionHash: String = ""
 ) {
     init {
@@ -534,6 +535,13 @@ data class CriticDecisionRecord(
         }
         require(resolvedReview.outcome != CriticOutcome.DISPUTE) {
             "A final Critic decision cannot remain disputed"
+        }
+        require(
+            reviewerAgentIds.isNotEmpty() &&
+                reviewerAgentIds.all(String::isNotBlank) &&
+                resolvedReview.criticAgentId in reviewerAgentIds
+        ) {
+            "Critic decision reviewer authority must include the resolved reviewer"
         }
         if (resolvedReview.outcome == CriticOutcome.PROMOTE) {
             require(

@@ -16,6 +16,7 @@ import com.achulkov.evomolior.core.atlas.ProofMethod
 import com.achulkov.evomolior.core.atlas.PhysicalDimension
 import com.achulkov.evomolior.core.atlas.ReplicationPolicy
 import com.achulkov.evomolior.core.atlas.RevealMode
+import com.achulkov.evomolior.core.atlas.ReceiverContract
 import com.achulkov.evomolior.core.atlas.RewardClass
 import com.achulkov.evomolior.core.atlas.RewardSpec
 import com.achulkov.evomolior.core.atlas.SimulationRecordBindings
@@ -33,6 +34,7 @@ import com.achulkov.evomolior.core.atlas.TypedToolSchemaCompiler
 import com.achulkov.evomolior.core.contract.GroupTopologyKind
 import com.achulkov.evomolior.core.contract.StartingField
 import com.achulkov.evomolior.core.config.CouncilExecutionPurpose
+import com.achulkov.evomolior.core.deliverable.ReceiverDeliverableBlueprintCompiler
 import com.achulkov.evomolior.core.model.GroupProfileType
 import com.achulkov.evomolior.core.model.Role
 import com.achulkov.evomolior.core.model.ScoringDimension
@@ -907,11 +909,25 @@ class CouncilContractsTest {
     fun `field seal records its canonicalization contract and verifies typed payloads`() {
         val worker = StartingField.default("Objective", runId = "run-1")
         val grader = StartingField.default("Grade Objective", runId = "grader-run-1")
+        val receiver = ReceiverContract(
+            rawObjective = worker.objective,
+            receiverId = "receiver-1",
+            receiverDescription = "Test receiver",
+            situation = "Verify a Council seal",
+            decisionOrUse = "Validate exact authority",
+            whyNeeded = "Prevent mutable deliverable policy",
+            successOutcomes = listOf("The seal verifies"),
+            unacceptableOutcomes = listOf("The blueprint is detached"),
+            constraints = emptyList(),
+            finalDeliverableContract = envelope(reverseSets = false).outputSpec,
+            evidenceProfile = EvidenceProfile(),
+        )
         val atlas = NodeAtlas(
             atlasId = CouncilDeterministicIds.atlasId("run-1"),
             runId = "run-1",
             version = 1,
-            receiverContractHash = "0".repeat(64),
+            receiverContractHash =
+                com.achulkov.evomolior.core.atlas.AtlasHashing.hashReceiverContract(receiver),
             rootNodeIds = emptySet(),
             nodes = emptyMap(),
             stageDefinitions = emptyList(),
@@ -933,12 +949,17 @@ class CouncilContractsTest {
             grader,
             atlas,
             graderAtlas,
+            receiver,
             envelope,
             report
         )
 
         assertEquals("SHA-256", seal.hashAlgorithm)
         assertEquals("evomolior-canonical-json-v1", seal.canonicalizationVersion)
+        assertEquals(
+            ReceiverDeliverableBlueprintCompiler.compile(receiver).blueprintHash,
+            seal.deliverableBlueprintHash,
+        )
         assertTrue(
             CouncilFieldSealing.verifySeal(
                 seal,
@@ -946,6 +967,7 @@ class CouncilContractsTest {
                 grader.copy(seal = seal),
                 atlas,
                 graderAtlas,
+                receiver,
                 envelope,
                 report
             )
@@ -957,8 +979,21 @@ class CouncilContractsTest {
                 grader,
                 atlas,
                 graderAtlas,
+                receiver,
                 envelope,
                 report
+            )
+        )
+        assertFalse(
+            CouncilFieldSealing.verifySeal(
+                seal.copy(deliverableBlueprintHash = "f".repeat(64)),
+                worker,
+                grader,
+                atlas,
+                graderAtlas,
+                receiver,
+                envelope,
+                report,
             )
         )
     }

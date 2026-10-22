@@ -51,6 +51,46 @@ class ToolInfrastructureContractsTest {
     }
 
     @Test
+    fun `formula skeleton serializes the exact Council reference program`() {
+        assertFailsWith<IllegalArgumentException> {
+            ToolProjectSkeletonCompiler.compile(commitment(opportunity()))
+        }
+
+        val referenceProgram = ToolDslProgram(
+            kind = ToolDslKind.FORMULA,
+            outputs = listOf(
+                ToolDslOutput(
+                    field = "result",
+                    expression = ToolDslExpression.Binary(
+                        operation = ToolDslBinaryOperation.MULTIPLY,
+                        left = ToolDslExpression.Input("value"),
+                        right = ToolDslExpression.Literal(JsonPrimitive(2.0))
+                    )
+                )
+            )
+        )
+        val skeleton = ToolProjectSkeletonCompiler.compile(
+            commitment(
+                opportunity().copy(
+                    formulaDslReferenceSemantics =
+                        FormulaDslReferenceSemantics.DIMENSIONAL_ANALYSIS_V1,
+                    formulaDslReferenceProgram = referenceProgram
+                )
+            )
+        )
+
+        val formulaSource = skeleton.files.single { it.relativePath == "formula.json" }.content
+        assertEquals(
+            referenceProgram,
+            json.decodeFromString(ToolDslProgram.serializer(), formulaSource)
+        )
+        assertEquals(
+            ToolDslPythonRuntime.render(formulaSource),
+            skeleton.files.single { it.relativePath == "run-dsl.py" }.content
+        )
+    }
+
+    @Test
     fun `compiled schemas enforce fixed arrays and nested closed objects recursively`() {
         val inputSchema = Json.parseToJsonElement(
             TypedToolSchemaCompiler.compile(
@@ -186,6 +226,53 @@ class ToolInfrastructureContractsTest {
         assertEquals(72L, longFailure.maximumItemCount)
         assertEquals("too_many_items_root.hourly_results", longFailure.stableCode)
         assertNotNull(TypedToolSchemaValidator.validationError(scalarOutput, outputSchema))
+    }
+
+    @Test
+    fun `canonical promotion outputs distinguish number and integer representations recursively`() {
+        val outputSchema = Json.parseToJsonElement(
+            TypedToolSchemaCompiler.compile(
+                listOf(
+                    TypedField(
+                        name = "results",
+                        type = TypedFieldType.ARRAY,
+                        description = "Numeric results.",
+                        itemType = TypedFieldType.NUMBER,
+                        minimumItems = 2,
+                        maximumItems = 2
+                    ),
+                    TypedField(
+                        name = "count",
+                        type = TypedFieldType.INTEGER,
+                        description = "Result count."
+                    )
+                )
+            )
+        ) as JsonObject
+        val canonical = Json.parseToJsonElement("""{"results":[4.0,1.0E-7],"count":2}""")
+        val integerEncodedNumber =
+            Json.parseToJsonElement("""{"results":[4,1.0E-7],"count":2}""")
+        val redundantDecimal =
+            Json.parseToJsonElement("""{"results":[4.00,1.0E-7],"count":2}""")
+        val exponentEncoded =
+            Json.parseToJsonElement("""{"results":[4e0,1.0E-7],"count":2}""")
+        val nonJvmExponent =
+            Json.parseToJsonElement("""{"results":[4.0,1e-7],"count":2}""")
+
+        assertNull(TypedToolSchemaValidator.canonicalOutputFailure(canonical, outputSchema))
+        listOf(
+            integerEncodedNumber to "root.results[0]",
+            redundantDecimal to "root.results[0]",
+            exponentEncoded to "root.results[0]",
+            nonJvmExponent to "root.results[1]"
+        ).forEach { (invalid, expectedPath) ->
+            val failure = assertNotNull(
+                TypedToolSchemaValidator.canonicalOutputFailure(invalid, outputSchema)
+            )
+            assertEquals(TypedToolSchemaValidationCode.NON_CANONICAL_NUMBER, failure.code)
+            assertEquals(expectedPath, failure.path)
+            assertEquals("non_canonical_number_$expectedPath", failure.stableCode)
+        }
     }
 
     @Test

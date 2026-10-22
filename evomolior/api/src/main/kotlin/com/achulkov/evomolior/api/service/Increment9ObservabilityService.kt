@@ -1,9 +1,14 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+
 package com.achulkov.evomolior.api.service
 
 import com.achulkov.evomolior.core.atlas.CaptureState
 import com.achulkov.evomolior.core.atlas.ToolVersionId
 import com.achulkov.evomolior.core.contract.CostLedgerPolicy
 import com.achulkov.evomolior.core.contract.CostLedgerSummary
+import com.achulkov.evomolior.core.contract.ContributionAuthorityKind
+import com.achulkov.evomolior.core.contract.PublicationState
+import com.achulkov.evomolior.core.contract.RoundPhaseV1
 import com.achulkov.evomolior.core.grader.EvaluationIndependenceProfile
 import com.achulkov.evomolior.core.grader.GraderScoreBundleStatus
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
@@ -11,6 +16,8 @@ import com.achulkov.evomolior.substrate.atlas.AtlasTransactionRepository
 import com.achulkov.evomolior.substrate.cost.CostLedgerRepository
 import com.achulkov.evomolior.substrate.grader.GraderAuthorityRepository
 import com.achulkov.evomolior.substrate.publication.PublicationStateRepository
+import com.achulkov.evomolior.substrate.repair.ToolRepairPersistenceRepository
+import com.achulkov.evomolior.substrate.roundledger.RoundPhaseLedgerRepository
 import com.achulkov.evomolior.substrate.tools.ToolInfrastructureRepository
 import com.achulkov.evomolior.substrate.worker.ContributionGraphRepository
 import com.achulkov.evomolior.substrate.worker.WorkerExecutionRepository
@@ -92,19 +99,88 @@ data class UsefulExitObservability(
     val usefulExitRate: Double?
 )
 
-/** Configured-versus-activated status for one society mechanism. */
+/** Closed activation state required by completion-blueprint Section 11.4. */
+@Serializable
+enum class MechanismActivationState {
+    NOT_CONFIGURED,
+    CONFIGURED_NOT_REACHED,
+    ATTEMPTED_FAILED,
+    ACTIVATED_NO_DOWNSTREAM_USE,
+    ACTIVATED_WITH_DOWNSTREAM_USE,
+}
+
+/** Exact five-state activation report for one society mechanism. */
 @Serializable
 data class MechanismActivation(
     val mechanismId: String,
-    val configured: Boolean,
-    val activated: Boolean,
+    val state: MechanismActivationState,
     val authorityIds: List<String>
 ) {
     init {
         require(mechanismId.isNotBlank()) { "Mechanism ID must not be blank" }
-        require(!activated || configured) { "An unconfigured mechanism cannot be activated" }
-        require(authorityIds.none(String::isBlank)) { "Mechanism authority IDs must not be blank" }
+        require(
+            authorityIds.isNotEmpty() &&
+                authorityIds.none(String::isBlank) &&
+                authorityIds == authorityIds.distinct().sorted()
+        ) { "Mechanism authority IDs must be non-empty, sorted, and distinct" }
     }
+
+    /** Whether the mechanism was configured for this run. */
+    val configured: Boolean
+        get() = state != MechanismActivationState.NOT_CONFIGURED
+
+    /** Whether the mechanism crossed its activation boundary. */
+    val activated: Boolean
+        get() = state == MechanismActivationState.ACTIVATED_NO_DOWNSTREAM_USE ||
+            state == MechanismActivationState.ACTIVATED_WITH_DOWNSTREAM_USE
+}
+
+/**
+ * Resolves the exact five-state mechanism classification from ordered authority layers.
+ *
+ * @param mechanismId Stable mechanism identity.
+ * @param configured Whether the mechanism was present in immutable run configuration.
+ * @param configurationAuthorityIds Evidence for the configured/not-configured decision.
+ * @param attemptAuthorityIds Evidence that the activation boundary was attempted.
+ * @param activationAuthorityIds Evidence that the mechanism activated successfully.
+ * @param downstreamAuthorityIds Evidence that a later independent operation used the activation.
+ */
+internal fun resolveMechanismActivation(
+    mechanismId: String,
+    configured: Boolean,
+    configurationAuthorityIds: List<String>,
+    attemptAuthorityIds: List<String> = emptyList(),
+    activationAuthorityIds: List<String> = emptyList(),
+    downstreamAuthorityIds: List<String> = emptyList(),
+): MechanismActivation {
+    require(
+        configured ||
+            attemptAuthorityIds.isEmpty() &&
+            activationAuthorityIds.isEmpty() &&
+            downstreamAuthorityIds.isEmpty()
+    ) { "An unconfigured mechanism cannot carry attempt, activation, or downstream authority" }
+    require(activationAuthorityIds.isNotEmpty() || downstreamAuthorityIds.isEmpty()) {
+        "Downstream use requires an activated mechanism"
+    }
+    val state = when {
+        !configured -> MechanismActivationState.NOT_CONFIGURED
+        downstreamAuthorityIds.isNotEmpty() ->
+            MechanismActivationState.ACTIVATED_WITH_DOWNSTREAM_USE
+        activationAuthorityIds.isNotEmpty() ->
+            MechanismActivationState.ACTIVATED_NO_DOWNSTREAM_USE
+        attemptAuthorityIds.isNotEmpty() -> MechanismActivationState.ATTEMPTED_FAILED
+        else -> MechanismActivationState.CONFIGURED_NOT_REACHED
+    }
+    return MechanismActivation(
+        mechanismId = mechanismId,
+        state = state,
+        authorityIds = (
+            configurationAuthorityIds +
+                attemptAuthorityIds +
+                activationAuthorityIds +
+                downstreamAuthorityIds
+            ).distinct().sorted(),
+    )
 }
 
 /** Complete read-only Increment 9 observability snapshot. */
@@ -256,65 +332,176 @@ class Increment9ObservabilityService(
             CostLedgerPolicy()
         ).summary(runId)
         val publication = PublicationStateRepository(databaseFactory.getAtlas(runId)).history(runId)
-        val controlIds = graphByGroup.flatMap { (groupId, repository) ->
+        val controlRecords = graphByGroup.flatMap { (groupId, repository) ->
             repository.controlInterventionsThroughRound(runId, groupId, maxRound)
-                .map { it.interventionId }
-        }.sorted()
-        val summaryIds = graphByGroup.flatMap { (groupId, repository) ->
+        }
+        val controlIds = controlRecords.map { it.interventionId }.distinct().sorted()
+        val controlDownstreamIds = controlRecords
+            .flatMap { record ->
+                record.avoidedLossAuthorities.map {
+                    "control-downstream/${it.authorityId}"
+                }
+            }
+            .distinct()
+            .sorted()
+        val summaryRecords = graphByGroup.flatMap { (groupId, repository) ->
             repository.summaryValidationsThroughRound(runId, groupId, maxRound)
-                .map { it.validationId }
-        }.sorted()
+        }
+        val summaryIds = summaryRecords.map { it.validationId }.distinct().sorted()
+        val finalReferenceIds = graphByGroup.flatMap { (groupId, repository) ->
+            repository.finalDeliverableReferencesForRun(runId, groupId)
+                .filter {
+                    it.nodeId != null &&
+                        it.sourceAuthority.kind ==
+                        ContributionAuthorityKind.NODE_CAPTURE_DECISION
+                }
+                .map { it.referenceId }
+        }.distinct().sorted()
         val toolReuseIds = toolDashboards.flatMap(ToolObservability::reuseAuthorityIds)
+        val configuredToolOpportunityIds = atlas.nodes.values
+            .mapNotNull { it.toolOpportunity?.opportunityId }
+            .distinct()
+            .sorted()
+        val toolRepairAttemptIds = groupIds.flatMap { groupId ->
+            val repository = ToolRepairPersistenceRepository(databaseFactory.get(runId, groupId))
+            configuredToolOpportunityIds.flatMap { opportunityId ->
+                repository.attempts(opportunityId).map { it.attemptId }
+            }
+        }.distinct().sorted()
+        val toolTransportAttemptIds = ToolTransportAttemptStore(databaseFactory)
+            .read(runId)
+            .attempts
+            .map { it.recordHash }
+            .sorted()
+        val promotedToolAuthorityIds = groupIds.flatMap { groupId ->
+            val database = databaseFactory.get(runId, groupId)
+            val infrastructure = ToolInfrastructureRepository(database)
+            database.toolRegistryDao()
+                .getActive(runId, groupId, null)
+                .mapNotNull { tool ->
+                    infrastructure.lifecycle(ToolVersionId(tool.id))
+                        .firstOrNull { it.state == com.achulkov.evomolior.core.atlas.ToolLifecycleState.PROMOTED }
+                        ?.eventId
+                }
+        }.distinct().sorted()
+        val captureAttemptIds = states.values
+            .flatMap { it.grades }
+            .map { it.gradeId }
+            .distinct()
+            .sorted()
+        val disclosureActivationIds = states.values
+            .flatMap { state ->
+                state.disclosureLineage.map { it.authorization.authorizationId }
+            }
+            .distinct()
+            .sorted()
+        val disclosureAttemptIds = if (atlas.stageDefinitions.size > 1) {
+            val ledger = RoundPhaseLedgerRepository(databaseFactory.getAtlas(runId))
+            (0..maxRound).mapNotNull { round ->
+                ledger.history(runId, round).singleOrNull {
+                    it.phase ==
+                        RoundPhaseV1.MUTATION_CAPTURE_YIELD_DISCLOSURE_AND_OUTLIER_RESOLVED
+                }?.eventHash
+            }.map { "disclosure-attempt/$it" }
+        } else {
+            emptyList()
+        }
+        val disclosureDownstreamIds = states.values
+            .filter {
+                it.disclosureLineage.isNotEmpty() &&
+                    it.captureState in setOf(CaptureState.CAPTURED, CaptureState.SHARED)
+            }
+            .flatMap { state ->
+                state.disclosureLineage.map {
+                    "disclosure-captured/${it.authorization.authorizationId}"
+                }
+            }
+            .distinct()
+            .sorted()
+        val registrationsByGroup = groupIds.associateWith { groupId ->
+            WorkerExecutionRepository(databaseFactory.get(runId, groupId))
+                .registrations(runId, groupId)
+        }
+        val exitsByGroup = groupIds.associateWith { groupId ->
+            WorkerExecutionRepository(databaseFactory.get(runId, groupId))
+                .exits(runId, groupId)
+        }
+        val ordinaryExitIds = exitsByGroup.values.flatten().map { it.exitId }.distinct().sorted()
+        val usefulExitIds = exitsByGroup.values.flatten()
+            .filter { it.useful }
+            .map { "useful-exit/${it.exitId}" }
+            .distinct()
+            .sorted()
         val mechanisms = listOf(
-            MechanismActivation(
-                "progressive-disclosure",
-                atlas.stageDefinitions.isNotEmpty(),
-                states.values.any { it.disclosureLineage.isNotEmpty() },
-                states.values.flatMap { it.disclosureLineage }
-                    .map { it.authorization.authorizationId }
-                    .sorted()
+            resolveMechanismActivation(
+                mechanismId = "progressive-disclosure",
+                configured = atlas.stageDefinitions.size > 1,
+                configurationAuthorityIds = listOf("worker-atlas/${atlas.atlasHash}"),
+                attemptAuthorityIds = disclosureAttemptIds,
+                activationAuthorityIds = disclosureActivationIds,
+                downstreamAuthorityIds = disclosureDownstreamIds,
             ),
-            MechanismActivation(
-                "competitive-node-capture",
-                atlas.nodes.isNotEmpty(),
-                captureAuthorityIds.isNotEmpty(),
-                captureAuthorityIds
+            resolveMechanismActivation(
+                mechanismId = "competitive-node-capture",
+                configured = atlas.nodes.isNotEmpty(),
+                configurationAuthorityIds = listOf("worker-atlas/${atlas.atlasHash}"),
+                attemptAuthorityIds = captureAttemptIds,
+                activationAuthorityIds = captureAuthorityIds,
+                downstreamAuthorityIds = finalReferenceIds,
             ),
-            MechanismActivation(
-                "promoted-tool-later-node-reuse",
-                atlas.nodes.values.any { it.toolOpportunity != null },
-                toolReuseIds.isNotEmpty(),
-                toolReuseIds.sorted()
+            resolveMechanismActivation(
+                mechanismId = "promoted-tool-later-node-reuse",
+                configured = configuredToolOpportunityIds.isNotEmpty(),
+                configurationAuthorityIds = if (configuredToolOpportunityIds.isEmpty()) {
+                    listOf("worker-atlas/${atlas.atlasHash}:no-tool-opportunity")
+                } else {
+                    configuredToolOpportunityIds.map { "tool-opportunity/$it" }
+                },
+                attemptAuthorityIds = toolTransportAttemptIds + toolRepairAttemptIds,
+                activationAuthorityIds = promotedToolAuthorityIds,
+                downstreamAuthorityIds = toolReuseIds.sorted(),
             ),
-            MechanismActivation(
-                "useful-exit-accounting",
-                true,
-                usefulExitDashboards.any { it.ordinaryExitCount > 0 },
-                groupIds.flatMap { groupId ->
-                    WorkerExecutionRepository(databaseFactory.get(runId, groupId))
-                        .exits(runId, groupId)
-                        .map { it.exitId }
-                }.sorted()
+            resolveMechanismActivation(
+                mechanismId = "useful-exit-accounting",
+                configured = true,
+                configurationAuthorityIds = listOf("run-topology/$runId"),
+                attemptAuthorityIds = registrationsByGroup.values.flatten()
+                    .map { it.registrationId }
+                    .distinct()
+                    .sorted(),
+                activationAuthorityIds = ordinaryExitIds,
+                downstreamAuthorityIds = usefulExitIds,
             ),
-            MechanismActivation(
-                "typed-control-intervention",
-                true,
-                controlIds.isNotEmpty(),
-                controlIds
+            resolveMechanismActivation(
+                mechanismId = "typed-control-intervention",
+                configured = true,
+                configurationAuthorityIds = listOf("worker-atlas/${atlas.atlasHash}"),
+                attemptAuthorityIds = controlIds,
+                activationAuthorityIds = controlIds,
+                downstreamAuthorityIds = controlDownstreamIds,
             ),
-            MechanismActivation(
-                "summary-validation",
-                true,
-                summaryIds.isNotEmpty(),
-                summaryIds
+            resolveMechanismActivation(
+                mechanismId = "summary-validation",
+                configured = true,
+                configurationAuthorityIds = listOf("worker-atlas/${atlas.atlasHash}"),
+                attemptAuthorityIds = emptyList(),
+                activationAuthorityIds = summaryIds,
             ),
-            MechanismActivation(
-                "publication-barrier",
-                true,
-                publication.isNotEmpty(),
-                publication.map { it.eventId }
+            resolveMechanismActivation(
+                mechanismId = "publication-barrier",
+                configured = true,
+                configurationAuthorityIds = listOf("publication-policy/$runId"),
+                attemptAuthorityIds = emptyList(),
+                activationAuthorityIds = publication.map { it.eventId },
+                downstreamAuthorityIds = publication
+                    .filter { it.state == PublicationState.ARCHIVED }
+                    .map { "accepted-archive/${it.eventHash}" },
             )
         )
+        require(
+            mechanisms.map(MechanismActivation::mechanismId) ==
+                MechanismActivationCatalog.orderedMechanismIds
+        ) { "Observability mechanism catalog drifted from terminal report authority" }
         return Increment9ObservabilitySnapshot(
             runId,
             nodeDashboard,

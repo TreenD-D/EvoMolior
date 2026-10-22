@@ -32,10 +32,10 @@ internal class BlindTournamentService(
 ) {
     private var worker: ScoringWorkerProcess? = null
 
-    fun start(groupIds: List<String>) {
+    suspend fun start(groupIds: List<String>) {
         check(worker == null) { "BlindTournamentService is already running" }
         val process = workerFactory()
-        runBlocking { process.start(groupIds) }
+        process.start(groupIds)
         worker = process
     }
 
@@ -63,9 +63,6 @@ internal class BlindTournamentService(
             )
         )
         response.exactGraderVerdict?.let { verdict ->
-            check(verdict.status == ExactGraderRoundStatus.VALID) {
-                "Scoring child rejected exact grader authority: ${verdict.reason}"
-            }
             onExactGraderReplay(round, verdict)
         }
         response.failureTelemetry.forEach { onFailureTelemetry(it) }

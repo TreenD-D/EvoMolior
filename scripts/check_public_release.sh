@@ -42,22 +42,8 @@ required_public_files=(
   documentation/benchmarks/EvoMolior_Benchmark_Ladder.md
   documentation/deployment/Remote_CLI_Dashboard_Deployment.md
   documentation/opensource/Open_Source_Readiness.md
-  documentation/submission/Alibaba_Cloud_Deployment_Proof.md
-  documentation/submission/Architecture.md
-  documentation/submission/Demo_Video_Script.md
-  documentation/submission/Devpost_Submission.md
-  documentation/submission/Evidence_and_Claims.md
-  documentation/submission/EvoMolior_Architecture.html
-  documentation/submission/EvoMolior_Pitch_Deck.html
-  documentation/submission/EvoMolior_Pitch_Deck.pdf
-  documentation/submission/Judge_Guide.md
-  documentation/submission/README.md
-  documentation/submission/Submission_Checklist.md
-  documentation/submission/assets/evomolior-architecture.png
-  documentation/submission/assets/evomolior-architecture.svg
-  documentation/submission/assets/evomolior-thumbnail.png
-  documentation/submission/assets/evomolior-thumbnail.svg
-  documentation/submission/evidence/qwen-frames-comparison.json
+  scripts/check_repository_hygiene.sh
+  scripts/test_repository_hygiene.sh
 )
 
 missing_public_files=""
@@ -98,7 +84,7 @@ while IFS= read -r path; do
     documentation/prompts/*|documentation/examples/*)
       staged_internal+="${path}"$'\n'
       ;;
-    build/*|.evomolior-locks/*|.evomolior-tmp/*|.gradle-user/*|.test-tmp/*|.java-tmp/*)
+    build/*|*/build/*|.evomolior-locks/*|.evomolior-tmp/*|.evomolior-gradle-home/*|.gradle-user/*|.gradle-tmp/*|.system-cache-relief/*|.test-tmp/*|.java-tmp/*)
       staged_internal+="${path}"$'\n'
       ;;
   esac
@@ -109,34 +95,10 @@ if [[ -n "$staged_internal" ]]; then
   printf '%s' "$staged_internal" | sed -n '1,30p' >&2
 fi
 
-unapproved_tracked_docs=""
-while IFS= read -r path; do
-  case "$path" in
-    documentation/README.md|\
-    documentation/EvoMolior_Alignment_Plan.md|\
-    documentation/EvoMolior_Competitive_Progressive_Disclosure_Action_Plan-1.html|\
-    documentation/EvoMolior_Competitive_Progressive_Disclosure_Action_Plan_v1.1_agentsdiff.html|\
-    documentation/EvoMolior_Current_Architecture_Deep_Dive.md|\
-    documentation/EvoMolior_Gap_Matrix.md|\
-    documentation/EvoMolior_Implementation_Plan_v1.0.md|\
-    documentation/EvoMolior_Roadmap_and_Project_State.md|\
-    documentation/EvoMolior_Specification_v0.2.html|\
-    documentation/benchmarks/EvoMolior_Benchmark_Ladder.md|\
-    documentation/deployment/Remote_CLI_Dashboard_Deployment.md|\
-    documentation/opensource/Open_Source_Readiness.md|\
-    documentation/submission/*)
-      ;;
-    *)
-      unapproved_tracked_docs+="${path}"$'\n'
-      ;;
-  esac
-done < <(git ls-files documentation)
-
-if [[ -n "$unapproved_tracked_docs" ]]; then
-  fail "documentation outside the public allowlist remains tracked"
-  printf '%s' "$unapproved_tracked_docs" | sed -n '1,30p' >&2
+if bash scripts/check_repository_hygiene.sh; then
+  pass "repository ignore and size policy"
 else
-  pass "tracked documentation matches the public allowlist"
+  fail "repository ignore or size policy failed"
 fi
 
 tracked_runtime_state="$(
@@ -179,46 +141,40 @@ public_surface=(
   documentation/EvoMolior_Competitive_Progressive_Disclosure_Action_Plan-1.html
   documentation/EvoMolior_Competitive_Progressive_Disclosure_Action_Plan_v1.1_agentsdiff.html
   documentation/EvoMolior_Current_Architecture_Deep_Dive.md
+  documentation/EvoMolior_General_Purpose_Improvement_Plan.md
   documentation/EvoMolior_Gap_Matrix.md
   documentation/EvoMolior_Implementation_Plan_v1.0.md
   documentation/EvoMolior_Roadmap_and_Project_State.md
   documentation/EvoMolior_Specification_v0.2.html
   documentation/benchmarks
   documentation/deployment
+  documentation/configuration
   documentation/opensource
-  documentation/submission
 )
 
-if rg -n '/Volumes/|/Users/|sandbox:/mnt/data|BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY' "${public_surface[@]}"; then
+scan_status=0
+rg --no-ignore -l '/Volumes/|/Users/|sandbox:/mnt/data|BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY' "${public_surface[@]}" || scan_status=$?
+if [[ "$scan_status" -eq 0 ]]; then
   fail "local absolute paths, sandbox links, or private-key blocks exist in the public surface"
+elif [[ "$scan_status" -ne 1 ]]; then
+  fail "public documentation scan could not complete"
 else
   pass "public docs contain no local absolute paths, sandbox links, or private-key blocks"
 fi
 
-if rg -n --hidden \
-  --glob '!**/.git/**' \
-  --glob '!**/.gradle/**' \
-  --glob '!**/build/**' \
-  --glob '!results/**' \
-  --glob '!documentation/agent-notes/**' \
-  --glob '!documentation/tmp/**' \
-  --glob '!local.properties' \
+scan_status=0
+git grep -l -I -E --untracked --exclude-standard \
   -e '(^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{32,}' \
   -e 'AIza[0-9A-Za-z_-]{20,}' \
   -e 'AKIA[0-9A-Z]{16}' \
   -e 'BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY' \
-  .; then
+  -- . || scan_status=$?
+if [[ "$scan_status" -eq 0 ]]; then
   fail "a secret-like value was found; inspect every match"
+elif [[ "$scan_status" -ne 1 ]]; then
+  fail "public source secret scan could not complete"
 else
   pass "no high-confidence provider key pattern found in the current public source scan"
-fi
-
-if command -v xmllint >/dev/null 2>&1; then
-  if xmllint --noout documentation/submission/assets/*.svg; then
-    pass "submission SVG assets are valid XML"
-  else
-    fail "submission SVG XML validation failed"
-  fi
 fi
 
 if [[ "$failures" -ne 0 ]]; then

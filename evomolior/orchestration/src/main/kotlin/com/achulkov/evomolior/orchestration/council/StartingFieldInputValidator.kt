@@ -24,6 +24,10 @@ import com.achulkov.evomolior.core.council.FieldCompileErrorCode
 import com.achulkov.evomolior.core.council.FieldDegradationRecord
 import com.achulkov.evomolior.core.council.LocalLimitationNode
 import com.achulkov.evomolior.core.council.LocalNodeKey
+import com.achulkov.evomolior.core.council.QuantitativeToolFieldLocation
+import com.achulkov.evomolior.core.council.QuantitativeToolFieldObligation
+import com.achulkov.evomolior.core.council.QuantitativeToolFieldShape
+import com.achulkov.evomolior.core.council.QuantitativeToolObligation
 import com.achulkov.evomolior.core.council.StartingFieldCompileResult
 import com.achulkov.evomolior.core.council.SealedTestV3
 import com.achulkov.evomolior.core.config.AcceptanceProfile
@@ -66,6 +70,7 @@ internal object StartingFieldInputValidator {
             validateStages(envelope, outputs).forEach(::add)
             validateSynthesisAcceptanceProfile(envelope, outputs).forEach(::add)
             validateTests(outputs).forEach(::add)
+            validateQuantitativePromotionFixtures(envelope, outputs).forEach(::add)
             validateSynthesisJsonContracts(outputs).forEach(::add)
         }
         val revision = StartingFieldRevisionValidator.validate(
@@ -101,6 +106,7 @@ internal object StartingFieldInputValidator {
         StartingFieldSupplementalValidator.validateSpecialists(envelope, outputs).forEach(::add)
         validateSpecialistEnvelope(envelope, outputs).forEach(::add)
         validateSpecialistAcceptanceProfile(runId, envelope, outputs).forEach(::add)
+        validateQuantitativeToolObligation(envelope, outputs).forEach(::add)
         validateSpecialistNodes(runId, envelope, outputs).forEach(::add)
         validatePolicies(envelope, outputs).forEach(::add)
         validateModels(envelope, outputs).forEach(::add)
@@ -235,6 +241,12 @@ internal object StartingFieldInputValidator {
                 testId !in node.toolOpportunity?.promotionTestIds.orEmpty()
             }
         }
+        val declaredTestCount = nodes.sumOf { node ->
+            (
+                node.proofContract.executableTestIds +
+                    node.toolOpportunity?.promotionTestIds.orEmpty()
+                ).size
+        }
         if (
             envelope.acceptanceProfile != AcceptanceProfile.NORMAL &&
             (
@@ -252,7 +264,19 @@ internal object StartingFieldInputValidator {
             )
         }
         when (envelope.acceptanceProfile) {
-            AcceptanceProfile.NORMAL -> Unit
+            AcceptanceProfile.NORMAL -> {
+                if (declaredTestCount < 1) {
+                    add(
+                        error(
+                            FieldCompileErrorCode.ENVELOPE_VIOLATION,
+                            "taskAnatomist.nodes.proofContract.executableTestIds",
+                            "Genesis Council requires at least one executable or promotion " +
+                                "test declaration",
+                            Role.CouncilTaskAnatomist
+                        )
+                    )
+                }
+            }
             AcceptanceProfile.RUNTIME_USABILITY_SMOKE -> {
                 if (envelope.maxRounds != 1) {
                     add(
@@ -330,6 +354,253 @@ internal object StartingFieldInputValidator {
                 opportunities.forEach { origin ->
                     validateFullOpportunityTopology(runId, origin, nodes).forEach(::add)
                 }
+            }
+        }
+    }
+
+    private fun validateQuantitativeToolObligation(
+        envelope: ExecutionEnvelope,
+        outputs: CouncilSpecialistBundle
+    ): List<FieldCompileError> {
+        val obligation = envelope.quantitativeToolObligation ?: return emptyList()
+        val allOpportunityNodes = outputs.taskAnatomist.nodes.filter {
+            it.toolOpportunity != null
+        }
+        val opportunityNodes = allOpportunityNodes.filter { node ->
+            val opportunity = node.toolOpportunity ?: return@filter false
+            obligation.allowedOpportunityTypes.isEmpty() ||
+                opportunity.opportunityType in obligation.allowedOpportunityTypes
+        }
+        val assessed = opportunityNodes.map { node ->
+            node to requireNotNull(node.toolOpportunity).quantitativeMismatches(obligation)
+        }
+        if (assessed.any { (_, mismatches) -> mismatches.isEmpty() }) {
+            return emptyList()
+        }
+        val roleSummary = obligation.requiredFields.joinToString { field ->
+            "${field.roleId}=${field.location.name.lowercase()}.${field.fieldName}"
+        }
+        if (assessed.isEmpty()) {
+            val allowedTypes = obligation.allowedOpportunityTypes
+                .takeIf(Set<ToolOpportunityType>::isNotEmpty)
+                ?.sortedBy(ToolOpportunityType::name)
+                ?.joinToString { it.name }
+                ?: "any opportunity type"
+            return listOf(
+                error(
+                    FieldCompileErrorCode.ENVELOPE_VIOLATION,
+                    "taskAnatomist.nodes.toolOpportunity.quantitativeToolObligation",
+                    "One sealed tool opportunity of an allowed type ($allowedTypes) must satisfy " +
+                        "every exact operator-owned quantitative field role on the " +
+                        "${obligation.horizonIntervalCount}-" +
+                        "${obligation.horizonTimeBasis.name.lowercase()} bounded horizon: " +
+                        roleSummary,
+                    Role.CouncilTaskAnatomist,
+                    allOpportunityNodes.mapTo(linkedSetOf()) { it.key }
+                )
+            )
+        }
+        val (bestNode, mismatches) = assessed.minWith(
+            compareBy<Pair<LocalLimitationNode, List<QuantitativeFieldMismatch>>>(
+                { it.second.size },
+                { it.first.key.value }
+            )
+        )
+        return buildList {
+            add(error(
+                FieldCompileErrorCode.ENVELOPE_VIOLATION,
+                "taskAnatomist.nodes.toolOpportunity.quantitativeToolObligation",
+                "One sealed tool opportunity must satisfy every exact operator-owned " +
+                    "quantitative field role on the ${obligation.horizonIntervalCount}-" +
+                    "${obligation.horizonTimeBasis.name.lowercase()} bounded horizon: " +
+                    roleSummary,
+                Role.CouncilTaskAnatomist,
+                opportunityNodes.mapTo(linkedSetOf()) { it.key }
+            ))
+            mismatches.forEach { mismatch ->
+                add(
+                    error(
+                        FieldCompileErrorCode.ENVELOPE_VIOLATION,
+                        "taskAnatomist.nodes.${bestNode.key.value}.toolOpportunity." +
+                            "quantitativeToolObligation.${mismatch.roleId}",
+                        mismatch.message,
+                        Role.CouncilTaskAnatomist,
+                        setOf(bestNode.key)
+                    )
+                )
+            }
+        }
+    }
+
+    private fun ToolOpportunity.quantitativeMismatches(
+        obligation: QuantitativeToolObligation
+    ): List<QuantitativeFieldMismatch> = buildList {
+        obligation.requiredOpportunityId?.let { requiredId ->
+            if (opportunityId != requiredId) {
+                add(
+                    QuantitativeFieldMismatch(
+                        roleId = "opportunity_id",
+                        message = "Opportunity ID must be '$requiredId', actual='$opportunityId'"
+                    )
+                )
+            }
+        }
+        if (
+            obligation.exactPromotionTestIds.isNotEmpty() &&
+            promotionTestIds != obligation.exactPromotionTestIds
+        ) {
+            add(
+                QuantitativeFieldMismatch(
+                    roleId = "promotion_test_ids",
+                    message = "Promotion test IDs must equal " +
+                        obligation.exactPromotionTestIds.sorted().joinToString(
+                            prefix = "[",
+                            postfix = "]"
+                        ) +
+                        ", actual=" +
+                        promotionTestIds.sorted().joinToString(prefix = "[", postfix = "]")
+                )
+            )
+        }
+        obligation.maximumOpportunityRuntimeMillis?.let { maximumRuntime ->
+            if (maximumRuntimeMillis > maximumRuntime) {
+                add(
+                    QuantitativeFieldMismatch(
+                        roleId = "maximum_runtime_millis",
+                        message = "maximumRuntimeMillis must be at most $maximumRuntime, " +
+                            "actual=$maximumRuntimeMillis"
+                    )
+                )
+            }
+        }
+        obligation.requiredFields.forEach { requiredField ->
+            val fields = when (requiredField.location) {
+                QuantitativeToolFieldLocation.INPUT -> requiredInputs
+                QuantitativeToolFieldLocation.OUTPUT -> requiredOutputs
+            }
+            val field = fields.singleOrNull { it.name == requiredField.fieldName }
+            if (field == null) {
+                add(
+                    QuantitativeFieldMismatch(
+                        roleId = requiredField.roleId,
+                        message = "Missing required top-level " +
+                            "${requiredField.location.name.lowercase()} field " +
+                            "'${requiredField.fieldName}' for quantitative role " +
+                            "'${requiredField.roleId}'"
+                    )
+                )
+                return@forEach
+            }
+            val differences = buildList {
+                if (!field.required) add("required must be true")
+                when (requiredField.shape) {
+                    QuantitativeToolFieldShape.SCALAR -> {
+                        if (field.type != requiredField.numericType) {
+                            add(
+                                "type must be ${requiredField.numericType}, actual=${field.type}"
+                            )
+                        }
+                    }
+                    QuantitativeToolFieldShape.HORIZON_SERIES -> {
+                        if (field.type != TypedFieldType.ARRAY) {
+                            add("type must be ARRAY, actual=${field.type}")
+                        }
+                        if (field.itemType != requiredField.numericType) {
+                            add(
+                                "array item type must be ${requiredField.numericType}, " +
+                                    "actual=${field.itemType}"
+                            )
+                        }
+                        if (
+                            field.minimumItems != obligation.horizonIntervalCount ||
+                            field.maximumItems != obligation.horizonIntervalCount
+                        ) {
+                            add(
+                                "array bounds must both equal " +
+                                    "${obligation.horizonIntervalCount}, actual=" +
+                                    "${field.minimumItems}..${field.maximumItems}"
+                            )
+                        }
+                    }
+                }
+                if (field.physicalDimension != requiredField.quantitySpec.dimension) {
+                    add(
+                        "physicalDimension must be " +
+                            "${requiredField.quantitySpec.dimension}, actual=" +
+                            "${field.physicalDimension}"
+                    )
+                }
+                if (field.quantitySpec != requiredField.quantitySpec) {
+                    add(
+                        "quantitySpec must be ${requiredField.quantitySpec}, actual=" +
+                            "${field.quantitySpec}"
+                    )
+                }
+            }
+            if (differences.isNotEmpty()) {
+                add(
+                    QuantitativeFieldMismatch(
+                        roleId = requiredField.roleId,
+                        message = "Quantitative role '${requiredField.roleId}' at " +
+                            "${requiredField.location.name.lowercase()}." +
+                            "${requiredField.fieldName} is incompatible: " +
+                            differences.joinToString("; ")
+                    )
+                )
+            }
+        }
+    }
+
+    private data class QuantitativeFieldMismatch(
+        val roleId: String,
+        val message: String
+    )
+
+    private fun validateQuantitativePromotionFixtures(
+        envelope: ExecutionEnvelope,
+        outputs: CouncilRoleOutputBundle
+    ): List<FieldCompileError> = buildList {
+        val fixtures = envelope.quantitativeToolObligation
+            ?.exactPromotionFixtures
+            .orEmpty()
+        if (fixtures.isEmpty()) return@buildList
+        val testsById = outputs.synthesis.sealedTests.groupBy { it.testKey }
+        fixtures.forEach { fixture ->
+            val path = "synthesis.sealedTests.${fixture.testId}.testDefinitionJson"
+            val test = testsById[fixture.testId]?.singleOrNull()
+            if (test == null) {
+                add(
+                    error(
+                        FieldCompileErrorCode.ENVELOPE_VIOLATION,
+                        path,
+                        "Operator-owned promotion fixture '${fixture.testId}' is missing or " +
+                            "duplicated",
+                        Role.CouncilSynthesis
+                    )
+                )
+                return@forEach
+            }
+            val definition = runCatching {
+                json.parseToJsonElement(test.testDefinitionJson) as? kotlinx.serialization.json.JsonObject
+            }.getOrNull()
+            val actualInput = definition?.get("input")
+            val actualOutput = definition?.get("expectedOutput")
+            val unexpectedFields = definition?.keys.orEmpty() - setOf("input", "expectedOutput")
+            if (
+                definition == null ||
+                unexpectedFields.isNotEmpty() ||
+                actualInput != fixture.input ||
+                actualOutput != fixture.expectedOutput
+            ) {
+                add(
+                    error(
+                        FieldCompileErrorCode.ENVELOPE_VIOLATION,
+                        path,
+                        "Promotion fixture '${fixture.testId}' must exactly equal the " +
+                            "operator-owned input and expectedOutput authority",
+                        Role.CouncilSynthesis
+                    )
+                )
             }
         }
     }

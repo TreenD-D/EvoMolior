@@ -78,7 +78,8 @@ class CompiledCouncilBootstrapAcceptanceTest {
             )
             val runConfig = config(runId, objective).copy(
                 groupProfiles = semanticProfiles,
-                maxAgentsPerGroup = 2,
+                // The researcher needs a slot alongside the Critic and artifact-owner Builder.
+                maxAgentsPerGroup = 3,
                 roundDurationMinutes = 1
             )
             val compiled = compiledCouncilTestFixture(
@@ -408,6 +409,7 @@ class CompiledCouncilBootstrapAcceptanceTest {
             AtlasTransactionRepository(substrateFactory)
                 .currentAtlas(runId, compiled.atlas.atlasId)
         )
+        assertEquals("IDLE", service.getState().status.name)
     }
 
     @Test
@@ -603,9 +605,23 @@ class CompiledCouncilBootstrapAcceptanceTest {
     fun `compiled resume restores grader field and verifies the shared seal before activation`() = runTest {
         val seeded = seedCompiledResumeState("compiled-resume-valid")
         val lifecycleCalls = AtomicInteger()
-        val service = EvoMoliorRunService(
-            lifecycleManagerProvider = { _, _, _, _, _ ->
+        var observedGraderField: StartingField? = null
+        var observedGraderModelAssignments: Map<String, String>? = null
+        var observedValidationContext: Any? = null
+        lateinit var service: EvoMoliorRunService
+        service = EvoMoliorRunService(
+            lifecycleManagerProvider = { runId, _, _, _, _ ->
                 lifecycleCalls.incrementAndGet()
+                observedGraderField = service.javaClass
+                    .getDeclaredField("activeGraderStartingField")
+                    .apply { isAccessible = true }
+                    .get(service) as StartingField?
+                observedGraderModelAssignments =
+                    service.activeSealedGraderModelAssignments(runId)
+                observedValidationContext = service.javaClass
+                    .getDeclaredField("activeSealedTestSuiteValidationContext")
+                    .apply { isAccessible = true }
+                    .get(service)
                 error("stop at resumed runtime activation")
             },
             groupCoordinatorProvider = { groupIds, dimensions -> GroupCoordinator(groupIds, dimensions) },
@@ -620,23 +636,46 @@ class CompiledCouncilBootstrapAcceptanceTest {
 
         assertTrue(failure.message.orEmpty().contains("resumed runtime activation"))
         assertEquals(1, lifecycleCalls.get())
-        val activeGraderField = service.javaClass
-            .getDeclaredField("activeGraderStartingField")
-            .apply { isAccessible = true }
-            .get(service) as StartingField?
-        assertEquals(seeded.compiled.graderField, activeGraderField)
+        assertEquals(seeded.compiled.graderField, observedGraderField)
         assertEquals(
             seeded.compiled.graderField.modelAssignment,
-            service.activeSealedGraderModelAssignments(seeded.config.runId)
+            observedGraderModelAssignments
         )
-        val activeValidationContext = service.javaClass
-            .getDeclaredField("activeSealedTestSuiteValidationContext")
-            .apply { isAccessible = true }
-            .get(service)
         assertEquals(
             seeded.compiled.sealedTests.validationContext,
-            activeValidationContext
+            observedValidationContext
         )
+        assertEquals("IDLE", service.getState().status.name)
+    }
+
+    @Test
+    fun `compiled resume coordinator failure remains a preactivation startup rejection`() = runTest {
+        val seeded = seedCompiledResumeState("compiled-resume-coordinator-rejection")
+        val service = EvoMoliorRunService(
+            lifecycleManagerProvider = { _, _, _, _, _ ->
+                error("lifecycle activation must not begin")
+            },
+            groupCoordinatorProvider = { _, _ ->
+                error("resume coordinator construction failed")
+            },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = seeded.substrateFactory,
+            metaPlannerRunner = MetaPlannerRunner()
+        )
+
+        val failure = assertFailsWith<IllegalStateException> {
+            service.resumePersistedRun(seeded.config)
+        }
+
+        assertTrue(failure.message.orEmpty().contains("resume coordinator construction failed"))
+        val rejection = assertNotNull(
+            StartupRejectionFileStore(seeded.substrateFactory::runControlDir)
+                .read(seeded.config.runId)
+        )
+        assertFalse(rejection.activationFlags.runStartedEmitted)
+        assertFalse(rejection.activationFlags.workerInfrastructureActivated)
+        assertFalse(rejection.activationFlags.graderInfrastructureActivated)
+        assertEquals("IDLE", service.getState().status.name)
     }
 
     @Test

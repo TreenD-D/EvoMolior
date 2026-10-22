@@ -7,14 +7,20 @@ import ai.koog.agents.features.eventHandler.feature.EventHandler
 import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.llm.LLModel
 import com.achulkov.evomolior.core.config.LlmBackend
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
 import com.achulkov.evomolior.core.contract.CriticOutcome
 import com.achulkov.evomolior.core.contract.CriticReview
 import com.achulkov.evomolior.core.contract.GRADER_METHODOLOGY_DRAFT_SIGNATURE_PREFIX
+import com.achulkov.evomolior.core.atlas.AtlasHashing
+import com.achulkov.evomolior.core.repair.ToolRepairCode
+import com.achulkov.evomolior.core.repair.ToolSemanticReview
+import com.achulkov.evomolior.core.repair.ToolSemanticVerdict
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
 import io.github.aakira.napier.Napier
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.UUID
 
@@ -34,6 +40,7 @@ import java.util.UUID
 class CriticReviewAgent(
     openRouterApiKey: String,
     private val llmBackend: LlmBackend = LlmBackend.OPENROUTER,
+    private val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     private val criticModelId: String = ModelSelectionConfig.DEFAULT_CRITIC_PIPELINE_MODEL,
     private val systemPrompt: String = CRITIC_SYSTEM_PROMPT,
     private val deterministicReviewRunner: (suspend (
@@ -42,12 +49,21 @@ class CriticReviewAgent(
         disputeContext: String?,
         criticId: String
     ) -> CriticReview)? = null,
+    private val deterministicSemanticReviewRunner: (suspend (
+        submission: StagingSubmissionEntity,
+        prompt: String,
+        criticId: String
+    ) -> ToolSemanticReview)? = null,
     private val providerCostRecorder: ((String) -> ProviderCallCostRecorder)? = null,
     private val promptExecutor: PromptExecutor? = null
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val executor by lazy {
-        promptExecutor ?: LlmExecutorFactory.create(llmBackend, openRouterApiKey)
+        promptExecutor ?: LlmExecutorFactory.create(
+            backend = llmBackend,
+            apiKey = openRouterApiKey,
+            codexReasoningEffort = codexReasoningEffort
+        )
     }
 
     /**
@@ -68,6 +84,123 @@ class CriticReviewAgent(
             prompt = buildPrompt(submission, disputeContext),
             disputeContext = disputeContext,
             criticId = criticId
+        )
+    }
+
+    /**
+     * Produces a typed semantic TOOL review without projecting arbitrary rationale prose.
+     *
+     * @param submission Deterministically preflight-valid TOOL submission.
+     * @param publicContractSummary Runtime-authored public contract and quantity summary.
+     * @param criticId Stable Critic identity.
+     * @return Closed semantic review suitable for deterministic compatibility validation.
+     */
+    suspend fun reviewToolSemantics(
+        submission: StagingSubmissionEntity,
+        publicContractSummary: String,
+        criticId: String = "critic-${UUID.randomUUID().toString().take(8)}"
+    ): ToolSemanticReview {
+        require(submission.type == "TOOL") {
+            "Typed semantic review is available only for TOOL submissions"
+        }
+        val prompt = buildToolSemanticPrompt(submission, publicContractSummary)
+        return deterministicSemanticReviewRunner?.invoke(submission, prompt, criticId) ?: run {
+            val model: LLModel = LlmExecutorFactory.resolveModel(llmBackend, criticModelId)
+            val costRecorder = providerCostRecorder?.invoke(criticId)
+            val agent: AIAgent<String, String> = AIAgent.builder()
+                .promptExecutor(executor)
+                .llmModel(model)
+                .systemPrompt(TOOL_SEMANTIC_SYSTEM_PROMPT)
+                .responseProcessor(EmptyAssistantResponseRecoveryProcessor)
+                .toolRegistry(ToolRegistry {})
+                .graphStrategy(singleRunStrategy())
+                .install(EventHandler.Feature) { config ->
+                    costRecorder?.let(config::installProviderCostRecorder)
+                    config.installBlockingFailurePolicy("ToolSemanticCritic[$criticId]")
+                }
+                .build()
+            val response = try {
+                runWithOpenRouterProviderRetry("ToolSemanticCritic[$criticId]") {
+                    agent.run(prompt)
+                }
+            } finally {
+                costRecorder?.failedAll()
+            }
+            parseToolSemanticResponse(response)
+        }
+    }
+
+    /**
+     * Builds the closed semantic-review prompt from public authority only.
+     *
+     * @param submission TOOL candidate whose source is visible to the Critic.
+     * @param publicContractSummary Runtime-owned public schema, reference, and quantity summary.
+     */
+    fun buildToolSemanticPrompt(
+        submission: StagingSubmissionEntity,
+        publicContractSummary: String
+    ): String = """
+        Review this deterministically preflight-valid TOOL using only the public authority below.
+
+        Public contract authority:
+        ---
+        ${publicContractSummary.take(TOOL_SEMANTIC_PUBLIC_AUTHORITY_MAX_CHARS)}
+        ---
+
+        Candidate:
+        ---
+        ${modelSafeToolCandidate(submission.content)
+            .take(TOOL_SEMANTIC_CANDIDATE_MAX_CHARS)}
+        ---
+
+        Return exactly ToolSemanticReview JSON:
+        - verdict: PROMOTE, REJECT, or DISPUTE
+        - publicFindings: zero or more objects containing only code, optional
+          affectedPublicField, the exact checked-in remediationKey, and optional public
+          quantitySpec copied from the authority above
+        - safeRepairCodes: the exact unique code set represented by publicFindings
+        - privateRationaleCommitment: lowercase SHA-256 only
+
+        Allowed repair codes:
+        ${ToolRepairCode.entries.joinToString(",") { it.name }}
+
+        Your public tests prove local consistency only. Private promotion authority is separate.
+        Private fixtures and exact private outputs are never disclosed. Do not invent or request
+        private inputs, expected values, actual values, differences, fixture names, paths, URLs,
+        stack traces, exception text, or another group's implementation. Codes are hypotheses
+        against public semantics, never claims about hidden values. JSON only.
+    """.trimIndent()
+
+    /**
+     * Parses a closed semantic review and fails closed without retaining malformed provider prose.
+     *
+     * @param responseText Raw provider response.
+     */
+    fun parseToolSemanticResponse(responseText: String): ToolSemanticReview = runCatching {
+        val jsonValue = Regex("""\{.*\}""", RegexOption.DOT_MATCHES_ALL)
+            .find(responseText)?.value ?: error("missing object")
+        json.decodeFromString(ToolSemanticReview.serializer(), jsonValue)
+    }.getOrElse {
+        ToolSemanticReview(
+            verdict = ToolSemanticVerdict.DISPUTE,
+            publicFindings = emptyList(),
+            safeRepairCodes = emptySet(),
+            privateRationaleCommitment =
+                AtlasHashing.hashText("typed-tool-semantic-review-parse-failure")
+        )
+    }
+
+    private fun modelSafeToolCandidate(content: String): String {
+        val payload = runCatching {
+            json.parseToJsonElement(content) as? JsonObject
+        }.getOrNull() ?: return content
+        val tests = payload["tests"] as? JsonArray ?: return content
+        val redactedTests = JsonArray(tests.map { element ->
+            val test = element as? JsonObject ?: return@map element
+            JsonObject(test.filterKeys { it != "testId" })
+        })
+        return AtlasHashing.canonicalJson(
+            JsonObject(payload.toMutableMap().apply { put("tests", redactedTests) })
         )
     }
 
@@ -144,6 +277,25 @@ class CriticReviewAgent(
         } else {
             ""
         }
+        val toolReviewPolicy = if (submission.type == "TOOL") {
+            """
+
+                TOOL-specific authority:
+                - This TOOL reached you only after deterministic validation proved its exact sealed
+                  opportunity identity, typed input/output schemas, closed implementation shape,
+                  bounded runtime/output, and worker-visible executable tests.
+                - If you PROMOTE it, the promotion boundary independently reruns the private sealed
+                  fixtures in the sandbox and fails closed before registry activation on any mismatch.
+                - Review semantic usefulness, concrete duplication, visible malicious behavior, and
+                  objective alignment. Do not reject merely because private fixtures are unavailable
+                  to you, because the payload is executable rather than prose, or because earlier
+                  invalid attempts existed.
+                - PROMOTE a useful exact-opportunity implementation unless you can name a concrete
+                  semantic, duplication, safety, or objective-alignment defect visible in this payload.
+            """.trimIndent()
+        } else {
+            ""
+        }
         return buildString {
             append(
                 """
@@ -171,6 +323,8 @@ class CriticReviewAgent(
 
                 For speculative submissions: lower bar for promotion (0.5+ is fine), but mark as speculative in reason.
                 For Outlier submissions: allow unconventional approaches; only reject if factually incorrect.
+
+                $toolReviewPolicy
 
                 JSON response only:
                 """.trimIndent()
@@ -238,6 +392,8 @@ class CriticReviewAgent(
     private companion object {
         const val DEFAULT_REVIEW_CONTENT_MAX_CHARS = 8_000
         const val TYPED_METHODOLOGY_REVIEW_CONTENT_MAX_CHARS = 64_000
+        const val TOOL_SEMANTIC_PUBLIC_AUTHORITY_MAX_CHARS = 24_000
+        const val TOOL_SEMANTIC_CANDIDATE_MAX_CHARS = 64_000
 
         val CRITIC_SYSTEM_PROMPT = """
             You are a Critic agent in the EvoMolior civilisational multi-agent system.
@@ -249,6 +405,11 @@ class CriticReviewAgent(
             You dispute borderline content that needs a second opinion.
             
             Always respond with a JSON object only.
+        """.trimIndent()
+
+        val TOOL_SEMANTIC_SYSTEM_PROMPT = """
+            You are the typed semantic TOOL Critic. Return only the closed ToolSemanticReview JSON
+            requested by the runtime. Never disclose, infer, or fabricate private fixture material.
         """.trimIndent()
     }
 }

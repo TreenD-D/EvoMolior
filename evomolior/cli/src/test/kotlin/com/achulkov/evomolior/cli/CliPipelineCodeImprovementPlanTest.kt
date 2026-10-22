@@ -29,17 +29,14 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 
 class CliPipelineCodeImprovementPlanTest {
 
     @Test
-    fun `pipeline applies a published code improvement plan into the next stage repo copy`() = runBlocking {
+    fun `pipeline applies a published code improvement plan into the next stage repo copy`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-plan-input-").toFile().apply {
             resolve("Example.kt").writeText(
                 """
@@ -148,7 +145,7 @@ class CliPipelineCodeImprovementPlanTest {
     }
 
     @Test
-    fun `normal pipeline does not propagate code improvement plans unless explicitly enabled`() = runBlocking {
+    fun `normal pipeline does not propagate code improvement plans unless explicitly enabled`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-plan-input-").toFile().apply {
             resolve("Example.kt").writeText(
                 """
@@ -277,7 +274,10 @@ private class PlanPublishingEngineService(
     override suspend fun getMetaArchiveEntries(runId: String, entryType: String?): List<MetaArchiveEntryRecord> = emptyList()
     override suspend fun getResultsBundle(runId: String): ByteArray? {
         check(runId in completedRuns) { "results bundle requested before run completion for $runId" }
-        return buildBundleBytes(bundleEntriesByRunId[runId].orEmpty(), runId)
+        return TestOutcomeArchiveFactory.accepted(
+            runId = runId,
+            outputEntries = bundleEntriesByRunId[runId].orEmpty()
+        )
     }
     override suspend fun getOverseerKernelState(): OverseerKernelState = OverseerKernelState()
     override suspend fun preflightOverseerHypothesis(hypothesis: OverseerHypothesis): OverseerKernelEligibility =
@@ -294,18 +294,4 @@ private class PlanPublishingEngineService(
     override suspend fun getOverseerDeadEndHistory(hypothesisId: String): List<OverseerDeadEndHistoryEntry> = emptyList()
     override suspend fun getOverseerAuditArchiveEntries(): List<MetaArchiveEntryRecord> = emptyList()
 
-    private fun buildBundleBytes(entries: Map<String, String>, runId: String): ByteArray {
-        val output = ByteArrayOutputStream()
-        ZipOutputStream(output).use { zip ->
-            entries.forEach { (path, content) ->
-                zip.putNextEntry(ZipEntry(path))
-                zip.write(content.toByteArray(Charsets.UTF_8))
-                zip.closeEntry()
-            }
-            zip.putNextEntry(ZipEntry("manifest.json"))
-            zip.write("""{"runId":"$runId","artifactCount":${entries.size}}""".toByteArray(Charsets.UTF_8))
-            zip.closeEntry()
-        }
-        return output.toByteArray()
-    }
 }

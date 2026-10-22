@@ -2,13 +2,317 @@
 
 **Status:** Canonical current roadmap, implementation-state, and architecture authority.
 
-**Evidence cut:** 2026-07-20.
+**Evidence cut:** 2026-07-26.
+
+**Maintenance review:** 2026-09-08. Historical provider acceptance evidence is not refreshed by
+this review.
 
 This is the sole current source of truth for EvoMolior's roadmap phase status, connected
 production architecture, known limitations, and next actions. The implementation plan defines the
 intended phase behavior and exit criteria; dated plans, audits, goal logs, and run reports are
 historical evidence. When another document conflicts with this file about current state, this file
 wins.
+
+## General-Purpose Maintenance Review — 2026-09-08
+
+The selected direction retains the society architecture while separating ordinary candidate
+production from task-specific qualification. The proposal and exit tests are in
+[General-Purpose Delivery Improvement Plan](EvoMolior_General_Purpose_Improvement_Plan.md).
+
+- Cleanup removed unused temporary/cache trees and old build test workspaces, preserving source,
+  uncommitted work, run history, provider evidence, and continuation material.
+- Ignored internal files were untracked without deleting local contents. Generated-path ignore
+  coverage and a 10 MiB indexed-file CI guard were added.
+- The Qwen event submission pack, branding, and event-specific network exception were removed;
+  optional Qwen provider support remains.
+- Ordinary builds no longer acquire the Appendix-B lock; explicit acceptance distribution
+  preparation/assembly/verification still does. Release checks no longer require event materials
+  or a fixed whitelist of documentation filenames.
+- General pre-acceptance candidate production and explicit-only refinement have focused regression
+  coverage, including exact writer lineage, noisy DOC streams, cancellation, recovery, and resume.
+  Specialized ARC compilation and strict accepted-publication checks remain.
+- Verification exposed the JVM method-size limit in `runLoop`; candidate sealing, failure recovery,
+  and terminal cleanup were extracted. The acceptance lock now uses a build service, removing its
+  incompatible global build-finished listener. Broader service decomposition remains proposed.
+
+Verification: 197 selected provider-free tests passed across core, sandbox, orchestration, API,
+and CLI; CLI distribution assembly and the generated launcher's help command passed. A plain
+CLI build succeeds while the acceptance OS lock is held, while explicit acceptance verification
+still rejects that concurrent lock. Repository-hygiene regression tests and the public-release
+surface scan passed. Initial missing dependency caches, a test fixture error, stale terminal
+expectations, and an overbroad replacement-DOC check were resolved during verification.
+
+The full project suite, fresh-clone build, full-history secret scan, live-provider acceptance,
+and performance comparison were not run. Existing Gradle deprecation warnings remain.
+
+### Codex Preset Follow-Up — 2026-09-08
+
+Explicit `-codex-preset full-luna|mixed-families` selects a persisted operator-owned policy.
+The [preset guide](configuration/Codex_Runtime_Presets.md) contains the approved role allocation
+and baseline-first commands. Omitting the flag preserves legacy all-Luna/uniform-effort behavior.
+
+- Full Luna excludes other models at configuration, sealed-pool, lifecycle, and factory boundaries.
+- Mixed pools give Astra to Council/graders/MetaPlanner/Auditor, Sol/Terra to specialists, Luna to
+  ordinary workers, and weighted diversity to existing Outlier slots (85/7/7/1 Luna/Sol/Terra/Astra).
+- Both named policies share low/medium/high reasoning tiers. The per-run effort is a ceiling;
+  xhigh/max/ultra remain unsupported. Counts, worker budgets, horizons, and monetary policy are not
+  increased or disabled by a preset.
+- Preset identity is included in the execution envelope and persisted resume intent. Council
+  projection freezes the requested pools before sealing; exact per-role overrides remain bounded
+  by the selected preset's supported model set.
+- Exact model IDs were confirmed in the local Codex catalog. No new price or output-token-limit
+  claims were invented. The bundled Codex CLI reports version 0.153.4; authentication and live
+  execution were not exercised.
+
+The combined provider-free verification covers 318 selected tests across core, sandbox, agents,
+orchestration, API, runtime, and CLI, including weighted selection boundaries, effort caps,
+sealing, override rejection, persistence, and the preceding delivery regressions. CLI distribution
+assembly also passed. The next live check remains a separately approved full-Luna run, followed by
+a mixed-family run with matched inputs and resource/effort bounds.
+
+### Live Luna Smoke Trial — 2026-09-08, 21:52–21:55 CEST
+
+A later authorized live trial used full Luna, a medium reasoning ceiling, two one-worker groups,
+one 60-second round, and a 75-point configuration to review CLI classpath-snapshot cleanup.
+An initial one-group invocation was rejected before activation: the current CLI constructs
+`RunConfig` with `isTestRun = false` even with `-fast`, so that flag neither permits a single-group
+diagnostic nor bypasses Council. README and preset instructions now reflect this observed limit.
+The monetary reservation preflight rejected missing maximum-cost authority before dispatch;
+the operator then explicitly approved iso-latency mode with a 15-minute outer cutoff.
+
+The live attempt lasted 187,651 ms. All eight Council roles returned structured responses and
+the compiled field was persisted. Both worker slots were assigned to Critic. At the round timeout,
+termination returned before actual execution settled; immediate round settlement rejected the
+non-quiescent state. The run aborted before the final writer, with no requested report or results
+bundle. Thirteen provider reservations identified only Luna; eight Council calls and two cancelled
+worker attempts were finalized, while three grader reservations remained open. Tokens and
+monetary cost were unavailable, not zero.
+
+This proves live Luna/Council connectivity, not successful deliverable production or acceptance.
+Before a mixed-model comparison, prioritize bounded termination/draining, abort-time reservation
+settlement, productive one-slot allocation, and clearer credit-versus-monetary budget semantics.
+Detailed private evidence is retained under ignored run ID
+`luna-snapshot-review-20260908T2145-v3`; no additional live retry or source-code fix was performed.
+
+### End-to-End Repair Validation — 2026-09-09
+
+The subsequent authorized repair pass added bounded execution draining at round and publication
+boundaries, guaranteed cancellation settlement for grader requests, productive one-slot allocation,
+and explicit worker-credit allocation limits. It also fixed extensionless script ingestion, added
+source-line-numbered artifact reads, and made CLI publication resolve and verify the actual
+accepted/provisional archive instead of synthesizing a static fallback.
+
+Fresh run `luna-snapshot-review-20260909-v7` completed with CLI exit 0 after **1,026,804 ms**
+(approximately 17:52:50–18:09:57 CEST). It used full Luna, medium reasoning, two one-worker groups,
+one budget-led round, 75 worker-allocation credits, and an explicitly approved 25-minute outer
+allowance. Iso-latency mode remained operator-approved; exact tokens and monetary charges are
+unavailable.
+
+The run completed all 17 round phases and published a real 614-word Markdown report, a provisional
+outcome archive, and `pipeline-results.zip`. Independent payload hash/size, ZIP CRC, section, word
+bound, and byte-equivalence checks passed. All 75 provider reservations finalized and the ledger
+closed with none outstanding. Latest focused reports contain 190 passing tests across the changed
+orchestration/API/CLI/artifact-reader areas; the full project/mobile suite was not run.
+
+This establishes operational end-to-end artifact delivery, **not strict acceptance**. The outcome
+remains `COMPLETED / PROVISIONAL`, with unresolved node/accepted-winner evidence and sealed-suite
+failures retained. The summary's dedicated primary-artifact validation status is `NOT_EVALUATED`;
+the independent checks validate text format and archive integrity, not executable behavior.
+Two illustrative command quotations in the model report omitted variable expressions; the private
+verification report records the exact source forms without rewriting the model artifact.
+
+Earlier failures remain preserved. v6 completed in the engine but exposed the CLI archive-kind
+bug; fixed completed-stage replay packaged that artifact without another provider call. v7 then
+validated the corrected path in a fresh live run. Private evidence is retained under the ignored
+`luna-snapshot-review-20260908T2145` experiment directory.
+
+### Full Live-Run Audit Follow-Up — 2026-09-10
+
+The full September 9 Luna v7 log and persisted artifacts were audited without another provider
+run. Delivery remains operationally successful and strictly **provisional**. Two of four Atlas
+nodes passed; validation and delivery lack node evidence in both groups. The one-round execution
+did not close the dependency chain or exact final-component lineage. The sealed review test only
+checks for `## Summary`, and failed on the earlier sealed snapshots before the recovery writer.
+The later independent format check does not replace that authority.
+
+Grading consumed 50 of 75 provider requests. Two grader groups persisted all-zero group scores
+while another scored highly; mandatory authored-test gating must be distinguished from raw
+judgments before interpreting this disagreement. Council needed two closure-repair cycles before
+later deterministic compiler projection. The six RoundJudge "repair" announcements were later
+confirmed to be unconditional telemetry: all dimensions were already supplied, with no additional
+dimension/node repair request. That distinction was established during implementation.
+The final writer staged its DOC but was cancelled during publication cleanup, not naturally
+completed. Its execution and provider accounting settled before the recovery archive closed.
+
+Next improvements: plan/horizon feasibility, candidate-timed complete validation, exact authored-test
+failure attribution, earlier deterministic Council projection, quotation fidelity, and separate
+live/allocated/spent budget telemetry. Four zero-budget alarms and contradictory criteria counters
+need correction. All-Luna independence is intentionally single-family; token/USD usage remains
+unavailable. These findings do not authorize larger budgets, relaxed gates, or a new provider run.
+
+The pending failure-path shutdown hardening is now verified: cancellation/drain failures are
+collected across all managers and criteria work, ownership remains retained on failure, and an
+explicit abort can retry cleanup after real jobs settle. September 10 verification passed
+36 focused API tests and CLI distribution assembly; archive hash/size/CRC checks passed again.
+The full project/mobile suite was not run; Gradle deprecation warnings remain. Detailed private
+evidence is in the experiment's `full-run-audit.md`.
+
+### Audit Fix Implementation and Verification — 2026-09-10
+
+The approved policies are implemented while retaining the society architecture, strict acceptance,
+model presets, worker/round limits and credit grants:
+
+- Council performs deterministic operator/hash projection before closure validation, preserves
+  semantic rejection, and evaluates necessary scheduling bounds. Replanning consumes the existing
+  shared repair limit. A valid but still-infeasible plan may proceed with an explicit provisional-only
+  warning; fitting the bounds is not a guarantee of acceptance.
+- Final report contracts support exact ordered Markdown headings, a maximum whitespace-word count,
+  and required literal statements. New absent fields remain omitted from canonical serialization,
+  preserving existing sealed-contract hashes. Candidate-time sealed-suite checks record exact output
+  hashes separately from earlier round gates, without retroactively changing those gates.
+- Source checks run automatically and **do not block delivery**. Authorized staged DOCs receive at
+  most one correction request inside their existing agent allowance. Unavailable sources remain
+  explicit limitations. Published reports get separate manifest-bound source-check attachments,
+  including CLI/pipeline and legacy recovery publication.
+- A final writer may finish its correction and finalization within its original allowance. Publication
+  selects the newest contract-valid same-writer candidate only after actual settlement; an invalid
+  advisory correction cannot discard an earlier valid report or borrow later DOC lineage. Explicit candidate-staged
+  stops are distinguished from unexpected failures without weakening killed-exit or Death Note rules.
+- Grader-authored tests remain scoped to interim canon snapshots; the existing sealed-suite machinery
+  owns final-artifact checks, as confirmed by the operator. Diagnostics preserve raw versus gated
+  scores, predicates, snapshot/freeze identity and execution status. Missing/mismatched authority
+  cannot become valid evidence. Host penalties are applied once, and repair logs require real work.
+- Budget observations separate allocated/live/spent/returned credits; empty fleets and stale
+  generations do not cause false depletion warnings. Critic counters retain durable partial progress
+  across interruptions. Allowed constitutional observations are distinct from blocked violations.
+- Provider usage summaries retain unknown cost/token status; summed request time is not elapsed
+  duration. CLI library logging has a matching SLF4J JUL binding.
+
+September 10 verification, including the failed-correction safeguard: **1,345 passing tests, eight
+skipped opt-in/live tests, zero failures or errors** across full core/agents/orchestration/runtime/CLI
+suites and 212 selected API tests.
+CLI distribution assembly, repository-hygiene fixtures, whitespace checks, and the public-release
+surface scan passed. No new paid/provider run was started. Full project/mobile testing, fresh-clone
+validation and full-history scanning were not performed; Gradle and existing compiler warnings remain.
+The old Luna v7 archive remains provisional historical evidence, not validation of this newer code.
+
+Usage and limitations are documented in
+[Report Validation and Run Diagnostics](configuration/Report_Validation_and_Run_Diagnostics.md).
+The private experiment's `audit-fixes-implementation-report.md` maps each finding to code and tests.
+
+### CLI Stabilization Before Mixed Research — 2026-10-01
+
+Operator scope is CLI/engine/persistence; desktop and mobile qualification are excluded.
+The in-process registration/shutdown race is fixed: an agent cannot become visible before its
+durable registration and execution ownership are established. Scoring child JVMs verify and watch
+their owning parent, exit when it dies, and inherit the parent's JVM temp directory. CLI stages
+now own bounded JVM-shutdown cancellation/abort/drain rather than only stopping their event collector.
+
+The generated Unix launcher now supervises its private classpath snapshot through JVM shutdown,
+cleans failed copies and preserves arguments/stdin/exit status. The operator approved translating
+Ctrl-C to child SIGTERM with wrapper exit130; TERM/HUP forward normally. SIGKILL cannot perform
+cleanup, and copying is not atomic with simultaneous distribution replacement.
+
+Codex executable discovery supports the updated ChatGPT app layout; CLI auth honors external
+`CODEX_HOME`. Preset model identities remain unchanged. Live self-improvement tests now require
+explicit opt-in rather than merely finding an API key. Objective-source fetch has finite connect/
+request timeouts, and external-source verification limitations do not consume advisory corrections.
+
+Verification: **1,960 JVM tests passed, ten opt-in/live tests skipped, zero failures/errors**, across
+all nine engine modules; thirteen generated-launcher lifecycle cases, CLI distribution assembly,
+public-release/hygiene and whitespace checks passed. Earlier full-suite failures exposed actual
+registration defects, stale role-capacity fixtures, virtual/real-clock misuse, and host-contention
+timeouts. Final API/runtime/CLI verification passed after the operator paused heavy unrelated
+workloads, without increasing timeout ceilings or weakening acceptance assertions.
+
+The operator has approved a subsequent bounded `mixed-families` geo-weather research run:
+two groups, up to three ordinary workers/group, four rounds,300 ordinary-worker allocation credits,
+high reasoning ceiling and two-hour outer watchdog, with explicit iso-latency/no known USD cap.
+This approval and provider-free verification are not themselves live mixed-model acceptance evidence.
+Private evidence and the locked research objective are under `runs/geo-weather-mixed-20261001/`.
+
+### Mixed Geo-Weather Research Outcome — 2026-10-01
+
+The authorized initial run executed mixed Luna/Sol/Astra roles but exited1 after101minutes.
+Three rounds were archived before internal-disk exhaustion disrupted the fourth round and writer.
+External shell temp variables had not overridden macOS JVM `java.io.tmpdir`. No final report was
+fabricated. Its422 recorded attempts settled, with zero pending reservations; some late attempts
+failed locally before provider dispatch.
+
+The Unix launcher now binds JVM temp to explicit `TMPDIR` (operator JVM-property overrides retain
+precedence), and actual-JVM tests verify that behavior with snapshots enabled and disabled.
+All fifteen generated-launcher lifecycle/temp tests and distribution assembly passed.
+
+The operator separately approved a45-minute synthesis run using exact preserved research DOCs,
+with original promoted/rejected status retained. It completed in26minutes with CLI exit0 and
+`COMPLETED / PROVISIONAL`;68 attempts settled, no open reservations. The published report has
+2,857 words and31 URL strings;31 recovery and15 pipeline payload hashes/sizes/CRC were verified.
+A separate, more extensive promoted worker DOC was exported verbatim as a5,033-word/30-row draft
+with provenance, explicitly not the selected final writer or accepted publication authority.
+
+Research quality remains limited: the detailed draft identifies only about eight substantive
+prior-inspection source entries; many inventory rows remain discovery leads. Product-level North
+American, snow/avalanche, licensing, pricing and API details require further verification.
+Source acquisition encountered TLS/redirect/unavailable-page issues; TLS validation was not
+disabled. Grading overhead, budget-aware capacity estimation and final-writer condensation remain
+improvement areas. No strict accepted-winner claim, safety assurance, or production procurement
+readiness follows from these outputs. Detailed evidence is in the private `final-evaluation.md`.
+
+### Log-Driven Review and Fixes — 2026-10-11
+
+No provider run was started. The retained October 1 research/synthesis logs, databases, and
+outputs were analysed; findings, fixes, open decisions, and application fit are in
+[Log-Driven Review](EvoMolior_Log_Driven_Review_2026-10-11.md).
+
+The logs showed that grading consumed most provider work while RoundJudge saw only 2,000
+characters per snapshot (600 per KB document), so every dimension tied at "insufficient
+evidence"; the tie then routed the writer to a thinner draft that `read_kb` truncated. Ordinary
+workers had a 300 s TTL from a units error, feasibility assumed unaffordable worker slots, and
+a third of attempts followed disk exhaustion.
+
+Implemented: budgeted judge snapshots; evidence-aware no-winner writer source selection
+(`runLoop` extraction regained bytecode headroom); paged and lineage-tolerant `read_kb`;
+600 s default worker TTL plus `ordinaryAgentTtlSeconds`; credit-affordable slots in Council
+planning; deterministic Critic settlement of runtime records, methodology-first review and
+review-only repair for pending drafts; storage-exhaustion stops and a CLI free-space preflight;
+URL hygiene in contracts and source checks; policy-checked redirect hops; request-fingerprinted
+stage reuse; MetaJudge weight normalisation, inferred provider roles, bounded Codex failure
+text; and a CI engine job. Grant sizing, per-group mandatory-node replication, grader-criteria
+reuse, and portfolio reselection remain open decisions.
+
+Verification: fresh, non-cached nine-module run on JDK 17 executed **2,006 tests: 1,996 passed,
+ten opt-in/live skips, zero failures or errors** (core 333, substrate 114, sandbox 17, agents 298,
+orchestration 323, competition 106, API 594, runtime 11, CLI 210). CLI distribution assembly and
+the generated launcher's help command, repository hygiene, whitespace, and the public-release
+surface scan passed. The new CI engine job has not yet run on GitHub runners. No live run
+validates these changes; the next authorized run should compare judge score spread, writer
+length versus the best promoted document, and grading share against the October 1 baseline.
+
+### Grader Baselines, Run-Loop Decomposition, and Application Templates — 2026-10-11
+
+No provider run was started.
+- **Grader baselines.** Grader civilisations now start each round from their newest accepted criteria
+  and typed methodology (`PriorRoundCriteriaBaseline`). They stage one consolidated revision and run
+  only a GraderBuilder in stable rounds. Round 0, rejection or failure pressure, and moved leased
+  frontiers keep full research.
+- **Run-loop decomposition.** `runLoop` was decomposed into round, restore, wait, criteria-launch, and
+  completion phases sharing a `RunLoopState`: 63,697 → 2,820 bytecode bytes, largest phase 27,223.
+- **Application improvements:**
+  - CLI application templates (`research-dossier`, `systematic-screening`, `code-audit`,
+    `evaluation-rubric`, `decision-memo`);
+  - a `minimumWordCount` contract floor;
+  - RoundJudge criteria budget (8,000 characters, authored test results retained);
+  - opt-in `-grader-groups 1|2|3` for normal runs. Acceptance profiles keep three. The 1- and
+    2-grader production paths are unit/envelope-tested only.
+
+Verification: a fresh, non-cached nine-module run on JDK 17 executed **2,024 tests: 2,014 passed,
+ten opt-in/live skips, zero failures or errors** (core 334, substrate 114, sandbox 17, agents 303,
+orchestration 323, competition 106, API 600, runtime 11, CLI 216). One later template run-path
+test also passed. The API suite covers the six-round accepted/no-candidate, recovery, and resume
+scenarios that drive the decomposed run loop, plus the Phase 7 curriculum acceptance. CLI
+assembly, the launcher's `template` and `--help` commands, hygiene, whitespace, and public-release
+gates passed. No live run validates grader baselines or fewer-grader runs; compare criteria-phase
+time and Critic call counts with the October 1 baseline in the next authorized run.
 
 ## 1. How Status Is Determined
 
@@ -87,6 +391,10 @@ EvoMoliorRunService
 - Explicit continuation routing can load selected prior-run context from the run graph/archive.
 - Final synthesis is checked for structural and provenance requirements before publication and
   archiving.
+- Terminal publication is outcome-specific: accepted runs publish accepted decision authority,
+  non-accepted post-runtime runs publish a neutral provisional decision package, and pre-runtime
+  rejections publish a startup diagnostic package. Each class has a separate append-only history
+  and verified archive invariant.
 - Ordinary CLI runs without fixed `-rounds` use bounded convergence authority: an explicit
   `--max-rounds` ceiling and two or three consecutive fully accepted rounds for the same winner.
   Fixed-round and configured pipeline stages remain fixed.
@@ -103,8 +411,9 @@ EvoMoliorRunService
   staging, process, message, and network metadata before mutation. Decisions are append-only
   substrate events.
 - `FetchSourceTool` composes run-approved hosts with `AllowlistProxy` role restrictions at the
-  outbound boundary. Automatic redirects are disabled so an unreviewed destination cannot receive
-  a request.
+  outbound boundary. The HTTP client never follows redirects; the tool authorizes, audits, and
+  intercepts each hop (at most five) before requesting it, so an unreviewed destination still
+  cannot receive a request.
 - Shuru VM management is implemented but is not the default or selected production agent boundary.
 - Blind scoring now runs in a run-scoped child JVM bound to authenticated loopback transport.
   `BlindSubmissionGate`, `MetaJudge`, and `ScoringEngine` state remain private to that worker.
@@ -160,8 +469,8 @@ authority model is complete.
 | 6. Mandatory progressive disclosure | `Implemented` | Exact mandatory-node coverage, node thresholds, evidence coverage, integration readiness, valid exact grader verdicts, and unresolved-hard-failure status now determine each group's stage independently. Group-local reveals bind the sealed stage payload and exact delivered cards into append-only Atlas lineage; transaction and WorkerView replay reject tampering. Invalid/abstained evaluations do not escalate leaks, compiled workers receive no uncommitted stage prose, and worker feedback is linted to current-stage revealed limitations. Focused tamper/independence/redaction/replay coverage and full engine suites pass on JDK 17; runtime and Compose JVM compile. | Retain exact disclosure authority. |
 | 7. Outlier shadow nodes and amendments | `Implemented` | Outlier-only, WorkerView-bound proposals now flow through revealed/canon duplicate checks, sealed hidden-map anticipation, isolated exact grader assessments, and append-only shadow lifecycle. Later agents receive group-local redacted shadow cards and bind independent evidence through typed contribution references. Delayed lineage and fitness precede immutable next-round Atlas amendments with added execution state and refreshed disclosure/WIP/resource projections. Focused authority, migration, tool, grader, WorkerView, and production-round tests pass; full engine suites pass on JDK 17 and runtime/Compose compile. | Retain shadow/amendment authority. |
 | 8. Tool and simulation compounding | `Implemented` | Council-sealed typed opportunities compile into executable shell, Python, or closed-AST DSL projects. Promotion requires exact schemas/tests and real bounded sandbox execution. Runtime emits immutable execution/simulation records, automatic contribution/evidence lineage, evidence-bound later-node reuse, delayed causal fitness, exact metrics, and immutable maintained/forked/retired version history. Grader production rejects unbound promotion and primordial tools remain archived projections. Focused acceptance and full engine suites pass on JDK 17; runtime and Compose JVM compile. | Retain tool and simulation authority. |
-| 9. Causal fitness, cost, publication, and observability | `Implemented` | Schema v18 and the contribution graph bind exact Critic, canonical, evidence, grade, capture, integration, final-reference, receiver-score, Control, and Summary authority. Worker, Review, assessed Control, and validated Summary fitness remain plane-separated. Run-global provider/tool cost reservations fail closed on unknown capped cost and active publication reservations. Immutable final candidates enter the strict hash-linked publication sequence through Death Note and quiescence gates. Manifest v2 self-verifies Atlas, grader, contribution, publication, event, database/WAL, output, and final-reference exports. Read-only dashboards preserve unavailable zero denominators. Focused authority coverage and the full engine suites pass on JDK 17; runtime and Compose JVM compile. | Retain causal publication authority. |
-| 10. Matched comparative benchmark harness | `Implemented` | Immutable experiment authority executes explicit iterative-single-agent, one-group, and full-society arms over the same frozen sources, task tools, sealed Atlas, output contract, GPT worker family, deterministic evaluator, seeds, and iso-latency policy. The accepted one-task/two-seed report in `results/increment10-gpt-matched-20260712-v3/` retains all six cells, exact runtime commitments, disjoint namespaces, society final-reference hashes, failures, and unavailable cost/confidence values. The two complete pairs tied at quality `1.0`; one-group and full society each failed one seed, so no superiority claim is supported. | v68 is permanently rejected. Its promotion-wire root repair, clean independent re-review, expanded preflight, non-cached nine-module suite, and Section 18.1 pass on current bytes. v69 is statically launch-eligible; accept only a complete audited Appendix B archive before reconciling Section 18.2/18.3 metrics and claims. |
+| 9. Causal fitness, cost, publication, and observability | `Implemented` | Schema v18 and the contribution graph bind exact Critic, canonical, evidence, grade, capture, integration, final-reference, receiver-score, Control, and Summary authority. Worker, Review, assessed Control, and validated Summary fitness remain plane-separated. Run-global provider/tool cost reservations fail closed on unknown capped cost and active publication reservations. Immutable final candidates enter the strict hash-linked publication sequence through Death Note and runtime-cell quiescence gates. Outcome-aware RunManifest v5 preserves historical manifest verification while adding exact outcome-class invariants and non-normal admission-byte authority. Read-only dashboards preserve unavailable zero denominators. Focused authority coverage and the complete current engine graph pass on JDK 17; runtime, CLI, and Compose JVM tests pass. | Retain causal publication and outcome-separation authority. |
+| 10. Matched comparative benchmark harness | `Implemented` | Immutable experiment authority executes explicit iterative-single-agent, one-group, and full-society arms over the same frozen sources, task tools, sealed Atlas, output contract, GPT worker family, deterministic evaluator, seeds, and iso-latency policy. The accepted one-task/two-seed report in `results/increment10-gpt-matched-20260712-v3/` retains all six cells, exact runtime commitments, disjoint namespaces, society final-reference hashes, failures, and unavailable cost/confidence values. The two complete pairs tied at quality `1.0`; one-group and full society each failed one seed, so no superiority claim is supported. | v68-v72, v20, and v21 are permanently rejected. Completion-blueprint source/static closure and immutable package verification are complete. Bounded provider qualification, a fresh explicitly authorized strict successor, and the post-acceptance matched rerun remain open. |
 
 ## 4. Explicit Feature Gap Matrix
 
@@ -201,7 +510,7 @@ These are limits on the claims supported by the retained evidence, not open phas
 | Score sealing | The 100-check-in audit passes with no pre-close reveal or seal-audit emission. |
 | Society superiority | Small matched FRAMES and LitQA2 slices show measurable society gains; research-synthesis comparisons remain ties at materially higher cost, so broad superiority is not claimed. |
 | Latest publication/authority fixes | A current-code single-stage, three-round Codex code-mode run completed, used scoped staging/KG tools, and published the contracted audit plan. |
-| Competitive progressive-disclosure closure | Increments 0-10 remain accepted and the short Step 14 representative archive passed on current post-v72 bytes. The full Step 15 v4 attempt completed Genesis Council and all six worker/grader/judging rounds on exact `CODEX_CHATGPT:gpt-5.6-luna` with no fallback, but aborted after four final-writer attempts failed to publish a sealed-test-valid receiver file. It produced no normal archive, manifest, accepted Section 18.2 metrics, or winner. The user closed the goal under a reduced presentation-readiness scope and explicitly skipped Step 16. Strict full Appendix-B acceptance, the new matched comparison, and broad society-superiority claims remain unaccepted. |
+| Competitive progressive-disclosure closure | Increments 0-10 remain accepted and the short Step 14 representative archive passed on post-v72 bytes. Later strict v20 and v21 attempts each completed six worker/grader rounds but terminated `RECOVERED` with process exit `1`, no accepted winner/source/writer, no accepted metrics, and no normal results archive. v20 preserved a useful caveated receiver artifact; v21 preserved round summaries but no receiver artifact. Both are immutable rejected evidence. Strict full Appendix-B acceptance, the new matched comparison, and broad society-superiority claims remain unaccepted. |
 
 ### Working With Caveats
 
@@ -226,8 +535,51 @@ These are limits on the claims supported by the retained evidence, not open phas
   compilation, and static/document reconciliation also pass on those final CLI-security bytes.
 - v72 consumed that clean short-run authorization and failed closed before workers: the private
   grader suite contained seven `GENERAL` tests whose exact definition was JSON `null`. The
-  commitments were correct, but compiler-valid JSON was not evaluator-executable. No provider run
-  is currently authorized.
+  commitments were correct, but compiler-valid JSON was not evaluator-executable.
+- v20 and v21 are later immutable strict rejections. Both completed six rounds and exited
+  `RECOVERED`/`1`; neither created accepted publication authority. v21 reduced repeated immutable
+  exit conflicts relative to v20 but still recorded 296 conflicts, did not promote a tool, and
+  produced no receiver-facing recovery artifact.
+- The current completion-blueprint patch replaces stale whole-entry lifecycle mutation with
+  atomic runtime cells, adds typed repair transport and receiver-oriented provisional packaging,
+  and adds deterministic six-round accepted/no-candidate harnesses. The current authored bytes
+  pass the complete serialized engine graph, Compose JVM graph, focused strict scenarios, static
+  gates, and independent source review. This is deterministic implementation evidence, not a
+  substitute for the still-open provider-backed Gates D and E.
+- Gate-D v1 (`gate-d-bounded-provider-qualification-20260726-v1`) consumed its one-run
+  authorization and was rejected at admission before runtime/provider activation with
+  `providerExecutionCount=0`. The legitimate checked-in provider wrapper was incorrectly
+  classified as a competing acceptance process because its ancestor argv contains the launcher
+  and `appendix-b-full`. v1 is immutable rejected evidence and must never be resumed or reused.
+  Current source excludes only the current JVM's complete invocation ancestors, preserves
+  rejection of unrelated acceptance and protected Gradle commands, fails closed on unavailable
+  same-owner inventory, and exposes only a finite non-secret code to owner stderr. Focused tests,
+  the full graphs, and independent re-review pass on the repair.
+- Gate-D v2 (`gate-d-bounded-provider-qualification-20260726-v2`) crossed admission and runtime
+  activation, completed three fully archived rounds, and then failed during round-3 snapshot
+  closure because an audit-only frozen capture decision preserved ownership without carrying the
+  earlier authoritative bundle itself. It is immutable rejected evidence and must never be
+  resumed or reused. Current source resolves owner authority through validated Atlas history,
+  validates preserved capture against earlier exact passing authority, and publishes a
+  metrics-bearing provisional-v2 package from the last fully archived round if later closure
+  fails. Recovered manifests bind source-round Atlas hashes; metrics explicitly distinguish
+  terminal attempted work from the decision-authority cutoff; diagnostic sweeps are archived; and
+  recovery-publication failure text is public-safe. Focused tests, the complete serialized graphs,
+  and independent repaired-path review pass. The historical v2 package is stale; fresh Gate C and
+  a new one-run authorization are required.
+- Gate-D v3 (`gate-d-bounded-provider-qualification-20260726-v3`) completed all six rounds and
+  honestly exited `1`/`ABORTED` after provisional publication rejected valid opaque operational
+  snapshot evidence IDs. The run also exposed an approach-only worker context for a private-only
+  diagnostic and a Council validation gap that admitted a `scenario:boolean` tool despite the
+  exact hourly load/power/energy qualification. v3 is immutable rejected evidence. All three
+  defects now have focused passing repairs. The third adds optional operator-owned quantitative
+  tool authority, exact typed 72-hour field/unit/aggregation validation, config and recovery
+  propagation, pre-activation service rejection of the v3-shaped contract, and exact
+  hash-sealed-manifest comparison during resume. Fresh non-cached closure passes 1,704 engine
+  tests and 11 Compose tests. Independent continuation
+  `4954d174-fb73-4122-8a6e-7a0c6ad88445` reports no blocker or High; source/package reclosure
+  remains open.
+- No provider run is currently authorized.
 - The macOS internal data volume can become too full for `/var/folders` test fixtures. Canonical
   static gates isolate JVM/native temporary files on the repository volume; the environmental
   no-space attempt is not passing evidence.
@@ -248,7 +600,7 @@ These are limits on the claims supported by the retained evidence, not open phas
 6. **Preserve claim discipline.** Treat narrow same-task benchmark gains as satisfying the Phase
    10 measurable-improvement exit condition without claiming broad research-synthesis superiority.
 7. **Complete the competitive progressive-disclosure acceptance boundary.** Increments 0-10 remain
-   accepted. v63-v72 are permanently rejected. v70 proved that the
+   accepted. v63-v72, v20, and v21 are permanently rejected. v70 proved that the
    transported root still exposed generic promotion values even though an unreachable duplicate
    definition held the exact Task-derived branches. The post-v70 repair binds exact authority to
    the actual root, removes Koog's invalid provider-only `$id`, prunes unreachable definitions,
@@ -263,9 +615,20 @@ These are limits on the claims supported by the retained evidence, not open phas
    review. The canonical nine-module suite, augmented Section 18.1, Compose JVM compilation, and
    static/document gates passed on those final bytes and were consumed by v72. v72 failed startup
    preflight at `0/7` executable tests because `GENERAL` test generation still has no shared typed
-   contract with the evaluator. The next work is contract design and deterministic repair, not
-   another provider run. A conjunctively accepted Appendix B archive must still precede
-   accepted-run Section 18.2/18.3 reconciliation, final claims, and goal closure.
+   contract with the evaluator. v20 and v21 later completed six rounds but remained honest
+   non-accepted recoveries: neither established accepted winner/tool/final-lineage authority, and
+   v21 exposed stale lifecycle mutation, insufficient typed semantic repair, and an empty
+   receiver-facing recovery outcome. The current completion-blueprint patch addresses those
+   source defects, and its final local source graph now passes deterministic accepted and
+   no-candidate scenarios, the serialized nine-module engine graph, Compose JVM verification,
+   static gates, and independent review. Gate-D v1 is immutable rejected pre-provider evidence;
+   its ancestor-classification defect was repaired before immutable rejected Gate-D v2. v2 then
+   exposed capture-history and activated-run fallback defects after three archived rounds; those
+   defects are now repaired and independently reviewed. The old Gate-C package is stale, so a
+   fresh immutable package and a newly authorized Gate-D run ID are required. Another strict run
+   requires Gates A-D plus explicit operator authorization. A conjunctively accepted Appendix B
+   archive must still precede accepted-run metrics reconciliation, matched comparison, final
+   claims, and goal closure.
 
 ## 6. Evidence Baseline
 
@@ -477,6 +840,64 @@ Remaining uncompleted work is recorded in
 `agent-notes/remediation-plan-after-v72-reduced-scope-closure-20260720.md`. Full Appendix-B
 acceptance, accepted-run Section 18.2/18.3 metrics, the post-v72 matched three-arm comparison, and
 any broad superiority claim remain open.
+
+## July 24 v20/v21 Strict Rejections and July 26 Remediation State
+
+The reduced-scope July 20 administrative closure did not satisfy strict Appendix-B acceptance.
+Work resumed, and two fresh immutable strict successors completed full six-round work cycles:
+
+- `appendix-b-full-gpt-20260724-v20-strict` exited `1` with status `RECOVERED` after
+  `8,925,543 ms`. It had no accepted winner or active promoted tool. Its verified recovery bundle
+  preserved a 13,117-byte receiver-facing artifact with explicit caveats, but two mandatory
+  run-authority tests still failed.
+- `appendix-b-full-gpt-20260724-v21-strict` exited `1` with status `RECOVERED` after
+  `6,802,833 ms`. Both final groups passed only 4 of 8 sealed tests with mandatory failure. It had
+  no scoring candidate, accepted winner/source/writer, promoted tool, normal results archive,
+  accepted metrics, or receiver-facing recovery artifact.
+
+Both runs are immutable rejected evidence and must never be resumed or reclassified. The exact
+v21 distribution, provider, summary, exit-marker, and recovery-archive hashes are recorded in
+`agent-notes/step15-v21-strict-failure-and-project-state-report-20260724.md`.
+
+The current authored completion-blueprint patch addresses the defects exposed by those runs:
+
+- linearizable runtime cells and write-once exit authority replace stale whole-entry lifecycle
+  writes;
+- typed, disclosure-safe repair diagnostics include power-to-energy unit conversion and persist
+  cross-generation consumption lineage;
+- accepted, provisional, and startup terminal classes have separate semantic packages,
+  publication histories, manifests, archives, and verification;
+- provisional completion retains neutral receiver-oriented evidence without inventing winner,
+  accepted metrics, final-reference, or archive authority;
+- deterministic six-round accepted and no-candidate scenarios cover lifecycle overlap, private
+  failure, safe repair, later validation/use, simulation, capture, lineage, and archive behavior.
+
+As of July 26, source Gate A is complete. The provider-free six-round accepted production scenario
+uses `APPENDIX_B_ACCEPTANCE` / `APPENDIX_B_FULL` and proves private failure, typed delayed repair,
+promotion, distinct validation, later independent mortal use, simulation/evidence/capture/final
+lineage, and a verified accepted archive. The six-round no-candidate scenario proves a verified
+neutral two-source provisional package. Exact persisted admission bytes are archived, committed in
+both manifest layers, and revalidated for every non-normal accepted or provisional outcome.
+
+The fresh serialized JDK 17 nine-module graph executed 1,694 tests with zero failures or errors
+and ten opt-in skips: core 294, sandbox 16, substrate 107, agents 244, orchestration 263,
+competition 100, API 488, runtime 7, and CLI 175. A separate fresh Compose JVM graph executed
+11 tests with zero failures, errors, or skips. Root Gradle test configuration forwards the
+repository-volume `java.io.tmpdir` to forked test JVMs, so the required temporary-disk isolation
+applies to Room/SQLite fixtures as well as Gradle itself. `git diff --check`, the locked blueprint
+hash, shell syntax, resource XML, Room v21-v24 schema JSON, high-confidence secret scanning, and
+safe public-document path/key scanning pass. Independent final review reports no remaining Gate
+A/B source blocker.
+
+Gate B's prior implementation, test, review, and document/static checks were complete. Historical
+Gate C is clean commit `78d68344e56241b0c6c64726b9a558b9e7a46d80` and content-addressed distribution
+`6ad972e21ebb063fbc1b086b2ee61226294d789b88fa3f0d6a65aeffd93c83f8`; it is now stale after the
+immutable v3 rejection. Exact JDK identity binds the real Java home and SHA-256 of `bin/java`,
+`release`, and `lib/modules`, not version text alone. Gate-D v1, v2, and v3 are immutable rejected
+evidence. No successor provider run is authorized. Typed quantitative-tool authority, exact
+resume compatibility, its fresh 1,704-engine-test/11-Compose-test closure, and independent
+no-blocker/High review are complete. Source/package reclosure, Gate E, and the post-acceptance
+matched three-arm comparison remain open. Gate E remains unauthorized.
 
 ## 7. Document Authority
 

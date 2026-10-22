@@ -19,7 +19,7 @@ class RunObjectiveHeuristicsTest {
     fun `requestsBrowserDeliverable detects submission and publication ready benchmark briefs`() {
         assertTrue(
             RunObjectiveHeuristics.requestsBrowserDeliverable(
-                "Produce a Qwen Cloud Track 3 submission brief and publication-ready benchmark plan."
+                "Produce a project submission brief and publication-ready benchmark plan."
             )
         )
     }

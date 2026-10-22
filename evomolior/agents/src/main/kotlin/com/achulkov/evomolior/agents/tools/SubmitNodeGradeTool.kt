@@ -54,8 +54,9 @@ class NodeGradeSubmissionGuard {
 /**
  * Submits one packet-bound node vector against an immutable grader assignment.
  *
- * The tool validates every caller-supplied commitment against the assignment before invoking the
- * callback. Generic dimension scores are intentionally absent from this boundary.
+ * The model supplies only an assignment ID and grading decision. The runtime resolves the
+ * immutable assignment and authors every packet, node, policy, criteria, and hash commitment.
+ * Generic dimension scores are intentionally absent from this boundary.
  */
 class SubmitNodeGradeTool(
     private val budgetLedger: BudgetLedger,
@@ -68,8 +69,8 @@ class SubmitNodeGradeTool(
     name = "submit_node_grade",
     description = """
         Submit one exact node grade for an assigned sealed evidence packet.
-        Copy assignmentId, assignmentHash, packetId, packetHash, nodeId, atlasHash,
-        nodePayloadHash, criteriaHash, and capturePolicyHash exactly from the assignment.
+        Provide only the assignmentId shown in the exact node evaluation context; the runtime
+        resolves and binds every immutable packet, node, criteria, and capture-policy commitment.
         For VALID, provide every normalized vector value in [0.0, 1.0].
         For ABSTAINED, omit scoreVector and explain why the exact frozen authority cannot be graded.
         INVALID is runtime-reserved and is not a model-selectable outcome.
@@ -77,18 +78,10 @@ class SubmitNodeGradeTool(
 ) {
     private val assignmentsById = assignments.associateBy(NodeGradingAssignment::assignmentId)
 
-    /** Tool arguments binding a complete response to the immutable assignment. */
+    /** Model-authored decision fields bound to runtime-owned assignment authority. */
     @Serializable
     data class Args(
         val assignmentId: String,
-        val assignmentHash: String,
-        val packetId: String,
-        val packetHash: String,
-        val nodeId: String,
-        val atlasHash: String,
-        val nodePayloadHash: String,
-        val criteriaHash: String,
-        val capturePolicyHash: String,
         val verdict: NodeGradeSubmissionVerdict,
         val scoreVector: NodeScoreVector? = null,
         val rationale: String
@@ -98,16 +91,6 @@ class SubmitNodeGradeTool(
         val assignment = assignmentsById[args.assignmentId]
             ?: return "Error: assignmentId is not assigned to this grader."
         if (!assignment.hasValidHash()) return "Error: immutable assignment authority is invalid."
-        val packet = assignment.packet
-        val commitmentsMatch = args.assignmentHash == assignment.assignmentHash &&
-            args.packetId == packet.packetId &&
-            args.packetHash == packet.packetHash &&
-            args.nodeId == packet.nodeId.value &&
-            args.atlasHash == packet.atlasHash &&
-            args.nodePayloadHash == packet.nodePayloadHash &&
-            args.criteriaHash == assignment.criteriaHash &&
-            args.capturePolicyHash == assignment.capturePolicyHash
-        if (!commitmentsMatch) return "Error: submitted commitments do not match the assignment."
         if (args.rationale.isBlank()) return "Error: rationale must not be blank."
         if (args.verdict == NodeGradeSubmissionVerdict.VALID && args.scoreVector == null) {
             return "Error: VALID responses require a complete scoreVector."

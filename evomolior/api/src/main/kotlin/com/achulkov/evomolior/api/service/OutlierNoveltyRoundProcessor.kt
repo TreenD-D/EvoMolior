@@ -18,6 +18,8 @@ import com.achulkov.evomolior.core.atlas.OutlierNoveltyMetrics
 import com.achulkov.evomolior.core.atlas.ShadowNodeDecision
 import com.achulkov.evomolior.core.atlas.ShadowNodeLifecycleEvent
 import com.achulkov.evomolior.core.atlas.ShadowNodeState
+import com.achulkov.evomolior.core.compounding.OutlierExperimentDisposition
+import com.achulkov.evomolior.core.compounding.OutlierExperimentWipRecordV1
 import com.achulkov.evomolior.core.contract.CommitType
 import com.achulkov.evomolior.core.contract.ContributionCommit
 import com.achulkov.evomolior.core.grader.GraderAtlas
@@ -32,6 +34,7 @@ import com.achulkov.evomolior.substrate.atlas.ResourceProjectionNode
 import com.achulkov.evomolior.substrate.atlas.WipProjectionTask
 import com.achulkov.evomolior.substrate.grader.GraderAuthorityRepository
 import com.achulkov.evomolior.substrate.outlier.OutlierNoveltyRepository
+import com.achulkov.evomolior.substrate.compounding.BoundedCompoundingLedgerRepository
 import com.achulkov.evomolior.substrate.worker.WorkerExecutionRepository
 
 /** Executes one round of global shadow-node authority over isolated group and grader databases. */
@@ -138,6 +141,11 @@ class OutlierNoveltyRoundProcessor(
             workerGroupIds = workerGroupIds,
             round = round
         )
+        materializeAcceptedOutlierExperiments(
+            global = global,
+            runId = runId,
+            round = round,
+        )
         return OutlierNoveltyRoundResult(
             atlas = tested.atlas,
             metrics = OutlierNoveltyMetrics(
@@ -149,6 +157,66 @@ class OutlierNoveltyRoundProcessor(
                 downstreamAdoptionCount = tested.adoptionCount
             )
         )
+    }
+
+    /**
+     * Materializes one bounded next-round experiment for every accepted Outlier proposal whose
+     * lifecycle reached an observable disposition. The record is independent of role allocation.
+     *
+     * @param global Global novelty authority.
+     * @param runId Owning run.
+     * @param round Current completed round.
+     */
+    private suspend fun materializeAcceptedOutlierExperiments(
+        global: OutlierNoveltyRepository,
+        runId: String,
+        round: Int,
+    ) {
+        val globalDatabase = substrateFactory.getAtlas(runId)
+        global.proposalsBeforeRound(runId, round + 1)
+            .filter { global.verdictForProposal(it.proposalHash)?.decision == ShadowNodeDecision.ACCEPT }
+            .forEach { proposal ->
+                val ledger = BoundedCompoundingLedgerRepository(
+                    database = substrateFactory.get(runId, proposal.groupId.value),
+                    outlierAuthorityDatabase = globalDatabase,
+                )
+                val experimentId = "outlier-experiment:${proposal.proposalId}"
+                /*
+                 * The WIP record is an immutable first disposition. Later adoption/rejection/
+                 * deferral is already append-only in the global shadow-node lifecycle; replacing
+                 * this record would destroy the original next-round obligation and its hash.
+                 */
+                if (ledger.outlierExperiment(experimentId) != null) return@forEach
+                val terminalState = global.lifecycle(proposal.proposalId).lastOrNull()?.toState
+                val disposition = when (terminalState) {
+                    ShadowNodeState.ACCEPTED_AMENDMENT -> OutlierExperimentDisposition.ADOPTED
+                    ShadowNodeState.REJECTED -> OutlierExperimentDisposition.REJECTED
+                    else -> OutlierExperimentDisposition.DEFERRED_WITH_REASON
+                }
+                val reason = when (disposition) {
+                    OutlierExperimentDisposition.ADOPTED -> null
+                    OutlierExperimentDisposition.REJECTED ->
+                        "Accepted Outlier proposal was tested and rejected with evidence."
+                    OutlierExperimentDisposition.DEFERRED_WITH_REASON ->
+                        "No downstream artifact evidence was available by the round boundary."
+                }
+                ledger.appendOutlierExperiment(
+                    OutlierExperimentWipRecordV1(
+                        experimentId = experimentId,
+                        proposalId = proposal.proposalId,
+                        proposalHash = proposal.proposalHash,
+                        runId = runId,
+                        groupId = proposal.groupId.value,
+                        sourceRound = proposal.round,
+                        startRound = maxOf(proposal.round + 1, round + 1),
+                        maxRounds = 2,
+                        maxAttempts = 2,
+                        boundedWipTaskId = "outlier-experiment-wip:${proposal.proposalId}",
+                        disposition = disposition,
+                        dispositionReason = reason,
+                    ).withComputedHash()
+                )
+            }
     }
 
     private suspend fun processLaterEvidence(
@@ -178,7 +246,17 @@ class OutlierNoveltyRoundProcessor(
                 proposal.proposalId in it.referencedNoveltyProposalIds
             }
             val persistedLineages = global.downstreamLineage(proposal.proposalId)
-            if (references.isEmpty() && persistedLineages.isEmpty()) continue
+            if (references.isEmpty() && persistedLineages.isEmpty()) {
+                // Accepted novelty must not remain an invisible, indefinite obligation. A later
+                // round without downstream evidence is a durable disposition, not a silent skip.
+                appendTransition(
+                    repository = global,
+                    proposal = proposal,
+                    toState = ShadowNodeState.DEFERRED,
+                    round = round
+                )
+                continue
+            }
             val lineages = (
                 persistedLineages + references.map { contribution ->
                 global.appendDownstreamLineage(

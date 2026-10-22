@@ -291,7 +291,8 @@ class CriticPipelineKgConsistencyTest {
             criticModel = "anthropic/claude-haiku-4.5",
             kgSchema = "{}",
             criticReviewRunner = promoteReviewRunner,
-            toolsMountHostPath = dataRoot.absolutePath
+            toolsMountHostPath = dataRoot.absolutePath,
+            legacyDirectToolPromotionEnabled = true
         )
 
         val summary = pipeline.processPendingSubmissions()
@@ -357,7 +358,8 @@ class CriticPipelineKgConsistencyTest {
             criticModel = "anthropic/claude-haiku-4.5",
             kgSchema = "{}",
             criticReviewRunner = promoteReviewRunner,
-            toolsMountHostPath = toolsRoot.absolutePath
+            toolsMountHostPath = toolsRoot.absolutePath,
+            legacyDirectToolPromotionEnabled = true
         )
 
         val summary = pipeline.processPendingSubmissions()

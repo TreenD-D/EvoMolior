@@ -87,7 +87,8 @@ class LlmExecutorFactoryTest {
             cliPath = "/tmp/codex",
             modelId = ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
             outputPath = java.nio.file.Path.of("/tmp/last-message.txt"),
-            workspace = java.nio.file.Path.of("/tmp/code-mode-workspace")
+            workspace = java.nio.file.Path.of("/tmp/code-mode-workspace"),
+            reasoningEffort = CodexReasoningEffort.MEDIUM
         )
 
         assertEquals(
@@ -120,13 +121,44 @@ class LlmExecutorFactoryTest {
     }
 
     @Test
+    fun `codex reasoning effort resolves validated overrides with high default`() {
+        assertEquals(CodexReasoningEffort.HIGH, CodexReasoningEffort.resolve(null))
+        assertEquals(CodexReasoningEffort.LOW, CodexReasoningEffort.resolve("low"))
+        assertEquals(CodexReasoningEffort.MEDIUM, CodexReasoningEffort.resolve("medium"))
+        assertEquals(CodexReasoningEffort.HIGH, CodexReasoningEffort.resolve("high"))
+
+        val failure = assertFailsWith<IllegalArgumentException> {
+            CodexReasoningEffort.resolve("maximum")
+        }
+        assertTrue(failure.message.orEmpty().contains(CodexReasoningEffort.ENV_VAR))
+        assertTrue(failure.message.orEmpty().contains("low, medium, or high"))
+    }
+
+    @Test
+    fun `codex exec command emits explicit high reasoning effort`() {
+        val command = CodexExecProcess.command(
+            cliPath = "/tmp/codex",
+            modelId = ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
+            outputPath = java.nio.file.Path.of("/tmp/last-message.txt"),
+            workspace = java.nio.file.Path.of("/tmp/code-mode-workspace"),
+            reasoningEffort = CodexReasoningEffort.HIGH
+        )
+
+        assertEquals(
+            "model_reasoning_effort=\"high\"",
+            command[command.indexOf("-c") + 1]
+        )
+    }
+
+    @Test
     fun `codex exec command can disable native search for matched tool experiments`() {
         val command = CodexExecProcess.command(
             cliPath = "/tmp/codex",
             modelId = ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
             outputPath = java.nio.file.Path.of("/tmp/last-message.txt"),
             workspace = java.nio.file.Path.of("/tmp/code-mode-workspace"),
-            nativeSearchEnabled = false
+            nativeSearchEnabled = false,
+            reasoningEffort = CodexReasoningEffort.MEDIUM
         )
 
         assertFalse("--search" in command)
@@ -143,7 +175,8 @@ class LlmExecutorFactoryTest {
             workspace = java.nio.file.Path.of("/tmp/code-mode-workspace"),
             outputSchemaPath = schemaPath,
             nativeSearchEnabled = false,
-            structuredOutputOnly = true
+            structuredOutputOnly = true,
+            reasoningEffort = CodexReasoningEffort.MEDIUM
         )
 
         val schemaFlagIndex = command.indexOf("--output-schema")
@@ -170,7 +203,8 @@ class LlmExecutorFactoryTest {
                 modelId = ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
                 outputPath = java.nio.file.Path.of("/tmp/last-message.txt"),
                 workspace = java.nio.file.Path.of("/tmp/code-mode-workspace"),
-                outputSchemaPath = java.nio.file.Path.of("/tmp/council-output-schema.json")
+                outputSchemaPath = java.nio.file.Path.of("/tmp/council-output-schema.json"),
+                reasoningEffort = CodexReasoningEffort.MEDIUM
             )
         }
 
@@ -217,7 +251,8 @@ class LlmExecutorFactoryTest {
                             // A child that does not consume stdin used to block the parent before it
                             // reached the cancellable waitFor call once this exceeded pipe capacity.
                             prompt = "x".repeat(2 * 1024 * 1024),
-                            codeModeSession = codeModeSession
+                            codeModeSession = codeModeSession,
+                            reasoningEffort = CodexReasoningEffort.MEDIUM
                         )
                     )
                 }
@@ -253,6 +288,7 @@ class LlmExecutorFactoryTest {
                     outputPath = outputPath,
                     prompt = "bounded request",
                     codeModeSession = codeModeSession,
+                    reasoningEffort = CodexReasoningEffort.MEDIUM,
                     executionTimeout = 1_000.milliseconds
                 )
             )

@@ -24,6 +24,19 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 
 class CodexChatGptLLMClientTest {
+    @Test
+    fun `failure diagnostics keep the tail of a long transcript and short streams verbatim`() {
+        assertEquals("exit: auth expired", boundedCodexFailureDiagnostic("  exit: auth expired\n"))
+
+        val transcript = (1..5_000).joinToString("\n") { """{"type":"item","n":$it}""" } +
+            "\nERROR: No space left on device"
+        val bounded = boundedCodexFailureDiagnostic(transcript)
+
+        assertTrue(bounded.length < CODEX_FAILURE_DIAGNOSTIC_MAX_CHARS + 64)
+        assertTrue(bounded.startsWith("[... "))
+        assertTrue(bounded.endsWith("ERROR: No space left on device"))
+    }
+
     private val model = CodexChatGptModelResolver.resolve(
         ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL
     )

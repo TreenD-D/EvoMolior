@@ -18,6 +18,9 @@ import com.achulkov.evomolior.core.contract.ContributionRelation
 import com.achulkov.evomolior.core.contract.CriticDecisionRecord
 import com.achulkov.evomolior.core.contract.CriticOutcome
 import com.achulkov.evomolior.core.contract.CriticReview
+import com.achulkov.evomolior.core.contract.CostLedgerEntry
+import com.achulkov.evomolior.core.contract.CostLedgerEntryKind
+import com.achulkov.evomolior.core.contract.CostSubjectType
 import com.achulkov.evomolior.core.contract.FinalCandidateRecord
 import com.achulkov.evomolior.core.contract.FinalDeliverableReferenceRecord
 import com.achulkov.evomolior.core.config.AcceptanceProfile
@@ -40,7 +43,10 @@ import com.achulkov.evomolior.core.council.SandboxCapabilitySummary
 import com.achulkov.evomolior.core.council.SourceAccessPolicySummary
 import com.achulkov.evomolior.core.model.GroupProfileType
 import com.achulkov.evomolior.core.model.ScoringDimension
+import com.achulkov.evomolior.core.metrics.MetricAvailability
+import com.achulkov.evomolior.core.metrics.RunClosureMetricCatalog
 import com.achulkov.evomolior.core.metrics.RunMetricCatalog
+import com.achulkov.evomolior.core.metrics.RunMetricObservation
 import com.achulkov.evomolior.core.metrics.RunMetricsV1
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
 import com.achulkov.evomolior.substrate.atlas.AtlasProjectionSet
@@ -48,6 +54,7 @@ import com.achulkov.evomolior.substrate.atlas.AtlasTransactionRepository
 import com.achulkov.evomolior.substrate.atlas.DisclosureProjection
 import com.achulkov.evomolior.substrate.atlas.PreparedAtlasMigration
 import com.achulkov.evomolior.substrate.atlas.ResourceProjection
+import com.achulkov.evomolior.substrate.cost.CostLedgerRepository
 import com.achulkov.evomolior.substrate.db.entity.EventLogEntryEntity
 import com.achulkov.evomolior.substrate.db.entity.EventTypes
 import com.achulkov.evomolior.substrate.db.entity.KnowledgeBaseEntryEntity
@@ -60,6 +67,7 @@ import com.achulkov.evomolior.substrate.worker.ContributionGraphRepository
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
@@ -144,6 +152,15 @@ class RunArchiveServiceTest {
         val valid = RunManifestVerifier.verify(validBundle, expectedRunId = runId)
         assertTrue(valid.isValid, valid.errors.joinToString())
         assertTrue(valid.manifest!!.entries.any { it.category == RunManifestEntryCategory.DATABASE })
+        val sourceSidecars = valid.manifest!!.entries.filter { it.path.startsWith("source-checks/") }
+        assertTrue(sourceSidecars.isNotEmpty())
+        val validEntries = unzipEntryBytes(validBundle)
+        sourceSidecars.forEach { sidecar ->
+            assertTrue(validEntries.getValue(sidecar.path).decodeToString().contains("Not semantic proof"))
+        }
+        val tamperedSidecars = validEntries.toMutableMap()
+        tamperedSidecars[sourceSidecars.first().path] = "tampered audit".encodeToByteArray()
+        assertFalse(RunManifestVerifier.verify(zipEntries(tamperedSidecars), expectedRunId = runId).isValid)
 
         val tamperedEntries = unzipEntryBytes(validBundle).toMutableMap()
         tamperedEntries["outputs/high-level-run-log.txt"] = "tampered".toByteArray()
@@ -480,6 +497,10 @@ class RunArchiveServiceTest {
             configurationSha256 = "b".repeat(64),
             modelAssignmentsSha256 = "c".repeat(64),
             jvmVersion = "17.0.12",
+            javaHome = "/test/jdk",
+            javaExecutableSha256 = "e".repeat(64),
+            javaReleaseSha256 = "f".repeat(64),
+            javaModulesSha256 = "1".repeat(64),
             codexCliPath = "/tmp/codex",
             codexCliSha256 = "d".repeat(64),
             codexCliVersion = "codex fixture",
@@ -532,6 +553,20 @@ class RunArchiveServiceTest {
                 )
             )
         }
+        val metricsArtifact = RunMetricsV1ArtifactStore(dbFactory).persist(
+            acceptedAppendixBMetrics(runId)
+        )
+        previousPublication = publication.append(
+            PublicationStateEvent(
+                eventId = "publication:$runId:${PublicationState.METRICS_EXPORTED.name}",
+                runId = runId,
+                state = PublicationState.METRICS_EXPORTED,
+                sequence = requireNotNull(previousPublication).sequence + 1,
+                previousEventHash = previousPublication.eventHash,
+                authorityReferenceIds = setOf("run-metrics-v1:${metricsArtifact.sha256}"),
+                occurredAt = KotlinInstant.fromEpochMilliseconds(completedAtMs)
+            ).withComputedHash()
+        )
 
         service.archiveRun(
             runId = runId,
@@ -1797,6 +1832,127 @@ class RunArchiveServiceTest {
     }
 
     @Test
+    fun `Appendix B archive blocks v12 shaped metrics before manifest and archive`() = runTest {
+        val rootDir = createTempDirectory("run-archive-v12-policy-test-").toFile()
+        val dbFactory = SubstrateDatabaseFactory(rootDir)
+        val service = RunArchiveService(dbFactory, json)
+        val runId = "run-archive-v12-policy"
+        val groupIds = listOf("group-0", "group-1")
+        val startingField = StartingField.default(
+            objective = "Reject measured Appendix-B failures",
+            runId = runId,
+            groupCount = groupIds.size
+        )
+        val config = RunConfig(
+            runId = runId,
+            objective = startingField.objective,
+            groupCount = groupIds.size,
+            groupProfiles = listOf(GroupProfileType.Library, GroupProfileType.Factory),
+            rounds = 6,
+            roundDurationMinutes = 3,
+            maxAgentsPerGroup = 2,
+            scoringDimensions = listOf(
+                ScoringDimension("accuracy", "Accuracy", "Evidence fidelity", 1.0)
+            ),
+            openRouterApiKey = "/tmp/codex",
+            llmBackend = LlmBackend.CODEX_CHATGPT,
+            councilExecutionPurpose = CouncilExecutionPurpose.APPENDIX_B_ACCEPTANCE,
+            acceptanceProfile = AcceptanceProfile.APPENDIX_B_FULL,
+            finalOutputSpec = FinalOutputSpec(
+                relativePath = "receiver/result.md",
+                mediaType = "text/markdown"
+            )
+        )
+        PersistedRunStateStore.writeForDataRoot(
+            rootDir,
+            PersistedRunState.fromRunConfig(
+                config = config,
+                groupIds = groupIds,
+                graderGroupIds = listOf("grader-0", "grader-1"),
+                allowedHosts = emptySet()
+            )
+        )
+        val metricsArtifact = RunMetricsV1ArtifactStore(dbFactory).persist(
+            v12ShapedAppendixBMetrics(runId)
+        )
+        val publication = PublicationStateRepository(dbFactory.getAtlas(runId))
+        var previous: PublicationStateEvent? = null
+        PublicationState.entries
+            .takeWhile { it != PublicationState.MANIFEST_HASHED }
+            .forEachIndexed { index, state ->
+                val authority = if (state == PublicationState.METRICS_EXPORTED) {
+                    "run-metrics-v1:${metricsArtifact.sha256}"
+                } else {
+                    "authority:${state.name}"
+                }
+                previous = publication.append(
+                    PublicationStateEvent(
+                        eventId = "publication:$runId:${state.name}",
+                        runId = runId,
+                        state = state,
+                        sequence = index,
+                        previousEventHash = previous?.eventHash,
+                        authorityReferenceIds = setOf(authority),
+                        occurredAt = KotlinInstant.parse("2026-07-22T12:00:00Z")
+                    ).withComputedHash()
+                )
+            }
+        val completion = RunCompletionRecord(
+            runId = runId,
+            winnerId = groupIds.first(),
+            completedRoundCount = 6,
+            generatedOutputFiles = listOf(
+                GeneratedOutputFile(
+                    relativePath = "receiver/result.md",
+                    mediaType = "text/markdown",
+                    content = "# Rejected fixture",
+                    sourceGroupId = groupIds.first()
+                )
+            )
+        )
+
+        val failure = assertFailsWith<IllegalStateException> {
+            service.archiveRun(
+                runId = runId,
+                groupIds = groupIds,
+                winnerId = completion.winnerId,
+                objective = startingField.objective,
+                startingFieldJson = json.encodeToString(
+                    StartingField.serializer(),
+                    startingField
+                ),
+                finalGeneration = 6,
+                completionRecord = completion
+            )
+        }
+
+        assertTrue(failure.message.orEmpty().contains("atomic_node_completion_rate"))
+        assertEquals(PublicationState.METRICS_EXPORTED, publication.latest(runId)?.state)
+        assertTrue(
+            publication.history(runId).none {
+                it.state == PublicationState.MANIFEST_HASHED ||
+                    it.state == PublicationState.ARCHIVED
+            }
+        )
+    }
+
+    @Test
+    fun `Appendix B policy explains a missing closure block`() {
+        val metrics = acceptedAppendixBMetrics("run-missing-closure").copy(
+            closureObservations = emptyList()
+        )
+
+        val failure = assertFailsWith<IllegalStateException> {
+            AppendixBFullPublicationPolicy.requireAccepted(metrics)
+        }
+
+        assertTrue(
+            failure.message.orEmpty().contains("required closure observations are missing")
+        )
+        assertTrue(failure.message.orEmpty().contains("exit_identity_conflicts"))
+    }
+
+    @Test
     fun `archive rebuild rejects current wire bytes carrying a stale seal`() = runTest {
         val rootDir = createTempDirectory("run-archive-stale-seal-test-").toFile()
         val dbFactory = SubstrateDatabaseFactory(rootDir)
@@ -1964,6 +2120,56 @@ class RunArchiveServiceTest {
 
         assertTrue(failure.message.orEmpty().contains("unaccounted non-daemon"))
         assertTrue(failure.message.orEmpty().contains("final-writer"))
+    }
+
+    @Test
+    fun `PublicationQuiescenceTest archive rejects an active cost reservation`() = runTest {
+        val rootDir = createTempDirectory("run-archive-active-cost-").toFile()
+        val dbFactory = SubstrateDatabaseFactory(rootDir)
+        val service = RunArchiveService(dbFactory, json)
+        val runId = "run-archive-active-cost"
+        val groupId = "group-0"
+        CostLedgerRepository(dbFactory.get(runId, "__cost_ledger__")).reserve(
+            CostLedgerEntry(
+                entryId = "cost-reserved-$runId",
+                reservationId = "reservation-$runId",
+                runId = runId,
+                groupId = AtlasGroupId(groupId),
+                agentId = "final-writer",
+                subjectType = CostSubjectType.SIMULATION,
+                subjectId = "publication-race",
+                kind = CostLedgerEntryKind.RESERVED,
+                reservedMaximumUsd = 0.5,
+                occurredAt = KotlinInstant.parse("2026-07-24T10:00:00Z")
+            ).withComputedHash()
+        )
+        val startingField = StartingField.default(
+            "Reject publication with unsettled cost authority",
+            runId = runId,
+            groupCount = 1
+        )
+
+        val failure = assertFailsWith<IllegalStateException> {
+            service.archiveRun(
+                runId = runId,
+                groupIds = listOf(groupId),
+                winnerId = groupId,
+                objective = startingField.objective,
+                startingFieldJson = json.encodeToString(
+                    StartingField.serializer(),
+                    startingField
+                ),
+                finalGeneration = 1,
+                completionRecord = RunCompletionRecord(runId = runId, winnerId = groupId)
+            )
+        }
+
+        assertTrue(failure.message.orEmpty().contains("active cost reservation"))
+        assertTrue(
+            dbFactory.get(runId, "__meta_archive__").metaArchiveDao()
+                .getByType(RunArchiveService.ENTRY_RUN_COMPLETED)
+                .isEmpty()
+        )
     }
 
     @Test
@@ -2633,6 +2839,180 @@ class RunArchiveServiceTest {
     }
 
     @Test
+    fun `buildResultsBundle preserves raw parameterized notebook source from round archive`() =
+        runTest {
+            val rootDir = createTempDirectory("run-archive-notebook-recovery-test-").toFile()
+            val dbFactory = SubstrateDatabaseFactory(rootDir)
+            val service = RunArchiveService(dbFactory, json)
+            val runId = "run-archive-notebook-recovery"
+            val winnerId = "group-0"
+            val metaDb = dbFactory.get(runId, "__meta_archive__")
+            val notebook = """
+                {
+                  "cells": [
+                    {
+                      "cell_type": "markdown",
+                      "id": "intro",
+                      "metadata": {},
+                      "source": ["# EvoARC-2 symbolic baseline\n"]
+                    },
+                    {
+                      "cell_type": "code",
+                      "id": "solver",
+                      "execution_count": null,
+                      "metadata": {},
+                      "outputs": [],
+                      "source": ["def is_grid(value): return isinstance(value, list)\n"]
+                    }
+                  ],
+                  "metadata": {},
+                  "nbformat": 4,
+                  "nbformat_minor": 5
+                }
+            """.trimIndent()
+            val startingField = StartingField.default("archive the notebook", runId = runId)
+            metaDb.metaArchiveDao().insert(
+                MetaArchiveEntryEntity(
+                    id = UUID.randomUUID().toString(),
+                    runId = runId,
+                    entryType = RunArchiveService.ENTRY_STARTING_FIELD,
+                    groupId = null,
+                    label = "StartingField — $runId",
+                    contentJson = json.encodeToString(StartingField.serializer(), startingField),
+                    runObjective = startingField.objective,
+                    finalScore = null,
+                    isFromWinner = false,
+                    generation = 0,
+                    archivedAtMs = System.currentTimeMillis()
+                )
+            )
+            metaDb.metaArchiveDao().insert(
+                MetaArchiveEntryEntity(
+                    id = "run-completed-$runId",
+                    runId = runId,
+                    entryType = RunArchiveService.ENTRY_RUN_COMPLETED,
+                    groupId = null,
+                    label = "Run Completed — $runId",
+                    contentJson = json.encodeToString(
+                        RunCompletionRecord.serializer(),
+                        RunCompletionRecord(
+                            runId = runId,
+                            winnerId = winnerId,
+                            finalAnswerSummary = "Notebook recovered from raw archived body"
+                        )
+                    ),
+                    runObjective = startingField.objective,
+                    finalScore = null,
+                    isFromWinner = false,
+                    generation = 1,
+                    archivedAtMs = System.currentTimeMillis()
+                )
+            )
+            metaDb.metaArchiveDao().insert(
+                MetaArchiveEntryEntity(
+                    id = UUID.randomUUID().toString(),
+                    runId = runId,
+                    entryType = RunArchiveService.ENTRY_ROUND_SUMMARY,
+                    groupId = null,
+                    label = "Round summary — $runId",
+                    contentJson = """
+                        {
+                          "runId":"$runId",
+                          "roundIndex":0,
+                          "roundWinnerId":"$winnerId",
+                          "groupSummaries":[{
+                            "groupId":"$winnerId",
+                            "submissionSummary":${JsonPrimitive(notebook)}
+                          }],
+                          "generatedAtMs":123
+                        }
+                    """.trimIndent(),
+                    runObjective = startingField.objective,
+                    finalScore = null,
+                    isFromWinner = true,
+                    generation = 1,
+                    archivedAtMs = System.currentTimeMillis()
+                )
+            )
+
+            val bundle = assertNotNull(
+                service.buildResultsBundle(
+                    runId = runId,
+                    requestedOutputSpec = FinalOutputSpec(
+                        relativePath = "submission.ipynb",
+                        mediaType = "Application/X-IPYNB+JSON; charset=utf-8"
+                    )
+                )
+            )
+
+            val entries = unzipEntries(bundle)
+            assertEquals(notebook, entries["outputs/submission.ipynb"])
+        }
+
+    @Test
+    fun `buildResultsBundle normalizes requested and generated notebook media types`() = runTest {
+        val rootDir = createTempDirectory("run-archive-notebook-media-test-").toFile()
+        val dbFactory = SubstrateDatabaseFactory(rootDir)
+        val service = RunArchiveService(dbFactory, json)
+        val runId = "run-archive-notebook-media"
+        val startingField = StartingField.default("archive the notebook", runId = runId)
+        dbFactory.get(runId, "__meta_archive__").metaArchiveDao().insert(
+            MetaArchiveEntryEntity(
+                id = UUID.randomUUID().toString(),
+                runId = runId,
+                entryType = RunArchiveService.ENTRY_STARTING_FIELD,
+                groupId = null,
+                label = "StartingField — $runId",
+                contentJson = json.encodeToString(StartingField.serializer(), startingField),
+                runObjective = startingField.objective,
+                finalScore = null,
+                isFromWinner = false,
+                generation = 0,
+                archivedAtMs = System.currentTimeMillis()
+            )
+        )
+        val notebook = """
+            {
+              "cells":[{
+                "cell_type":"code",
+                "id":"source",
+                "execution_count":null,
+                "metadata":{},
+                "outputs":[],
+                "source":"print('offline')"
+              }],
+              "metadata":{},
+              "nbformat":4,
+              "nbformat_minor":5
+            }
+        """.trimIndent()
+        val requested = FinalOutputSpec(
+            relativePath = "submission.ipynb",
+            mediaType = "Application/X-IPYNB+JSON; charset=utf-8"
+        )
+        val bundle = assertNotNull(
+            service.buildResultsBundle(
+                runId = runId,
+                completionRecord = RunCompletionRecord(
+                    runId = runId,
+                    winnerId = "group-0",
+                    requestedOutputSpec = requested,
+                    generatedOutputFiles = listOf(
+                        GeneratedOutputFile(
+                            relativePath = "submission.ipynb",
+                            mediaType = "application/x-ipynb+json",
+                            content = notebook
+                        )
+                    )
+                ),
+                requestedOutputSpec = requested
+            )
+        )
+
+        assertEquals(notebook, unzipEntries(bundle)["outputs/submission.ipynb"])
+    }
+
+    @Test
     fun `validateGeneratedOutputFile rejects placeholder article references without traceable identifiers`() {
         val badHtml = GeneratedOutputFile(
             relativePath = "final-article.html",
@@ -3154,6 +3534,120 @@ class RunArchiveServiceTest {
             )
         }
     }
+
+    private fun acceptedAppendixBMetrics(runId: String) = RunMetricsV1(
+        runId = runId,
+        observations = RunMetricCatalog.orderedMetricIds.map { metricId ->
+            when (metricId) {
+                "atomic_node_completion_rate",
+                "mandatory_node_coverage",
+                "grader_bundle_validity",
+                "node_to_final_lineage" -> metricObservation(
+                    metricId = metricId,
+                    numerator = 2.0,
+                    denominator = 2.0,
+                    value = 1.0
+                )
+                "tool_native_agent_rate",
+                "tool_reuse_factor",
+                "simulation_influence_rate" -> metricObservation(
+                    metricId = metricId,
+                    numerator = 1.0,
+                    denominator = 2.0,
+                    value = 0.5
+                )
+                "score_replay_error" -> metricObservation(
+                    metricId = metricId,
+                    numerator = 0.0,
+                    denominator = 6.0,
+                    value = 0.0
+                )
+                else -> metricObservation(
+                    metricId = metricId,
+                    numerator = 1.0,
+                    denominator = 2.0,
+                    value = 0.5
+                )
+            }
+        },
+        closureObservations = RunClosureMetricCatalog.orderedMetricIds.map { metricId ->
+            when (metricId) {
+                "exit_identity_conflicts",
+                "exit_finalization_retries",
+                "tool_contract_transport_failure_rate",
+                "tool_repair_diagnostics_emitted",
+                "tool_repair_diagnostic_consumption_rate",
+                "repeated_identical_tool_failure_rate" -> metricObservation(
+                    metricId = metricId,
+                    numerator = 0.0,
+                    denominator = 1.0,
+                    value = 0.0
+                )
+                "repair_to_promotion_rate" -> metricObservation(
+                    metricId = metricId,
+                    numerator = 1.0,
+                    denominator = 2.0,
+                    value = 0.5
+                )
+                "receiver_component_coverage",
+                "interim_snapshot_coverage",
+                "recovery_component_coverage",
+                "provisional_claim_with_authority_rate" -> metricObservation(
+                    metricId = metricId,
+                    numerator = 2.0,
+                    denominator = 2.0,
+                    value = 1.0
+                )
+                "accepted_package_deterministic_content_rate" -> metricObservation(
+                    metricId = metricId,
+                    numerator = 1.0,
+                    denominator = 1.0,
+                    value = 1.0
+                )
+                else -> error("Unhandled closure metric fixture: $metricId")
+            }
+        }
+    )
+
+    private fun v12ShapedAppendixBMetrics(runId: String) = acceptedAppendixBMetrics(runId).copy(
+        observations = acceptedAppendixBMetrics(runId).observations.map { observation ->
+            when (observation.metricId) {
+                "atomic_node_completion_rate" ->
+                    metricObservation(observation.metricId, 0.0, 3.0, 0.0)
+                "mandatory_node_coverage" ->
+                    metricObservation(observation.metricId, 1.0, 4.0, 0.25)
+                "tool_native_agent_rate" ->
+                    metricObservation(observation.metricId, 0.0, 12.0, 0.0)
+                "tool_reuse_factor" ->
+                    metricObservation(observation.metricId, 0.0, 2.0, 0.0)
+                "simulation_influence_rate" -> RunMetricObservation(
+                    metricId = observation.metricId,
+                    status = MetricAvailability.NOT_APPLICABLE,
+                    unit = "ratio",
+                    evidenceRefs = listOf("fixture/${observation.metricId}"),
+                    unavailableReason = "No simulation-eligible node decisions were recorded"
+                )
+                "node_to_final_lineage" ->
+                    metricObservation(observation.metricId, 0.0, 1.0, 0.0)
+                else -> observation
+            }
+        }
+    )
+
+    private fun metricObservation(
+        metricId: String,
+        numerator: Double,
+        denominator: Double,
+        value: Double
+    ) = RunMetricObservation(
+        metricId = metricId,
+        status = MetricAvailability.AVAILABLE,
+        numerator = numerator,
+        denominator = denominator,
+        value = value,
+        unit = "fixture",
+        evidenceRefs = listOf("fixture/$metricId")
+    )
 
     private fun unzipEntries(bytes: ByteArray): Map<String, String> {
         val result = mutableMapOf<String, String>()

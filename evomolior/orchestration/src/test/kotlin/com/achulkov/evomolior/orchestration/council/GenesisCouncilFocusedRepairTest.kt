@@ -504,7 +504,9 @@ class GenesisCouncilFocusedRepairTest {
             outputs = outputs,
             invalidSynthesis = invalidSynthesis,
             repairedSynthesis = synthesis(validDefinition),
-            relatedNode = relatedNode,
+            relatedNode = outputs.projectDeterministicCompilerAuthority(
+                runId, fixtures.envelope()
+            ).taskAnatomist.nodes.single { it.key == relatedNode.key },
             expectedCompilerErrors = expectedCompilerErrors,
             wireAuthority = CouncilSynthesisWireAuthority.from(outputs.taskAnatomist)
         )

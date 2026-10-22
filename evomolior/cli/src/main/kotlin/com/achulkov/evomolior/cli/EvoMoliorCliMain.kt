@@ -2,19 +2,27 @@ package com.achulkov.evomolior.cli
 
 import com.achulkov.evomolior.api.events.EvoMoliorEvent
 import com.achulkov.evomolior.api.model.RunConfig
+import com.achulkov.evomolior.api.service.RunOutcomePresentation
 import com.achulkov.evomolior.api.model.RunAutoCompletionPolicy
+import com.achulkov.evomolior.api.model.AcceptanceDiagnosticMode
 import com.achulkov.evomolior.api.service.EvoMoliorEngineService
 import com.achulkov.evomolior.api.service.AcceptanceRunBoundaryVerifier
 import com.achulkov.evomolior.api.util.loadRunInputArtifacts
 import com.achulkov.evomolior.cli.remote.RemoteDashboardConfig
 import com.achulkov.evomolior.cli.remote.RemoteDashboardServer
 import com.achulkov.evomolior.core.config.AcceptanceProfile
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
+import com.achulkov.evomolior.core.config.CodexRuntimePreset
 import com.achulkov.evomolior.core.config.FastModelSelectionConfig
 import com.achulkov.evomolior.core.config.CouncilExecutionPurpose
 import com.achulkov.evomolior.core.config.LlmBackend
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
 import com.achulkov.evomolior.core.config.RunObjectiveHeuristics
+import com.achulkov.evomolior.core.deliverable.AcceptanceStatus
+import com.achulkov.evomolior.core.deliverable.ExecutionCompletionStatus
+import com.achulkov.evomolior.core.deliverable.PrimaryArtifactValidationStatus
 import com.achulkov.evomolior.core.model.GroupProfileType
+import com.achulkov.evomolior.core.model.Role
 import com.achulkov.evomolior.core.model.ScoringDimension
 import com.achulkov.evomolior.runtime.createProductionRuntime
 import io.github.aakira.napier.Antilog
@@ -72,6 +80,11 @@ fun main(args: Array<String>) {
                 runComparativeBenchmarkCli(args.drop(1).toTypedArray())
                 return
             }
+            "template" -> {
+                val exitCode = ApplicationTemplates.run(args.drop(1))
+                if (exitCode != 0) exitProcess(exitCode)
+                return
+            }
             "gptauth" -> {
                 val authArgs = args.drop(1).toTypedArray()
                 if (authArgs.any { it == "-h" || it == "--help" }) {
@@ -107,6 +120,9 @@ fun main(args: Array<String>) {
         System.err.println()
         System.err.println(CliArguments.usage())
         exitProcess(2)
+    } catch (e: CliStoragePreflightException) {
+        System.err.println("EvoMolior CLI did not start: ${e.message}")
+        exitProcess(1)
     } catch (e: Exception) {
         System.err.println("EvoMolior CLI failed: ${e.message}")
         e.printStackTrace(System.err)
@@ -151,10 +167,15 @@ internal fun runCli(
                 LlmBackend.CODEX_CHATGPT -> createProductionRuntime(
                     dataRootDir = dataRoot,
                     llmBackend = cliOptions.llmBackend,
-                    councilModelId = ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
-                    graderModelId = ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
-                    criticPipelineModelId = ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
-                    leakTransformModelId = ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
+                    codexRuntimePreset = cliOptions.codexRuntimePreset,
+                    councilModelId = cliOptions.codexRuntimePreset?.defaultModel(Role.CouncilSynthesis)
+                        ?: ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
+                    graderModelId = cliOptions.codexRuntimePreset?.defaultModel(Role.GraderCritic)
+                        ?: ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
+                    criticPipelineModelId = cliOptions.codexRuntimePreset?.defaultModel(Role.Critic)
+                        ?: ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
+                    leakTransformModelId = cliOptions.codexRuntimePreset?.defaultModel(Role.Connector)
+                        ?: ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
                     acceptanceRunBoundaryVerifier = cliOptions.acceptanceRunBoundaryVerifier
                 )
             }
@@ -164,15 +185,44 @@ internal fun runCli(
                 createProductionRuntime(
                     dataRoot,
                     llmBackend = cliOptions.llmBackend,
+                    codexRuntimePreset = cliOptions.codexRuntimePreset,
                     acceptanceRunBoundaryVerifier = cliOptions.acceptanceRunBoundaryVerifier
                 ).engineService
             )
         }
     },
     acceptanceAdmissionController: AcceptanceAdmissionController =
-        AcceptanceAdmissionController.production()
+        AcceptanceAdmissionController.production(),
+    acceptanceAdmissionDiagnosticSink: (String) -> Unit = System.err::println,
+    storagePreflight: (CliOptions) -> Unit = ::verifyRunStorageBeforeStart
 ): CliRunResult = runBlocking {
-    runCliPipeline(options, runtimeFactory, acceptanceAdmissionController)
+    // Reject before Council or any provider call when a write volume is nearly full.
+    storagePreflight(options)
+    runCliPipeline(
+        options,
+        runtimeFactory,
+        acceptanceAdmissionController,
+        acceptanceAdmissionDiagnosticSink
+    )
+}
+
+/**
+ * Production storage admission for [runCli]; logs each observed volume and throws
+ * [CliStoragePreflightException] when one is below the configured floor.
+ *
+ * @param options Parsed CLI options naming the output directory and backend.
+ */
+internal fun verifyRunStorageBeforeStart(options: CliOptions) {
+    val statuses = RunStoragePreflight.verify(
+        locations = RunStoragePreflight.locations(options),
+        requiredFreeBytes = RunStoragePreflight.requiredFreeBytes()
+    )
+    statuses.forEach { status ->
+        Napier.i(
+            "EvoMolior CLI storage ${status.labels.joinToString(" + ")}: " +
+                "${RunStoragePreflight.formatBytes(status.usableBytes)} usable at ${status.probePath}"
+        )
+    }
 }
 
 internal data class CliRunResult(
@@ -269,6 +319,8 @@ internal data class CliOptions(
         RunAutoCompletionPolicy.DEFAULT_CONSECUTIVE_ACCEPTED_ROUNDS,
     val groupCount: Int? = null,
     val maxAgentsPerGroup: Int? = null,
+    /** Grader groups for normal runs (1-3); null keeps the production default of three. */
+    val graderGroupCount: Int? = null,
     val roundDurationMinutes: Int? = null,
     val budgetOverride: Double? = null,
     val runId: String? = null,
@@ -276,6 +328,9 @@ internal data class CliOptions(
     val enforceProviderMonetaryCostCap: Boolean = true,
     val councilExecutionPurpose: CouncilExecutionPurpose = CouncilExecutionPurpose.STANDARD,
     val acceptanceProfile: AcceptanceProfile = AcceptanceProfile.NORMAL,
+    val acceptanceDiagnosticMode: AcceptanceDiagnosticMode = AcceptanceDiagnosticMode.STRICT,
+    val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
+    val codexRuntimePreset: CodexRuntimePreset? = null,
     val acceptanceRunBoundaryVerifier: AcceptanceRunBoundaryVerifier =
         AcceptanceRunBoundaryVerifier.NONE
 )
@@ -297,7 +352,16 @@ internal data class CliRunSummary(
     val resultsBundlePath: String?,
     val status: String,
     val winnerId: String?,
-    val modelOverrides: Map<String, String>
+    val modelOverrides: Map<String, String>,
+    val terminalReason: String? = null,
+    val outcome: RunOutcomePresentation? = null,
+    val executionStatus: ExecutionCompletionStatus? = null,
+    val acceptanceStatus: AcceptanceStatus? = null,
+    val primaryArtifactPath: String? = null,
+    val primaryArtifactValidationStatus: PrimaryArtifactValidationStatus? = null,
+    val processExitCode: Int? = null,
+    /** SHA-256 of the stage request; see [cliStageRequestFingerprint]. Absent in older summaries. */
+    val requestFingerprint: String? = null,
 )
 
 internal object CliArguments {
@@ -311,7 +375,10 @@ internal object CliArguments {
                 ).filterNotNull()
             )
         },
-        codexSessionPreflight: (String) -> Unit = CodexAuthCommand::requireUsableSession
+        codexSessionPreflight: (String) -> Unit = CodexAuthCommand::requireUsableSession,
+        codexReasoningEffortEnvironment: () -> String? = {
+            System.getenv(CodexReasoningEffort.ENV_VAR)
+        }
     ): CliOptions? {
         if (args.any { it == "-h" || it == "--help" }) {
             return null
@@ -334,6 +401,7 @@ internal object CliArguments {
             RunAutoCompletionPolicy.DEFAULT_CONSECUTIVE_ACCEPTED_ROUNDS
         var completionStabilityExplicit = false
         var groupCount: Int? = null
+        var graderGroupCount: Int? = null
         var maxAgentsPerGroup: Int? = null
         var roundDurationMinutes: Int? = null
         var budgetOverride: Double? = null
@@ -342,6 +410,9 @@ internal object CliArguments {
         var enforceProviderMonetaryCostCap = true
         var councilExecutionPurpose = CouncilExecutionPurpose.STANDARD
         var acceptanceProfile = AcceptanceProfile.NORMAL
+        var acceptanceDiagnosticMode = AcceptanceDiagnosticMode.STRICT
+        var explicitCodexReasoningEffort: String? = null
+        var codexRuntimePreset: CodexRuntimePreset? = null
         val modelOverrides = linkedMapOf<String, String>()
 
         var index = 0
@@ -404,6 +475,13 @@ internal object CliArguments {
                     groupCount = value.toIntOrNull()?.takeIf { it > 0 }
                         ?: throw CliUsageException("Group count must be a positive integer, got: $value")
                 }
+                "-grader-groups", "--grader-groups" -> {
+                    val value = args.getOrNull(++index) ?: throw CliUsageException("Missing value for $arg")
+                    graderGroupCount = value.toIntOrNull()?.takeIf { it in 1..MAX_OPERATOR_GRADER_GROUPS }
+                        ?: throw CliUsageException(
+                            "Grader groups must be an integer from 1 to $MAX_OPERATOR_GRADER_GROUPS, got: $value"
+                        )
+                }
                 "-maxagents", "-max-agents", "-max-agents-per-group", "--max-agents-per-group" -> {
                     val value = args.getOrNull(++index) ?: throw CliUsageException("Missing value for $arg")
                     maxAgentsPerGroup = value.toIntOrNull()?.takeIf { it > 0 }
@@ -411,8 +489,11 @@ internal object CliArguments {
                 }
                 "-round-duration-minutes", "--round-duration-minutes" -> {
                     val value = args.getOrNull(++index) ?: throw CliUsageException("Missing value for $arg")
-                    roundDurationMinutes = value.toIntOrNull()?.takeIf { it > 0 }
-                        ?: throw CliUsageException("Round duration minutes must be a positive integer, got: $value")
+                    roundDurationMinutes = value.toIntOrNull()?.takeIf { it >= 0 }
+                        ?: throw CliUsageException(
+                            "Round duration minutes must be a non-negative integer " +
+                                "(0 enables budget-led production rounds), got: $value"
+                        )
                 }
                 "-budgetoverride", "-budget-override", "--budget-override" -> {
                     val value = args.getOrNull(++index) ?: throw CliUsageException("Missing value for $arg")
@@ -434,6 +515,23 @@ internal object CliArguments {
                         ?: throw CliUsageException("Missing value for $arg")
                     acceptanceProfile = try {
                         AcceptanceProfile.parse(value)
+                    } catch (error: IllegalArgumentException) {
+                        throw CliUsageException(error.message.orEmpty())
+                    }
+                }
+                "-acceptance-diagnostic-sweep", "--acceptance-diagnostic-sweep" -> {
+                    acceptanceDiagnosticMode =
+                        AcceptanceDiagnosticMode.FULL_SWEEP_NON_ACCEPTING
+                }
+                "-codex-reasoning-effort", "--codex-reasoning-effort" -> {
+                    explicitCodexReasoningEffort = args.getOrNull(++index)
+                        ?: throw CliUsageException("Missing value for $arg")
+                }
+                "-codex-preset", "--codex-preset" -> {
+                    val value = args.getOrNull(++index)
+                        ?: throw CliUsageException("Missing value for $arg")
+                    codexRuntimePreset = try {
+                        CodexRuntimePreset.parse(value)
                     } catch (error: IllegalArgumentException) {
                         throw CliUsageException(error.message.orEmpty())
                     }
@@ -476,6 +574,7 @@ internal object CliArguments {
         }
         Files.createDirectories(resolvedOutput)
 
+        validateCodexPreset(codexRuntimePreset, llmBackend, modelOverrides, acceptanceProfile)
         val resolvedKey = if (llmBackend == LlmBackend.CODEX_CHATGPT) {
             codexCliLocator()
         } else {
@@ -514,6 +613,15 @@ internal object CliArguments {
                     "-council-execution-purpose appendix-b-acceptance"
             )
         }
+        if (
+            acceptanceDiagnosticMode ==
+            AcceptanceDiagnosticMode.FULL_SWEEP_NON_ACCEPTING &&
+            acceptanceProfile == AcceptanceProfile.NORMAL
+        ) {
+            throw CliUsageException(
+                "-acceptance-diagnostic-sweep requires a non-normal acceptance profile"
+            )
+        }
 
         if (fast) {
             val approvedModels = when (llmBackend) {
@@ -523,7 +631,8 @@ internal object CliArguments {
                     ModelSelectionConfig.QWEN_CLOUD_QWEN_FAST_MODEL,
                     FastModelSelectionConfig.FAST_QWEN_CLOUD_DEEPSEEK_MODEL
                 )
-                LlmBackend.CODEX_CHATGPT -> setOf(ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL)
+                LlmBackend.CODEX_CHATGPT -> codexRuntimePreset?.supportedModelIds
+                    ?: setOf(ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL)
             }
             val invalidFastModels = modelOverrides.values.filterNot { it in approvedModels }
             if (invalidFastModels.isNotEmpty()) {
@@ -582,6 +691,24 @@ internal object CliArguments {
             }
         }
 
+        if (graderGroupCount != null && acceptanceProfile != AcceptanceProfile.NORMAL) {
+            throw CliUsageException(
+                "-grader-groups is unavailable to acceptance profiles; they use the production grader count"
+            )
+        }
+
+        val codexReasoningEffort = try {
+            CodexReasoningEffort.resolve(
+                explicitCodexReasoningEffort ?: if (llmBackend == LlmBackend.CODEX_CHATGPT) {
+                    codexReasoningEffortEnvironment()
+                } else {
+                    null
+                }
+            )
+        } catch (error: IllegalArgumentException) {
+            throw CliUsageException(error.message.orEmpty())
+        }
+
         return CliOptions(
             prompt = resolvedPrompt,
             inputDir = resolvedInput.toAbsolutePath().normalize(),
@@ -596,13 +723,17 @@ internal object CliArguments {
             completionStabilityRounds = completionStabilityRounds,
             groupCount = groupCount,
             maxAgentsPerGroup = maxAgentsPerGroup,
+            graderGroupCount = graderGroupCount,
             roundDurationMinutes = roundDurationMinutes,
             budgetOverride = budgetOverride,
             runId = runId,
             pipelineConfigPath = pipelineConfigPath?.toAbsolutePath()?.normalize(),
             enforceProviderMonetaryCostCap = enforceProviderMonetaryCostCap,
             councilExecutionPurpose = councilExecutionPurpose,
-            acceptanceProfile = acceptanceProfile
+            acceptanceProfile = acceptanceProfile,
+            acceptanceDiagnosticMode = acceptanceDiagnosticMode,
+            codexReasoningEffort = codexReasoningEffort,
+            codexRuntimePreset = codexRuntimePreset
         )
     }
 
@@ -621,7 +752,8 @@ internal object CliArguments {
           -completion-stability-rounds 2|3      default: 3 in auto-completion mode
           -group-count N
           -max-agents-per-group N
-          -round-duration-minutes N
+          -grader-groups 1|2|3                     default 3; fewer cuts grading cost but lowers independence
+          -round-duration-minutes N                 0 = budget-led production rounds
           -budget-override N
           -iso-latency
           -openrouter-api-key KEY
@@ -629,6 +761,9 @@ internal object CliArguments {
           -llm-backend openrouter|qwen-cloud|codex-chatgpt
           -council-execution-purpose standard|appendix-b-acceptance
           -acceptance-profile normal|runtime-usability-smoke|appendix-b-full
+          -acceptance-diagnostic-sweep             exhaustive late-gate report; never accepted
+          -codex-reasoning-effort low|medium|high  CLI overrides environment; default: high
+          -codex-preset full-luna|mixed-families  role policy; reasoning effort becomes a ceiling
           -debug
           -run-id custom-run-id
           -pipeline-config /path/to/pipeline.json
@@ -639,6 +774,7 @@ internal object CliArguments {
           benchmark -benchmark frames -limit 2 -output /path/to/output [-qwen-api-key KEY | -openrouter-api-key KEY]
           benchmark-compare [benchmark flags] -seeds 11,22 -constraint iso-cost|iso-latency [matched commitment flags]
           gptauth [status]                       check existing local Codex/ChatGPT session
+          template list|show <id>|init <id> <dir>  ready pipeline configs for best-fit applications
     """.trimIndent()
 
     private fun readLocalProperty(key: String): String? {
@@ -658,6 +794,9 @@ internal object CliArguments {
             ?.takeIf { it.isNotBlank() }
     }
 }
+
+/** Upper bound for `-grader-groups`, matching the production grader count. */
+internal const val MAX_OPERATOR_GRADER_GROUPS = 3
 
 internal class CliUsageException(message: String) : IllegalArgumentException(message)
 

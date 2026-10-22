@@ -57,6 +57,7 @@ import com.achulkov.evomolior.substrate.db.entity.ToolRegistryEntryEntity
 import com.achulkov.evomolior.substrate.tools.ToolInfrastructureRepository
 import com.achulkov.evomolior.substrate.worker.WorkerExecutionRepository
 import com.achulkov.evomolior.substrate.worker.ContributionGraphRepository
+import com.achulkov.evomolior.core.contract.ProvisionalNovelHypothesis
 import java.io.File
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
@@ -155,6 +156,45 @@ class NodeEvidencePacketSealerTest {
                 harness.sealer.seal(
                     request(harness.atlas).copy(nodePayloadHash = "tampered-payload")
                 )
+            }
+        } finally {
+            harness.close()
+        }
+    }
+
+    @Test
+    fun `sealer rejects a promoted provisional hypothesis as receiver evidence`() = runTest {
+        val harness = harness()
+        try {
+            val hypothesis = ProvisionalNovelHypothesis(
+                hypothesisId = "hypothesis-sealer-1",
+                runId = runId,
+                groupId = groupId,
+                round = 1,
+                agentId = agentId,
+                title = "Provisional idea",
+                idea = "A hidden relation may explain the observed output.",
+                inferredFrom = "Observed in the staged artifact.",
+                assumptions = listOf("The artifact is representative."),
+                uncertainty = "The sample is small.",
+                expectedImpact = "A focused test may improve the next attempt.",
+                falsifiablePrediction = "A held-out counterexample breaks the relation.",
+                minimalTestOrArtifact = "Run the relation check on a held-out case.",
+                confidence = 0.25,
+                provenanceRefs = listOf("submission:submission-1")
+            ).withComputedHash()
+            val existing = requireNotNull(harness.groupDatabase.stagingDao().getById("submission-1"))
+            harness.groupDatabase.stagingDao().update(
+                existing.copy(
+                    type = "HYPOTHESIS",
+                    content = json.encodeToString(hypothesis),
+                    speculative = true,
+                    promotedArtifactHash = AtlasHashing.hashText(json.encodeToString(hypothesis))
+                )
+            )
+
+            assertFailsWith<IllegalArgumentException> {
+                harness.sealer.seal(request(harness.atlas))
             }
         } finally {
             harness.close()
@@ -307,32 +347,91 @@ class NodeEvidencePacketSealerTest {
             }
         }
 
+    @Test
+    fun `origin bound promoted and reused authority remains valid after Atlas amendment`() =
+        runTest {
+            val reuseHarness = harness(
+                toolRunId = "execution-amended-reuse",
+                persistToolRun = true,
+                toolAuthorityTarget = ToolAuthorityTarget.EXPECTED_REUSE,
+                amendedAtlas = true
+            )
+            try {
+                val packet = reuseHarness.sealer.seal(
+                    request(reuseHarness.atlas).copy(
+                        toolRunIds = listOf("execution-amended-reuse")
+                    )
+                )
+                assertEquals(listOf("execution-amended-reuse"), packet.toolRunIds)
+            } finally {
+                reuseHarness.close()
+            }
+
+            val authoringHarness = harness(
+                authoringTool = true,
+                activeAuthoringTool = true,
+                amendedAtlas = true
+            )
+            try {
+                val packet = authoringHarness.sealer.seal(request(authoringHarness.atlas))
+                assertEquals(listOf("submission-1"), packet.acceptedArtifactIds)
+            } finally {
+                authoringHarness.close()
+            }
+        }
+
     private suspend fun harness(
         toolRunId: String? = null,
         persistToolRun: Boolean = false,
         toolAuthorityTarget: ToolAuthorityTarget = ToolAuthorityTarget.NONE,
         toolExecutionPurpose: ToolExecutionPurpose? = null,
         authoringTool: Boolean = false,
-        activeAuthoringTool: Boolean = false
+        activeAuthoringTool: Boolean = false,
+        amendedAtlas: Boolean = false
     ): Harness {
         require(!activeAuthoringTool || authoringTool)
         require(!persistToolRun || toolAuthorityTarget != ToolAuthorityTarget.NONE)
         val root = createTempDirectory("node-evidence-sealer-").toFile()
         val factory = SubstrateDatabaseFactory(root)
-        val atlas = atlas(toolAuthorityTarget, authoringTool)
+        val originAtlas = atlas(toolAuthorityTarget, authoringTool)
+        val atlas = if (amendedAtlas) {
+            originAtlas.copy(
+                version = 2,
+                parentAtlasHash = originAtlas.atlasHash,
+                amendmentIds = listOf("amendment-1"),
+                atlasHash = ""
+            ).withComputedHash()
+        } else {
+            originAtlas
+        }
         factory.getAtlas(runId).atlasDao().insertVersion(
             AtlasVersionEntity(
-                atlasId = atlas.atlasId,
+                atlasId = originAtlas.atlasId,
                 runId = runId,
-                version = atlas.version,
-                receiverContractHash = atlas.receiverContractHash,
+                version = originAtlas.version,
+                receiverContractHash = originAtlas.receiverContractHash,
                 receiverContractJson = json.encodeToString(receiver()),
-                atlasHash = atlas.atlasHash,
+                atlasHash = originAtlas.atlasHash,
                 parentAtlasHash = null,
-                sealedAtlasJson = json.encodeToString(atlas),
+                sealedAtlasJson = json.encodeToString(originAtlas),
                 createdAtMs = 1L
             )
         )
+        if (amendedAtlas) {
+            factory.getAtlas(runId).atlasDao().insertVersion(
+                AtlasVersionEntity(
+                    atlasId = atlas.atlasId,
+                    runId = runId,
+                    version = atlas.version,
+                    receiverContractHash = atlas.receiverContractHash,
+                    receiverContractJson = json.encodeToString(receiver()),
+                    atlasHash = atlas.atlasHash,
+                    parentAtlasHash = originAtlas.atlasHash,
+                    sealedAtlasJson = json.encodeToString(atlas),
+                    createdAtMs = 2L
+                )
+            )
+        }
         val groupDatabase = factory.get(runId, groupId.value)
         val submissionContent = if (activeAuthoringTool) {
             """{"name":"authored-tool"}"""
@@ -380,7 +479,7 @@ class NodeEvidencePacketSealerTest {
             )
         }
         if (activeAuthoringTool) {
-            prepareAuthoringAuthority(groupDatabase, atlas)
+            prepareAuthoringAuthority(groupDatabase, originAtlas)
         }
         val graphRepository = ContributionGraphRepository(
             database = groupDatabase,
@@ -409,7 +508,7 @@ class NodeEvidencePacketSealerTest {
             ).withComputedHash()
         )
         if (toolAuthorityTarget != ToolAuthorityTarget.NONE) {
-            preparePromotedToolAuthority(groupDatabase, atlas)
+            preparePromotedToolAuthority(groupDatabase, originAtlas)
         }
         if (persistToolRun) {
             val executionPurpose = toolExecutionPurpose ?: when (toolAuthorityTarget) {

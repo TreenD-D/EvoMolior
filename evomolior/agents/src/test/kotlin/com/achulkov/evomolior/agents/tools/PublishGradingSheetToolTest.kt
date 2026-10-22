@@ -204,6 +204,7 @@ class PublishGradingSheetToolTest {
 
         assertTrue(result.contains("invalid RE2/J pattern"))
         assertTrue(result.contains("["))
+        assertTrue(result.contains("upper limit of at most 1000"))
         assertEquals(0, db.stagingDao().getTotalCountForAgent(runId, groupId, agentId))
     }
 

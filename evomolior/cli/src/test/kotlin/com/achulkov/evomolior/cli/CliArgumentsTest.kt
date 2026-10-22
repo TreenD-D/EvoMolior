@@ -1,7 +1,10 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+
 package com.achulkov.evomolior.cli
 
 import com.achulkov.evomolior.api.events.EvoMoliorEvent
 import com.achulkov.evomolior.api.model.FinalOutputKind
+import com.achulkov.evomolior.api.model.AcceptanceDiagnosticMode
 import com.achulkov.evomolior.api.model.RunConfig
 import com.achulkov.evomolior.api.model.RunInputArtifactUpload
 import com.achulkov.evomolior.api.model.RunAutoCompletionPolicy
@@ -11,9 +14,23 @@ import com.achulkov.evomolior.api.service.EvoMoliorEngineService
 import com.achulkov.evomolior.api.service.GroupSummary
 import com.achulkov.evomolior.api.service.MetaArchiveEntryRecord
 import com.achulkov.evomolior.api.service.MetaArchiveSummary
+import com.achulkov.evomolior.api.service.AcceptedOutcomeArchiveRequest
+import com.achulkov.evomolior.api.service.MechanismActivation
+import com.achulkov.evomolior.api.service.MechanismActivationCatalog
+import com.achulkov.evomolior.api.service.MechanismActivationReportV1
+import com.achulkov.evomolior.api.service.MechanismActivationState
+import com.achulkov.evomolior.api.service.ProvisionalOutcomeArchiveRequest
+import com.achulkov.evomolior.api.service.RunManifest
+import com.achulkov.evomolior.api.service.RunManifestEntry
+import com.achulkov.evomolior.api.service.RunManifestEntryCategory
+import com.achulkov.evomolior.api.service.RunOutcomeArchiveService
+import com.achulkov.evomolior.api.service.RunOutcomeBundleInspector
 import com.achulkov.evomolior.api.service.AcceptanceAdmissionArtifact
 import com.achulkov.evomolior.api.service.AcceptanceAdmissionCheck
 import com.achulkov.evomolior.api.service.AcceptanceRunBoundary
+import com.achulkov.evomolior.api.service.ArcAgi2NotebookQualificationAuthority
+import com.achulkov.evomolior.api.service.GeneratedOutputFile
+import com.achulkov.evomolior.api.service.RecoveredDeliverableSource
 import com.achulkov.evomolior.core.contract.OverseerDeadEnd
 import com.achulkov.evomolior.core.contract.OverseerDeadEndHistoryEntry
 import com.achulkov.evomolior.core.contract.OverseerExperimentPlan
@@ -25,6 +42,10 @@ import com.achulkov.evomolior.core.contract.OverseerKernelAuditEntry
 import com.achulkov.evomolior.core.contract.OverseerKernelEligibility
 import com.achulkov.evomolior.core.contract.OverseerKernelState
 import com.achulkov.evomolior.api.service.PersistedRunStateStore
+import com.achulkov.evomolior.core.contract.PublicationState
+import com.achulkov.evomolior.core.contract.PublicationStateEvent
+import com.achulkov.evomolior.core.contract.RecoveryPublicationState
+import com.achulkov.evomolior.core.contract.RecoveryPublicationStateEvent
 import com.achulkov.evomolior.core.benchmark.BenchmarkAnswerFormat
 import com.achulkov.evomolior.core.benchmark.Tier0BenchmarkKind
 import com.achulkov.evomolior.core.benchmark.Tier0BenchmarkPrediction
@@ -34,9 +55,37 @@ import com.achulkov.evomolior.core.benchmark.Tier0EvidenceStep
 import com.achulkov.evomolior.core.config.AcceptanceProfile
 import com.achulkov.evomolior.core.config.FastModelSelectionConfig
 import com.achulkov.evomolior.core.config.CouncilExecutionPurpose
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
+import com.achulkov.evomolior.core.config.CodexRuntimePreset
 import com.achulkov.evomolior.core.config.LlmBackend
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
 import com.achulkov.evomolior.core.contract.RunInputArtifactKind
+import com.achulkov.evomolior.core.deliverable.AcceptedDeliverableAuthority
+import com.achulkov.evomolior.core.deliverable.ComponentAuthorityClass
+import com.achulkov.evomolior.core.deliverable.DeliverableAssemblyRequest
+import com.achulkov.evomolior.core.deliverable.DeliverableBlueprint
+import com.achulkov.evomolior.core.deliverable.DeliverableComponentKind
+import com.achulkov.evomolior.core.deliverable.DeliverableComponentProvenance
+import com.achulkov.evomolior.core.deliverable.DeliverableComponentSpec
+import com.achulkov.evomolior.core.deliverable.DeliverableContentOrigin
+import com.achulkov.evomolior.core.deliverable.DeliverableEvidenceDisclosure
+import com.achulkov.evomolior.core.deliverable.DeliverableEvidenceLink
+import com.achulkov.evomolior.core.deliverable.DeliverableFormat
+import com.achulkov.evomolior.core.deliverable.DeliverableHashing
+import com.achulkov.evomolior.core.deliverable.DeliverableSemanticBlock
+import com.achulkov.evomolior.core.deliverable.DeterministicDeliverableAssembler
+import com.achulkov.evomolior.core.deliverable.FailedAcceptanceGate
+import com.achulkov.evomolior.core.deliverable.RecoverySourceCandidate
+import com.achulkov.evomolior.core.deliverable.RecoverySourceSet
+import com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+import com.achulkov.evomolior.core.deliverable.SuppliedDeliverableComponent
+import com.achulkov.evomolior.core.metrics.MetricAvailability
+import com.achulkov.evomolior.core.metrics.RunMetricCatalog
+import com.achulkov.evomolior.core.metrics.RunMetricObservation
+import com.achulkov.evomolior.core.metrics.RunMetricsV1
+import com.achulkov.evomolior.core.outcome.RunOutcomeManifestEntry
+import com.achulkov.evomolior.core.outcome.RunOutcomeManifestEntryCategory
+import com.achulkov.evomolior.core.outcome.RunOutcomeManifestV1
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -51,6 +100,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -68,9 +118,11 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
+import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import java.util.zip.ZipInputStream
+import kotlin.time.Instant
 
 class CliArgumentsTest {
     @Test
@@ -117,7 +169,8 @@ class CliArgumentsTest {
                 "-llm-backend", "codex-chatgpt",
                 "-rounds", "6",
                 "-council-execution-purpose", "appendix-b-acceptance",
-                "-acceptance-profile", "appendix-b-full"
+                "-acceptance-profile", "appendix-b-full",
+                "-acceptance-diagnostic-sweep"
             ),
             codexCliLocator = { "/tmp/codex" },
             codexSessionPreflight = {}
@@ -128,6 +181,10 @@ class CliArgumentsTest {
             options.councilExecutionPurpose
         )
         assertEquals(AcceptanceProfile.APPENDIX_B_FULL, options.acceptanceProfile)
+        assertEquals(
+            AcceptanceDiagnosticMode.FULL_SWEEP_NON_ACCEPTING,
+            options.acceptanceDiagnosticMode
+        )
         assertEquals(
             RunAutoCompletionPolicy.DEFAULT_CONSECUTIVE_ACCEPTED_ROUNDS,
             options.completionStabilityRounds
@@ -142,6 +199,21 @@ class CliArgumentsTest {
                     "-rounds", "6",
                     "-council-execution-purpose", "appendix-b-acceptance"
                 )
+            )
+        }
+        assertFailsWith<CliUsageException> {
+            CliArguments.parse(
+                args = arrayOf(
+                    "-prompt", "Wrong diagnostic profile",
+                    "-input", input.toString(),
+                    "-output", output.toString(),
+                    "-llm-backend", "codex-chatgpt",
+                    "-rounds", "1",
+                    "-council-execution-purpose", "appendix-b-acceptance",
+                    "-acceptance-diagnostic-sweep"
+                ),
+                codexCliLocator = { "/tmp/codex" },
+                codexSessionPreflight = {}
             )
         }
         assertFailsWith<CliUsageException> {
@@ -275,6 +347,60 @@ class CliArgumentsTest {
         assertEquals(ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL, options.modelOverrides["Researcher"])
         assertEquals("/tmp/codex", options.openRouterApiKey)
         assertEquals(listOf("/tmp/codex"), preflightPaths)
+        assertEquals(CodexReasoningEffort.HIGH, options.codexReasoningEffort)
+    }
+
+    @Test
+    fun `codex reasoning effort precedence is CLI then environment then high`() {
+        val inputDir = createTempDirectory("cli-codex-effort-input-").toFile()
+        val outputDir = createTempDirectory("cli-codex-effort-output-").toFile()
+        fun parse(extra: Array<String>, environment: String?): CliOptions =
+            requireNotNull(
+                CliArguments.parse(
+                    args = arrayOf(
+                        "-prompt", "Reasoning effort authority",
+                        "-input", inputDir.absolutePath,
+                        "-output", outputDir.absolutePath,
+                        "-llm-backend", "codex-chatgpt",
+                        "-rounds", "1"
+                    ) + extra,
+                    codexCliLocator = { "/tmp/codex" },
+                    codexSessionPreflight = {},
+                    codexReasoningEffortEnvironment = { environment }
+                )
+            )
+
+        assertEquals(CodexReasoningEffort.HIGH, parse(emptyArray(), null).codexReasoningEffort)
+        assertEquals(CodexReasoningEffort.LOW, parse(emptyArray(), "low").codexReasoningEffort)
+        assertEquals(
+            CodexReasoningEffort.HIGH,
+            parse(arrayOf("--codex-reasoning-effort", "high"), "low").codexReasoningEffort
+        )
+        assertFailsWith<CliUsageException> {
+            parse(arrayOf("--codex-reasoning-effort", "maximum"), "medium")
+        }
+    }
+
+    @Test
+    fun `non codex backend ignores codex reasoning effort environment`() {
+        val inputDir = createTempDirectory("cli-openrouter-effort-input-").toFile()
+        val outputDir = createTempDirectory("cli-openrouter-effort-output-").toFile()
+
+        val options = requireNotNull(
+            CliArguments.parse(
+                args = arrayOf(
+                    "-prompt", "OpenRouter run",
+                    "-input", inputDir.absolutePath,
+                    "-output", outputDir.absolutePath,
+                    "-openrouter-api-key", "sk-test",
+                    "-rounds", "1"
+                ),
+                codexReasoningEffortEnvironment = { "invalid-for-codex" }
+            )
+        )
+
+        assertEquals(LlmBackend.OPENROUTER, options.llmBackend)
+        assertEquals(CodexReasoningEffort.HIGH, options.codexReasoningEffort)
     }
 
     @Test
@@ -422,7 +548,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `single agent baseline executes tool loop and writes benchmark artifacts`() = runBlocking {
+    fun `single agent baseline executes tool loop and writes benchmark artifacts`(): Unit = runBlocking {
         val outputDir = createTempDirectory("tier0-single-agent-baseline-run-output-")
         val tasksJsonl = createTempDirectory("tier0-single-agent-baseline-tasks-").resolve("tasks.jsonl")
         tasksJsonl.toFile().writeText(
@@ -1286,6 +1412,8 @@ class CliArgumentsTest {
                   "groupCount": 2,
                   "councilExecutionPurpose": "APPENDIX_B_ACCEPTANCE",
                   "acceptanceProfile": "runtime-usability-smoke",
+                  "acceptanceDiagnosticMode": "STRICT",
+                  "codexReasoningEffort": "high",
                   "finalOutput": {
                     "relativePath": "report.md",
                     "mediaType": "text/markdown"
@@ -1302,11 +1430,170 @@ class CliArgumentsTest {
             stage.councilExecutionPurpose
         )
         assertEquals(AcceptanceProfile.RUNTIME_USABILITY_SMOKE, stage.acceptanceProfile)
+        assertEquals(AcceptanceDiagnosticMode.STRICT, stage.acceptanceDiagnosticMode)
+        assertEquals(CodexReasoningEffort.HIGH, stage.codexReasoningEffort)
         assertTrue(
             cliJson.encodeToString(CliPipelineConfig.serializer(), decoded)
                 .contains("\"runtime-usability-smoke\"")
         )
     }
+
+    @Test
+    fun `checked in ARC notebook target decodes complete authority`() {
+        val target = repositoryFile(
+            "documentation/agent-notes/" +
+                "gate-d-arc-agi-2-notebook-qualification-20260726.json"
+        )
+        val decoded = cliJson.decodeFromString(
+            CliPipelineConfig.serializer(),
+            target.readText()
+        )
+
+        val primary = assertNotNull(decoded.primary)
+        assertEquals("gate-d-arc-agi-2-notebook-qualification", primary.id)
+        assertEquals(6, primary.rounds)
+        assertEquals(2, primary.groupCount)
+        assertEquals(2, primary.maxAgentsPerGroup)
+        assertEquals(
+            CouncilExecutionPurpose.APPENDIX_B_ACCEPTANCE,
+            primary.councilExecutionPurpose
+        )
+        assertEquals(AcceptanceProfile.APPENDIX_B_FULL, primary.acceptanceProfile)
+        assertEquals(
+            AcceptanceDiagnosticMode.FULL_SWEEP_NON_ACCEPTING,
+            primary.acceptanceDiagnosticMode
+        )
+        val prompt = assertNotNull(primary.prompt)
+        assertTrue(
+            prompt.contains("EvoARC-2 symbolic baseline qualification") ||
+                prompt.contains("offline Kaggle ARC-AGI-2 receiver")
+        )
+        assertTrue(
+            prompt.contains("rotation, reflection, and color-permutation") ||
+                prompt.contains("equivariant views")
+        )
+        assertTrue(
+            prompt.contains("neural and task-time-adaptation branches") ||
+                prompt.contains("heavyweight branch")
+        )
+        assertEquals("submission.ipynb", primary.finalOutput?.relativePath)
+        assertEquals("application/x-ipynb+json", primary.finalOutput?.mediaType)
+        assertEquals(
+            9,
+            primary.finalOutput?.validation?.minimumJsonArraySizes?.get("cells")
+        )
+        val notebook = assertNotNull(
+            primary.finalOutput?.validation?.jupyterNotebookSource
+        )
+        assertEquals(
+            ArcAgi2NotebookQualificationAuthority.notebookValidationContract,
+            primary.finalOutput?.validation
+        )
+        assertEquals(6, notebook.minimumCodeCellCount)
+        assertTrue("def select_two_outputs" in notebook.requiredCodeSignals)
+        assertTrue("mutation" in notebook.requiredMarkdownSignals)
+        assertTrue("requests." in notebook.forbiddenCodeSignals)
+        val obligation = assertNotNull(primary.quantitativeToolObligation)
+        ArcAgi2NotebookQualificationAuthority.requireExact(obligation)
+        assertEquals(8, obligation.horizonIntervalCount)
+        assertEquals("arc_candidate_portfolio_audit", obligation.requiredOpportunityId)
+        assertEquals(8_000, obligation.maximumOpportunityRuntimeMillis)
+        assertEquals(
+            setOf(
+                "duplicate_output_diversity_boundary",
+                "exactly_two_attempt_boundary",
+                "eight_second_runtime_boundary",
+                "rate_denominator_boundary"
+            ),
+            obligation.exactPromotionTestIds
+        )
+        assertEquals(4, obligation.exactPromotionFixtures.size)
+        assertEquals(
+            listOf(
+                "training_pair_count",
+                "search_interval_seconds",
+                "candidate_generated_per_interval",
+                "candidate_exact_fit_per_interval",
+                "candidate_duplicate_output_per_interval",
+                "candidate_distinct_output_per_interval",
+                "candidate_distinct_family_per_interval",
+                "interval_exact_fit_rate",
+                "interval_family_diversity",
+                "total_exact_fit_candidates",
+                "selected_attempt_count",
+                "selected_distinct_output_count",
+                "selection_runtime_seconds"
+            ),
+            obligation.requiredFields.map { it.roleId }
+        )
+    }
+
+    @Test
+    fun `checked in ARC notebook target plans and publishes without provider runtime`(): Unit =
+        runBlocking {
+            val inputDir = createTempDirectory("cli-arc-target-input-").toFile()
+            val outputDir = createTempDirectory("cli-arc-target-output-").toFile()
+            val target = repositoryFile(
+                "documentation/agent-notes/" +
+                    "gate-d-arc-agi-2-notebook-qualification-20260726.json"
+            )
+            val fakeEngine = FakeCliPipelineEngineService()
+            val runId = "cli-arc-notebook-preflight"
+
+            val result = runCli(
+                options = CliOptions(
+                    prompt = "The checked-in target is authoritative.",
+                    inputDir = inputDir.toPath(),
+                    outputDir = outputDir.toPath(),
+                    openRouterApiKey = "/tmp/codex",
+                    llmBackend = LlmBackend.CODEX_CHATGPT,
+                    modelOverrides = emptyMap(),
+                    debug = false,
+                    fast = false,
+                    rounds = 1,
+                    runId = runId,
+                    pipelineConfigPath = target
+                ),
+                runtimeFactory = { _, _ -> CliRuntime(fakeEngine) },
+                acceptanceAdmissionController = AcceptanceAdmissionController.NONE
+            )
+
+            assertTrue(result.completedSuccessfully)
+            val config = assertNotNull(fakeEngine.capturedConfigs.singleOrNull())
+            assertEquals(6, config.rounds)
+            assertEquals(2, config.groupCount)
+            assertEquals(2, config.maxAgentsPerGroup)
+            assertEquals(AcceptanceProfile.APPENDIX_B_FULL, config.acceptanceProfile)
+            assertEquals(
+                AcceptanceDiagnosticMode.FULL_SWEEP_NON_ACCEPTING,
+                config.acceptanceDiagnosticMode
+            )
+            assertEquals(
+                "arc_candidate_portfolio_audit",
+                config.quantitativeToolObligation?.requiredOpportunityId
+            )
+            assertEquals("submission.ipynb", config.finalOutputSpec?.relativePath)
+
+            val runRoot = outputDir.resolve(runId)
+            val publishedNotebook = runRoot.resolve("outputs/submission.ipynb")
+            assertTrue(publishedNotebook.isFile)
+            assertEquals(fakeArcNotebookSource(), publishedNotebook.readText())
+            val stageEntries = unzipEntries(runRoot.resolve("results.zip").readBytes())
+            assertEquals(
+                fakeArcNotebookSource(),
+                stageEntries["outputs/submission.ipynb"]
+            )
+            val pipelineArchive = runRoot.resolve("pipeline-results.zip").readBytes()
+            val pipelineEntries = unzipEntries(pipelineArchive)
+            assertEquals(
+                fakeArcNotebookSource(),
+                pipelineEntries["outputs/submission.ipynb"]
+            )
+            val manifest = verifyPipelineResultsZip(pipelineArchive)
+            assertTrue(
+                manifest.entries.any { it.path == "outputs/submission.ipynb" }
+            )
+        }
 
     @Test
     fun `parses overseer execution mode flag explicitly`() {
@@ -1368,6 +1655,32 @@ class CliArgumentsTest {
     }
 
     @Test
+    fun `parses zero round duration as budget-led mode`() {
+        val inputDir = createTempDirectory("cli-budget-led-input-").toFile()
+        val outputDir = createTempDirectory("cli-budget-led-output-").toFile()
+
+        val options = CliArguments.parse(
+            arrayOf(
+                "-prompt",
+                "Budget-led objective",
+                "-input",
+                inputDir.absolutePath,
+                "-output",
+                outputDir.absolutePath,
+                "-openrouter-api-key",
+                "sk-test",
+                "-rounds",
+                "1",
+                "-round-duration-minutes",
+                "0"
+            )
+        )
+
+        assertNotNull(options)
+        assertEquals(0, options.roundDurationMinutes)
+    }
+
+    @Test
     fun `accepts single group runs`() {
         val inputDir = createTempDirectory("cli-single-group-input-").toFile()
         val outputDir = createTempDirectory("cli-single-group-output-").toFile()
@@ -1394,7 +1707,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `runCli writes the per-run output bundle using a fake engine`() = runBlocking {
+    fun `runCli writes the per-run output bundle using a fake engine`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-smoke-input-").toFile().apply {
             resolve("notes.txt").writeText("hello from input")
         }
@@ -1423,7 +1736,9 @@ class CliArgumentsTest {
         assertTrue(runOutputDir.resolve("summary.json").exists())
         assertTrue(runOutputDir.resolve("results.zip").exists())
         assertEquals("Smoke test objective", runOutputDir.resolve("prompt.txt").readText())
-        assertTrue(runOutputDir.resolve("summary.json").readText().contains("\"runId\": \"cli-smoke\""))
+        val summary = runOutputDir.resolve("summary.json").readText()
+        assertTrue(summary.contains("\"runId\": \"cli-smoke\""))
+        assertTrue(summary.contains("\"outcomeClass\": \"ACCEPTED_DECISION_PACKAGE\""))
         assertTrue(fakeEngine.capturedConfig != null)
         assertEquals("cli-smoke", fakeEngine.capturedConfig!!.runId)
         assertEquals("Smoke test objective", fakeEngine.capturedConfig!!.objective)
@@ -1433,7 +1748,213 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `runCli projects omitted rounds into bounded grader-authoritative completion`() = runBlocking {
+    fun `completed provisional archive reuse materializes verified report without provider calls`(): Unit = runBlocking {
+        val fixture = completedProvisionalReportFixture()
+        val summaryBefore = fixture.first.outputDir.resolve(fixture.first.runId!!).resolve("summary.json").toFile().readText()
+        var runtimeCalls = 0
+        val result = runCli(fixture.first, runtimeFactory = { _, _ ->
+            runtimeCalls++
+            error("Completed archive reuse must not create a runtime")
+        })
+        val root = fixture.first.outputDir.resolve(fixture.first.runId!!).toFile()
+        assertTrue(result.completedSuccessfully)
+        assertEquals(0, runtimeCalls)
+        assertEquals(fixture.second, root.resolve("outputs/cli-snapshot-cleanup-review.md").readText())
+        assertEquals(summaryBefore, root.resolve("summary.json").readText())
+        assertFalse(root.resolve("results.zip").exists())
+        assertTrue(root.resolve("recovery-results.zip").exists())
+        val packaged = unzipEntries(root.resolve("pipeline-results.zip").readBytes())
+        assertEquals(fixture.second, packaged["outputs/cli-snapshot-cleanup-review.md"])
+        verifyPipelineResultsZip(root.resolve("pipeline-results.zip").readBytes())
+        assertFalse(packaged.keys.any { it.startsWith("outputs/recovered/") })
+    }
+
+    @Test
+    fun `completed typed accepted archive reuse retains accepted filename`(): Unit = runBlocking {
+        val (options, report) = completedProvisionalReportFixture()
+        val root = options.outputDir.resolve(options.runId!!).toFile()
+        val bytes = TestOutcomeArchiveFactory.accepted(
+            options.runId!!,
+            mapOf("outputs/cli-snapshot-cleanup-review.md" to report)
+        )
+        root.resolve("results.zip").writeBytes(bytes)
+        val summaryFile = root.resolve("summary.json")
+        val summary = cliJson.decodeFromString(CliRunSummary.serializer(), summaryFile.readText())
+        summaryFile.writeText(cliJson.encodeToString(summary.copy(
+            resultsBundlePath = "/old/moved/run/results.zip",
+            outcome = RunOutcomeBundleInspector.inspect(bytes),
+            acceptanceStatus = com.achulkov.evomolior.core.deliverable.AcceptanceStatus.ACCEPTED,
+        )))
+        assertTrue(runCli(options, runtimeFactory = { _, _ ->
+            error("Typed accepted completed reuse must not create a runtime")
+        }).completedSuccessfully)
+        assertEquals(report, root.resolve("outputs/cli-snapshot-cleanup-review.md").readText())
+        assertTrue(root.resolve("results.zip").readBytes().contentEquals(bytes))
+    }
+
+    @Test
+    fun `completed provisional archive infers primary report when no output is declared`(): Unit = runBlocking {
+        val (options, report) = completedProvisionalReportFixture()
+        options.pipelineConfigPath!!.toFile().writeText(
+            """{"primary":{"id":"primary","prompt":"Review snapshot","fast":false}}"""
+        )
+        assertTrue(runCli(options, runtimeFactory = { _, _ ->
+            error("Completed inference must not create a runtime")
+        }).completedSuccessfully)
+        val root = options.outputDir.resolve(options.runId!!).toFile()
+        assertEquals(report, root.resolve("outputs/cli-snapshot-cleanup-review.md").readText())
+        assertEquals(report, unzipEntries(root.resolve("pipeline-results.zip").readBytes())["outputs/cli-snapshot-cleanup-review.md"])
+    }
+
+    @Test
+    fun `previous stage bundling retains verified recovery archive kind and report`(): Unit = runBlocking {
+        val (options, report) = completedProvisionalReportFixture()
+        options.pipelineConfigPath!!.toFile().writeText(
+            """{
+                "primary":{"id":"primary","prompt":"Review snapshot","fast":false,"finalOutput":{"relativePath":"cli-snapshot-cleanup-review.md","mediaType":"text/markdown"}},
+                "stages":[{"id":"follow-up","prompt":"Inspect previous review","fast":false}]
+            }"""
+        )
+        val fakeEngine = FakeCliPipelineEngineService()
+        var runtimeCalls = 0
+        assertTrue(runCli(options, runtimeFactory = { _, _ ->
+            runtimeCalls++
+            CliRuntime(fakeEngine)
+        }).completedSuccessfully)
+        assertEquals(1, runtimeCalls)
+        assertEquals("${options.runId}-follow-up", fakeEngine.capturedConfigs.single().runId)
+        val root = options.outputDir.resolve(options.runId!!).toFile()
+        val previous = root.resolve(".pipeline-inputs/follow-up/previous-stage")
+        assertFalse(previous.resolve("results.zip").exists())
+        assertTrue(previous.resolve("recovery-results.zip").readBytes().contentEquals(
+            root.resolve("recovery-results.zip").readBytes()
+        ))
+        assertEquals(report, previous.resolve("results-bundle/outputs/recovered/cli-snapshot-cleanup-review.md").readText())
+        assertTrue(previous.resolve("summary.json").readText().contains("PROVISIONAL"))
+    }
+
+    @Test
+    fun `completed typed archive failures never retry provider or overwrite managed output`(): Unit = runBlocking {
+        for (failure in listOf(
+            "tampered", "missing", "malformed", "missing-manifest", "manifest",
+            "run-id", "archive-run-id", "kind", "summary", "missing-output"
+        )) {
+            val (options, _) = completedProvisionalReportFixture()
+            val root = options.outputDir.resolve(options.runId!!).toFile()
+            val archive = root.resolve("recovery-results.zip")
+            val summaryFile = root.resolve("summary.json")
+            val summary = cliJson.decodeFromString(CliRunSummary.serializer(), summaryFile.readText())
+            when (failure) {
+                "tampered" -> archive.writeBytes(buildZipBytes(
+                    unzipEntries(archive.readBytes()) +
+                        ("outputs/recovered/cli-snapshot-cleanup-review.md" to "tampered report")
+                ))
+                "missing" -> assertTrue(archive.delete())
+                "malformed" -> archive.writeText("not a zip")
+                "missing-manifest" -> archive.writeBytes(buildZipBytes(
+                    unzipEntries(archive.readBytes()) - "run-outcome-manifest-v1.json"
+                ))
+                "archive-run-id" -> archive.writeBytes(TestOutcomeArchiveFactory.provisional("different-run"))
+                "manifest" -> summaryFile.writeText(cliJson.encodeToString(
+                    summary.copy(outcome = summary.outcome!!.copy(manifestHash = "0".repeat(64)))
+                ))
+                "run-id" -> summaryFile.writeText(cliJson.encodeToString(summary.copy(runId = "different-run")))
+                "kind" -> summaryFile.writeText(cliJson.encodeToString(
+                    summary.copy(resultsBundlePath = root.resolve("results.zip").absolutePath)
+                ))
+                "summary" -> summaryFile.writeText("{broken")
+                "missing-output" -> options.pipelineConfigPath!!.toFile().writeText(
+                    """{"primary":{"id":"primary","prompt":"Review snapshot","fast":false,"finalOutput":{"relativePath":"absent.md","mediaType":"text/markdown"}}}"""
+                )
+            }
+            var runtimeCalls = 0
+            assertFailsWith<Exception>(failure) {
+                runCli(options, runtimeFactory = { _, _ ->
+                    runtimeCalls++
+                    error("Must not retry completed stage")
+                })
+            }
+            assertEquals(0, runtimeCalls, failure)
+            assertEquals("prior generated placeholder", root.resolve("outputs/cli-snapshot-cleanup-review.md").readText(), failure)
+            assertFalse(root.resolve("pipeline-results.zip").exists(), failure)
+        }
+    }
+
+    private fun completedProvisionalReportFixture(): Pair<CliOptions, String> {
+        val input = createTempDirectory("cli-provisional-reuse-input-")
+        val output = createTempDirectory("cli-provisional-reuse-output-")
+        val runId = "completed-provisional-report"
+        val root = output.resolve(runId).toFile().apply { mkdirs() }
+        val report = "# Snapshot cleanup review\n\nReal archived findings, not a generated summary.\n"
+        val bytes = TestOutcomeArchiveFactory.provisional(
+            runId,
+            GeneratedOutputFile(
+                relativePath = "cli-snapshot-cleanup-review.md",
+                mediaType = "text/markdown",
+                content = report,
+                sourceGroupId = "group-0",
+            )
+        )
+        root.resolve("recovery-results.zip").writeBytes(bytes)
+        val presentation = RunOutcomeBundleInspector.inspect(bytes)
+        root.resolve("summary.json").writeText(cliJson.encodeToString(CliRunSummary(
+            runId = runId, prompt = "Review snapshot", inputDirectory = input.toString(),
+            inputArtifactCount = 0, outputDirectory = root.absolutePath,
+            completedAt = "2026-09-09T17:12:00Z", durationMs = 42,
+            debugLogPath = null, resultsBundlePath = root.resolve("recovery-results.zip").absolutePath,
+            status = "COMPLETED", winnerId = null, modelOverrides = emptyMap(),
+            outcome = presentation,
+            executionStatus = com.achulkov.evomolior.core.deliverable.ExecutionCompletionStatus.COMPLETED,
+            acceptanceStatus = com.achulkov.evomolior.core.deliverable.AcceptanceStatus.PROVISIONAL,
+        )))
+        root.resolve("outputs").mkdirs()
+        root.resolve("outputs/cli-snapshot-cleanup-review.md").writeText("prior generated placeholder")
+        val pipeline = output.resolve("pipeline.json").toFile().apply {
+            writeText("""{"primary":{"id":"primary","prompt":"Review snapshot","fast":false,"finalOutput":{"relativePath":"cli-snapshot-cleanup-review.md","mediaType":"text/markdown"}}}""")
+        }
+        return CliOptions(
+            prompt = "Review snapshot", inputDir = input, outputDir = output,
+            openRouterApiKey = "sk-test", modelOverrides = emptyMap(), debug = false,
+            fast = false, rounds = 1, runId = runId, pipelineConfigPath = pipeline.toPath(),
+        ) to report
+    }
+
+    @Test
+    fun `runCli treats completed provisional recovery as process success`(): Unit = runBlocking {
+        val inputDir = createTempDirectory("cli-recovered-input-").toFile()
+        val outputDir = createTempDirectory("cli-recovered-output-").toFile()
+
+        val result = runCli(
+            options = CliOptions(
+                prompt = "Recover diagnostic output without acceptance.",
+                inputDir = inputDir.toPath(),
+                outputDir = outputDir.toPath(),
+                openRouterApiKey = "sk-test",
+                modelOverrides = emptyMap(),
+                debug = false,
+                fast = false,
+                rounds = 1,
+                runId = "cli-recovered"
+            ),
+            runtimeFactory = { _, _ -> CliRuntime(FakeRecoveredCliEngineService()) }
+        )
+
+        assertTrue(result.completedSuccessfully)
+        val runOutputDir = outputDir.resolve("cli-recovered")
+        assertTrue(runOutputDir.resolve("recovery-results.zip").exists())
+        assertFalse(runOutputDir.resolve("results.zip").exists())
+        assertTrue(runOutputDir.resolve("pipeline-results.zip").exists())
+        assertTrue(runOutputDir.resolve("primary/submission.ipynb").exists())
+        val summary = runOutputDir.resolve("summary.json").readText()
+        assertTrue(summary.contains("\"status\": \"COMPLETED\""))
+        assertTrue(summary.contains("\"executionStatus\": \"COMPLETED\""))
+        assertTrue(summary.contains("\"acceptanceStatus\": \"PROVISIONAL\""))
+        assertTrue(summary.contains("\"processExitCode\": 0"))
+        assertTrue(summary.contains("\"outcomeClass\": \"PROVISIONAL_DECISION_PACKAGE\""))
+    }
+
+    @Test
+    fun `runCli projects omitted rounds into bounded grader-authoritative completion`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-auto-run-input-").toFile()
         val outputDir = createTempDirectory("cli-auto-run-output-").toFile()
         val fakeEngine = FakeCliEngineService()
@@ -1463,7 +1984,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `runCli fetches a results bundle that already contains the final article after run completion`() = runBlocking {
+    fun `runCli fetches a results bundle that already contains the final article after run completion`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-fast-input-").toFile()
         val outputDir = createTempDirectory("cli-fast-output-").toFile()
         val fakeEngine = FakeCliBundleEngineService()
@@ -1495,11 +2016,30 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `fast browser run adds default follow up stage and aggregates published outputs`() = runBlocking {
+    fun `fast browser run aggregates explicitly configured follow up outputs and verifies packaging`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-pipeline-default-input-").toFile().apply {
             resolve("brief.txt").writeText("mindvortex brief")
         }
         val outputDir = createTempDirectory("cli-pipeline-default-output-").toFile()
+        val pipelineFile = outputDir.resolve("pipeline.json").apply {
+            writeText(
+                """
+                {
+                  "stages": [{
+                    "id": "fast-follow-up",
+                    "prompt": "Refine the previous HTML article using its source-grounded evidence.",
+                    "fast": true,
+                    "rounds": 1,
+                    "inheritsPreviousOutputs": true,
+                    "finalOutput": {
+                      "relativePath": "refined/final-article-refined.html",
+                      "mediaType": "text/html"
+                    }
+                  }]
+                }
+                """.trimIndent()
+            )
+        }
         val fakeEngine = FakeCliPipelineEngineService()
 
         val result = runCli(
@@ -1512,7 +2052,8 @@ class CliArgumentsTest {
                 debug = true,
                 fast = true,
                 rounds = 5,
-                runId = "cli-pipeline-default"
+                runId = "cli-pipeline-default",
+                pipelineConfigPath = pipelineFile.toPath(),
             ),
             runtimeFactory = { _, _ -> CliRuntime(fakeEngine) }
         )
@@ -1527,8 +2068,8 @@ class CliArgumentsTest {
         val followUpConfig = assertNotNull(fakeEngine.capturedConfigs.getOrNull(1))
         assertEquals("final-article.html", primaryConfig.finalOutputSpec?.relativePath)
         assertEquals("refined/final-article-refined.html", followUpConfig.finalOutputSpec?.relativePath)
-        assertTrue(followUpConfig.objective.contains("do not compress, summarize, or shorten"))
-        assertTrue(followUpConfig.objective.contains("source-grounded evidence notes"))
+        assertTrue(followUpConfig.objective.contains("Refine the previous HTML article"))
+        assertTrue(followUpConfig.objective.contains("source-grounded evidence"))
 
         val followUpArtifacts = followUpConfig.contextArtifacts.map { it.relativePath }.toSet()
         assertTrue("previous-stage/results.zip" in followUpArtifacts)
@@ -1557,22 +2098,35 @@ class CliArgumentsTest {
         assertTrue(pipelineEntries.keys.contains("outputs/assets/images/cli-pipeline-default-hero.png"))
         assertTrue(pipelineEntries.keys.contains("outputs/assets/images/cli-pipeline-default-fast-follow-up-hero.png"))
         assertTrue(pipelineEntries.keys.contains("pipeline-summary.json"))
+        assertTrue(pipelineEntries.keys.contains(CliPipelineResultsManifestV1.PATH))
+        val pipelineArchiveBytes = runOutputDir.resolve("pipeline-results.zip").readBytes()
+        val pipelineManifest = verifyPipelineResultsZip(pipelineArchiveBytes)
+        assertEquals(
+            pipelineEntries.keys - CliPipelineResultsManifestV1.PATH,
+            pipelineManifest.entries.mapTo(linkedSetOf()) { it.path },
+        )
+        val tamperedEntries = pipelineEntries.toMutableMap()
+        tamperedEntries["outputs/final-article.html"] =
+            tamperedEntries.getValue("outputs/final-article.html") + "tampered"
+        assertFailsWith<IllegalArgumentException> {
+            verifyPipelineResultsZip(buildZipBytes(tamperedEntries))
+        }
     }
 
     @Test
-    fun `track three publication objective and submission stage request authored html outputs`() = runBlocking {
-        val inputDir = createTempDirectory("cli-pipeline-track3-input-").toFile().apply {
-            resolve("track3.md").writeText("Track 3 Agent Society application vector")
+    fun `publication objective and submission stage request authored html outputs`(): Unit = runBlocking {
+        val inputDir = createTempDirectory("cli-pipeline-publication-input-").toFile().apply {
+            resolve("brief.md").writeText("Project strategy and delivery brief")
         }
-        val outputDir = createTempDirectory("cli-pipeline-track3-output-").toFile()
-        val pipelineFile = createTempDirectory("cli-pipeline-track3-").toFile().resolve("pipeline.json").apply {
+        val outputDir = createTempDirectory("cli-pipeline-publication-output-").toFile()
+        val pipelineFile = createTempDirectory("cli-pipeline-publication-").toFile().resolve("pipeline.json").apply {
             writeText(
                 """
                 {
                   "stages": [
                     {
                       "id": "submission-brief",
-                      "prompt": "Produce a polished browser-readable submission brief for Qwen Cloud Hackathon Track 3.",
+                      "prompt": "Produce a polished browser-readable project submission brief.",
                       "fast": true,
                       "rounds": 1,
                       "finalOutputKind": "HTML_ARTICLE",
@@ -1592,7 +2146,7 @@ class CliArgumentsTest {
 
         val result = runCli(
             options = CliOptions(
-                prompt = "The final artifacts must be publication-ready strategy and submission-brief documents for Qwen Cloud Hackathon Track 3.",
+                prompt = "The final artifacts must be publication-ready strategy and project submission-brief documents.",
                 inputDir = inputDir.toPath(),
                 outputDir = outputDir.toPath(),
                 openRouterApiKey = "sk-test",
@@ -1600,7 +2154,7 @@ class CliArgumentsTest {
                 debug = true,
                 fast = true,
                 rounds = 3,
-                runId = "cli-pipeline-track3",
+                runId = "cli-pipeline-publication",
                 pipelineConfigPath = pipelineFile.toPath()
             ),
             runtimeFactory = { _, _ -> CliRuntime(fakeEngine) }
@@ -1608,7 +2162,7 @@ class CliArgumentsTest {
 
         assertTrue(result.completedSuccessfully)
         assertEquals(
-            listOf("cli-pipeline-track3", "cli-pipeline-track3-submission-brief"),
+            listOf("cli-pipeline-publication", "cli-pipeline-publication-submission-brief"),
             fakeEngine.capturedConfigs.map { it.runId }
         )
 
@@ -1621,13 +2175,13 @@ class CliArgumentsTest {
         assertEquals("text/html", submissionConfig.finalOutputSpec?.mediaType)
         assertEquals(FinalOutputKind.HTML_ARTICLE, submissionConfig.finalOutputSpec?.kind)
 
-        val runOutputDir = outputDir.resolve("cli-pipeline-track3")
+        val runOutputDir = outputDir.resolve("cli-pipeline-publication")
         assertTrue(runOutputDir.resolve("outputs/final-article.html").exists())
         assertTrue(runOutputDir.resolve("pipeline-summary.json").readText().contains("\"submission-brief\""))
     }
 
     @Test
-    fun `pipeline primary contract publishes required output without an extra stage`() = runBlocking {
+    fun `pipeline primary contract publishes required output without an extra stage`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-pipeline-primary-input-").toFile().apply {
             resolve("brief.txt").writeText("single-stage audit brief")
         }
@@ -1699,7 +2253,98 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `default follow up stage inherits explicit run shape overrides`() = runBlocking {
+    fun `pipeline quantitative tool obligation propagates into run config`(): Unit = runBlocking {
+        val inputDir = createTempDirectory("cli-pipeline-quantitative-input-").toFile()
+        val outputDir = createTempDirectory("cli-pipeline-quantitative-output-").toFile()
+        val pipelineFile = createTempDirectory("cli-pipeline-quantitative-").toFile()
+            .resolve("pipeline.json")
+            .apply {
+                writeText(
+                    """
+                    {
+                      "primary": {
+                        "id": "quantitative",
+                        "prompt": "Produce a bounded quantitative result.",
+                        "fast": true,
+                        "rounds": 1,
+                        "groupCount": 2,
+                        "quantitativeToolObligation": {
+                          "horizonTimeBasis": "HOUR",
+                          "horizonIntervalCount": 72,
+                          "allowedOpportunityTypes": ["CALCULATION"],
+                          "requiredFields": [
+                            {
+                              "roleId": "hourly_load",
+                              "fieldName": "hourly_load_w",
+                              "location": "INPUT",
+                              "shape": "HORIZON_SERIES",
+                              "quantitySpec": {
+                                "dimension": {
+                                  "exponents": [{"key": "power", "value": 1}]
+                                },
+                                "unitId": "W",
+                                "scaleToSi": 1.0,
+                                "aggregation": "AVERAGE_OVER_INTERVALS",
+                                "timeBasis": "HOUR"
+                              }
+                            },
+                            {
+                              "roleId": "hourly_energy",
+                              "fieldName": "hourly_energy_kwh",
+                              "location": "OUTPUT",
+                              "shape": "HORIZON_SERIES",
+                              "quantitySpec": {
+                                "dimension": {
+                                  "exponents": [{"key": "energy", "value": 1}]
+                                },
+                                "unitId": "kWh",
+                                "scaleToSi": 3600000.0,
+                                "aggregation": "SUM_OVER_INTERVALS",
+                                "timeBasis": "HOUR"
+                              }
+                            }
+                          ]
+                        },
+                        "finalOutput": {
+                          "relativePath": "quantitative.md",
+                          "mediaType": "text/markdown"
+                        }
+                      }
+                    }
+                    """.trimIndent()
+                )
+            }
+        val fakeEngine = FakeCliPipelineEngineService()
+
+        val result = runCli(
+            options = CliOptions(
+                prompt = "Fallback prompt.",
+                inputDir = inputDir.toPath(),
+                outputDir = outputDir.toPath(),
+                openRouterApiKey = "sk-test",
+                modelOverrides = emptyMap(),
+                debug = false,
+                fast = true,
+                rounds = 1,
+                runId = "cli-pipeline-quantitative",
+                pipelineConfigPath = pipelineFile.toPath()
+            ),
+            runtimeFactory = { _, _ -> CliRuntime(fakeEngine) }
+        )
+
+        assertTrue(result.completedSuccessfully)
+        val obligation = assertNotNull(
+            fakeEngine.capturedConfigs.single().quantitativeToolObligation
+        )
+        assertEquals(72, obligation.horizonIntervalCount)
+        assertEquals(
+            listOf("hourly_load", "hourly_energy"),
+            obligation.requiredFields.map { it.roleId }
+        )
+    }
+
+    @Test
+    fun `fast browser run stays single stage and preserves explicit run shape overrides`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-pipeline-default-shape-input-").toFile().apply {
             resolve("brief.txt").writeText("mindvortex brief")
         }
@@ -1726,24 +2371,20 @@ class CliArgumentsTest {
 
         assertTrue(result.completedSuccessfully)
         assertEquals(
-            listOf("cli-pipeline-default-shape", "cli-pipeline-default-shape-fast-follow-up"),
+            listOf("cli-pipeline-default-shape"),
             fakeEngine.capturedConfigs.map { it.runId }
         )
 
         val primaryConfig = assertNotNull(fakeEngine.capturedConfigs.firstOrNull())
-        val followUpConfig = assertNotNull(fakeEngine.capturedConfigs.getOrNull(1))
         assertEquals(6, primaryConfig.groupCount)
         assertEquals(4, primaryConfig.maxAgentsPerGroup)
         assertEquals(1800.0, primaryConfig.budgetOverride)
         assertEquals(20, primaryConfig.rounds)
-        assertEquals(6, followUpConfig.groupCount)
-        assertEquals(4, followUpConfig.maxAgentsPerGroup)
-        assertEquals(1800.0, followUpConfig.budgetOverride)
-        assertEquals(1, followUpConfig.rounds)
+        assertFalse(outputDir.resolve("cli-pipeline-default-shape/stages").exists())
     }
 
     @Test
-    fun `pipeline config resolves stage prompt file relative to config and publishes json output`() = runBlocking {
+    fun `pipeline config resolves stage prompt file relative to config and publishes json output`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-pipeline-config-input-").toFile().apply {
             resolve("brief.txt").writeText("mindvortex brief")
         }
@@ -1823,7 +2464,60 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `pipeline config propagates explicit acceptance authority to run config`() = runBlocking {
+    fun `preset and ceiling flow through primary inherited and overridden stages`(): Unit = runBlocking {
+        val input = createTempDirectory("preset-stage-input-")
+        val output = createTempDirectory("preset-stage-output-")
+        val pipeline = createTempDirectory("preset-stage-config-").resolve("pipeline.json").toFile()
+        pipeline.writeText(
+            """
+            {
+              "stages": [
+                {"id": "inherited", "prompt": "Produce a report.", "rounds": 1},
+                {"id": "control", "prompt": "Produce a report.", "rounds": 1,
+                 "codexRuntimePreset": "full-luna", "codexReasoningEffort": "low"}
+              ]
+            }
+            """.trimIndent()
+        )
+        val engine = FakeCliPipelineEngineService()
+        val runtimeOptions = mutableListOf<CliOptions>()
+        runCli(
+            CliOptions(
+                prompt = "Produce a report.",
+                inputDir = input,
+                outputDir = output,
+                openRouterApiKey = "/tmp/codex",
+                llmBackend = LlmBackend.CODEX_CHATGPT,
+                modelOverrides = mapOf("Critic" to "gpt-5.6-sol"),
+                debug = true,
+                fast = true,
+                rounds = 1,
+                pipelineConfigPath = pipeline.toPath(),
+                codexRuntimePreset = CodexRuntimePreset.MIXED_FAMILIES,
+                codexReasoningEffort = CodexReasoningEffort.MEDIUM,
+            ),
+            runtimeFactory = { _, options ->
+                runtimeOptions += options
+                CliRuntime(engine)
+            },
+        )
+        val expected = listOf(
+            CodexRuntimePreset.MIXED_FAMILIES,
+            CodexRuntimePreset.MIXED_FAMILIES,
+            CodexRuntimePreset.FULL_LUNA,
+        )
+        assertEquals(expected, runtimeOptions.map { it.codexRuntimePreset })
+        assertEquals(expected, engine.capturedConfigs.map { it.codexRuntimePreset })
+        assertEquals(
+            listOf(CodexReasoningEffort.MEDIUM, CodexReasoningEffort.MEDIUM, CodexReasoningEffort.LOW),
+            engine.capturedConfigs.map { it.codexReasoningEffort },
+        )
+        assertEquals(mapOf("Critic" to "gpt-5.6-sol"), engine.capturedConfigs.first().modelOverrides)
+        assertTrue(engine.capturedConfigs.drop(1).all { it.modelOverrides.isEmpty() })
+    }
+
+    @Test
+    fun `pipeline config propagates explicit acceptance authority to run config`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-pipeline-acceptance-input-").toFile().apply {
             resolve("brief.txt").writeText("acceptance fixture")
         }
@@ -1842,6 +2536,8 @@ class CliArgumentsTest {
                         "groupCount": 2,
                         "councilExecutionPurpose": "APPENDIX_B_ACCEPTANCE",
                         "acceptanceProfile": "appendix-b-full",
+                        "codexRuntimePreset": "full-luna",
+                        "codexReasoningEffort": "high",
                         "finalOutput": {
                           "relativePath": "deliverable.md",
                           "mediaType": "text/markdown"
@@ -1865,7 +2561,8 @@ class CliArgumentsTest {
                 fast = false,
                 rounds = 1,
                 runId = "cli-pipeline-acceptance",
-                pipelineConfigPath = pipelineFile.toPath()
+                pipelineConfigPath = pipelineFile.toPath(),
+                codexReasoningEffort = CodexReasoningEffort.LOW
             ),
             runtimeFactory = { _, _ -> CliRuntime(fakeEngine) },
             acceptanceAdmissionController = AcceptanceAdmissionController.NONE
@@ -1878,14 +2575,17 @@ class CliArgumentsTest {
             configuredStage.councilExecutionPurpose
         )
         assertEquals(AcceptanceProfile.APPENDIX_B_FULL, configuredStage.acceptanceProfile)
+        assertEquals(CodexRuntimePreset.FULL_LUNA, configuredStage.codexRuntimePreset)
+        assertTrue(configuredStage.modelOverrides.isEmpty())
         assertEquals(6, configuredStage.rounds)
         assertEquals(2, configuredStage.groupCount)
         assertEquals("deliverable.md", configuredStage.finalOutputSpec?.relativePath)
         assertEquals("text/markdown", configuredStage.finalOutputSpec?.mediaType)
+        assertEquals(CodexReasoningEffort.HIGH, configuredStage.codexReasoningEffort)
     }
 
     @Test
-    fun `acceptance admission record does not turn a fresh run into a persisted resume`() = runBlocking {
+    fun `acceptance admission record does not turn a fresh run into a persisted resume`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-fresh-acceptance-input-").toFile()
         val outputDir = createTempDirectory("cli-fresh-acceptance-output-").toFile()
         val runId = "cli-fresh-acceptance"
@@ -1948,11 +2648,10 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `invalid pipeline acceptance stages reject before runtime creation`() = runBlocking {
+    fun `invalid pipeline acceptance stages reject before runtime creation`(): Unit = runBlocking {
         data class InvalidAcceptanceStage(
             val id: String,
             val stageJson: String,
-            val expectedMessage: String,
             val llmBackend: LlmBackend = LlmBackend.CODEX_CHATGPT
         )
 
@@ -1972,8 +2671,7 @@ class CliArgumentsTest {
                         "mediaType": "text/markdown"
                       }
                     }
-                """.trimIndent(),
-                expectedMessage = "requires councilExecutionPurpose=appendix-b-acceptance"
+                """.trimIndent()
             ),
             InvalidAcceptanceStage(
                 id = "backend",
@@ -1991,7 +2689,6 @@ class CliArgumentsTest {
                       }
                     }
                 """.trimIndent(),
-                expectedMessage = "requires the codex-chatgpt backend",
                 llmBackend = LlmBackend.OPENROUTER
             ),
             InvalidAcceptanceStage(
@@ -2009,8 +2706,7 @@ class CliArgumentsTest {
                         "mediaType": "text/markdown"
                       }
                     }
-                """.trimIndent(),
-                expectedMessage = "requires exactly 6 rounds"
+                """.trimIndent()
             ),
             InvalidAcceptanceStage(
                 id = "output",
@@ -2023,8 +2719,7 @@ class CliArgumentsTest {
                       "councilExecutionPurpose": "APPENDIX_B_ACCEPTANCE",
                       "acceptanceProfile": "runtime-usability-smoke"
                     }
-                """.trimIndent(),
-                expectedMessage = "requires an explicit finalOutput"
+                """.trimIndent()
             ),
             InvalidAcceptanceStage(
                 id = "unsafe-output-path",
@@ -2041,8 +2736,7 @@ class CliArgumentsTest {
                         "mediaType": "text/markdown"
                       }
                     }
-                """.trimIndent(),
-                expectedMessage = "requires a safe receiver-facing output path"
+                """.trimIndent()
             ),
             InvalidAcceptanceStage(
                 id = "binary-output",
@@ -2059,8 +2753,7 @@ class CliArgumentsTest {
                         "mediaType": "application/octet-stream"
                       }
                     }
-                """.trimIndent(),
-                expectedMessage = "requires a textual receiver-facing output"
+                """.trimIndent()
             )
         )
 
@@ -2099,17 +2792,19 @@ class CliArgumentsTest {
                 )
 
             assertFalse(result.completedSuccessfully)
-            assertTrue(
-                outputDir.resolve("cli-pipeline-invalid-${case.id}/startup-rejection.json")
-                    .readText()
-                    .contains(case.expectedMessage)
-            )
+            val rejection = outputDir
+                .resolve("cli-pipeline-invalid-${case.id}/startup-rejection.json")
+                .readText()
+            assertTrue(rejection.contains("\"disposition\":\"REJECTED_BEFORE_ACTIVATION\""))
+            assertTrue(rejection.contains("\"runStartedEmitted\":false"))
+            assertTrue(rejection.contains("\"successArchiveCreated\":false"))
+            assertTrue(rejection.contains("Startup admission was rejected before runtime activation."))
             assertEquals(0, runtimeFactoryCalls.get())
         }
     }
 
     @Test
-    fun `primary acceptance profile does not treat inferred output as explicit`() = runBlocking {
+    fun `primary acceptance profile does not treat inferred output as explicit`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-pipeline-primary-acceptance-input-").toFile()
         val outputDir = createTempDirectory("cli-pipeline-primary-acceptance-output-").toFile()
         val pipelineFile = createTempDirectory("cli-pipeline-primary-acceptance-").toFile()
@@ -2153,16 +2848,17 @@ class CliArgumentsTest {
             )
 
         assertFalse(result.completedSuccessfully)
-        assertTrue(
-            outputDir.resolve("cli-pipeline-primary-acceptance/startup-rejection.json")
-                .readText()
-                .contains("requires an explicit finalOutput")
-        )
+        val rejection = outputDir
+            .resolve("cli-pipeline-primary-acceptance/startup-rejection.json")
+            .readText()
+        assertTrue(rejection.contains("\"disposition\":\"REJECTED_BEFORE_ACTIVATION\""))
+        assertTrue(rejection.contains("\"runStartedEmitted\":false"))
+        assertTrue(rejection.contains("\"successArchiveCreated\":false"))
         assertEquals(0, runtimeFactoryCalls.get())
     }
 
     @Test
-    fun `pipeline config fails when the declared json output never materializes`() = runBlocking {
+    fun `pipeline config fails when the declared json output never materializes`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-pipeline-missing-input-").toFile().apply {
             resolve("brief.txt").writeText("mindvortex brief")
         }
@@ -2211,7 +2907,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `pipeline config fails when the declared json output has the wrong media type content`() = runBlocking {
+    fun `pipeline config fails when the declared json output has the wrong media type content`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-pipeline-wrong-type-input-").toFile().apply {
             resolve("brief.txt").writeText("mindvortex brief")
         }
@@ -2262,7 +2958,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `pipeline run shape overrides propagate to primary and configured follow up stages`() = runBlocking {
+    fun `pipeline run shape overrides propagate to primary and configured follow up stages`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-pipeline-shape-input-").toFile().apply {
             resolve("brief.txt").writeText("mindvortex brief")
         }
@@ -2327,7 +3023,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `pipeline stage can opt out of inheriting previous outputs`() = runBlocking {
+    fun `pipeline stage can opt out of inheriting previous outputs`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-pipeline-no-inherit-input-").toFile().apply {
             resolve("brief.txt").writeText("mindvortex brief")
         }
@@ -2381,15 +3077,47 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `aborted follow up stage reruns after stale output directory is cleaned`() = runBlocking {
+    fun `aborted follow up stage reruns after stale output directory is cleaned`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-pipeline-abort-input-").toFile().apply {
             resolve("brief.txt").writeText("mindvortex brief")
         }
         val outputDir = createTempDirectory("cli-pipeline-abort-output-").toFile()
+        val pipelineFile = outputDir.resolve("pipeline.json").apply {
+            writeText(
+                """
+                {
+                  "stages": [{
+                    "id": "fast-follow-up",
+                    "prompt": "Refine the previous HTML article.",
+                    "fast": true,
+                    "rounds": 1,
+                    "inheritsPreviousOutputs": true,
+                    "finalOutput": {
+                      "relativePath": "refined/final-article-refined.html",
+                      "mediaType": "text/html"
+                    }
+                  }]
+                }
+                """.trimIndent()
+            )
+        }
         val runRoot = outputDir.resolve("cli-pipeline-abort")
         val followUpDir = runRoot.resolve("stages").resolve("fast-follow-up")
         followUpDir.mkdirs()
-        followUpDir.resolve("summary.json").writeText("""{"status":"ABORTED"}""")
+        followUpDir.resolve("summary.json").writeText(cliJson.encodeToString(CliRunSummary(
+            runId = "cli-pipeline-abort-fast-follow-up",
+            prompt = "Refine the previous HTML article.",
+            inputDirectory = inputDir.absolutePath,
+            inputArtifactCount = 1,
+            outputDirectory = followUpDir.absolutePath,
+            completedAt = "2026-09-09T17:12:00Z",
+            durationMs = 42,
+            debugLogPath = null,
+            resultsBundlePath = null,
+            status = "ABORTED",
+            winnerId = null,
+            modelOverrides = emptyMap(),
+        )))
         val staleMarker = followUpDir.resolve("stale-marker.txt").apply {
             writeText("stale")
         }
@@ -2406,7 +3134,8 @@ class CliArgumentsTest {
                 debug = true,
                 fast = true,
                 rounds = 5,
-                runId = "cli-pipeline-abort"
+                runId = "cli-pipeline-abort",
+                pipelineConfigPath = pipelineFile.toPath(),
             ),
             runtimeFactory = { _, _ -> CliRuntime(fakeEngine) }
         )
@@ -2495,7 +3224,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `fast mode run uses a non-zero round duration`() = runBlocking {
+    fun `fast mode run uses a non-zero round duration`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-fast-input-").toFile()
         val outputDir = createTempDirectory("cli-fast-output-").toFile()
         val fakeEngine = FakeCliEngineService()
@@ -2520,7 +3249,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `fast browser article run uses richer grading rubric and more worker capacity`() = runBlocking {
+    fun `fast browser article run uses richer grading rubric and more worker capacity`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-fast-article-input-").toFile()
         val outputDir = createTempDirectory("cli-fast-article-output-").toFile()
         val fakeEngine = FakeCliEngineService()
@@ -2551,7 +3280,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `fast competitive multi round run keeps complex worker capacity while using fast models`() = runBlocking {
+    fun `fast competitive multi round run keeps complex worker capacity while using fast models`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-fast-competitive-input-").toFile()
         val outputDir = createTempDirectory("cli-fast-competitive-output-").toFile()
         val fakeEngine = FakeCliEngineService()
@@ -2580,7 +3309,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `non fast competitive multi round run defaults to multi agent worker capacity`() = runBlocking {
+    fun `non fast competitive multi round run defaults to multi agent worker capacity`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-nonfast-competitive-input-").toFile()
         val outputDir = createTempDirectory("cli-nonfast-competitive-output-").toFile()
         val fakeEngine = FakeCliEngineService()
@@ -2608,7 +3337,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `runCli resumes a persisted run when prior state exists but summary is missing`() = runBlocking {
+    fun `runCli resumes a persisted run when prior state exists but summary is missing`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-resume-input-").toFile()
         val outputDir = createTempDirectory("cli-resume-output-").toFile()
         val fakeEngine = FakeCliResumeEngineService()
@@ -2641,7 +3370,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `runCli reuses a completed stage that already published the requested final output`() = runBlocking {
+    fun `runCli reuses a completed stage that already published the requested final output`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-reuse-input-").toFile().apply {
             resolve("brief.txt").writeText("mindvortex brief")
         }
@@ -2700,10 +3429,13 @@ class CliArgumentsTest {
         val pipelineEntries = unzipEntries(runOutputDir.resolve("pipeline-results.zip").readBytes())
         assertTrue(pipelineEntries.keys.contains("outputs/final-article.html"))
         assertTrue(pipelineEntries.keys.contains("outputs/assets/images/cli-reuse-hero.png"))
+        assertTrue(pipelineEntries.keys.contains(CliPipelineResultsManifestV1.PATH))
+        verifyPipelineResultsZip(runOutputDir.resolve("pipeline-results.zip").readBytes())
+        Unit
     }
 
     @Test
-    fun `runCli publishes archived final article even without inferred final output spec`() = runBlocking {
+    fun `runCli publishes archived final article even without inferred final output spec`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-archived-output-input-").toFile().apply {
             resolve("brief.txt").writeText("mindvortex brief")
         }
@@ -2760,7 +3492,7 @@ class CliArgumentsTest {
     }
 
     @Test
-    fun `runCli does not publish archived asset paths outside outputs directory`() = runBlocking {
+    fun `runCli does not publish archived asset paths outside outputs directory`(): Unit = runBlocking {
         val inputDir = createTempDirectory("cli-zip-slip-input-").toFile().apply {
             resolve("brief.txt").writeText("mindvortex brief")
         }
@@ -2888,25 +3620,55 @@ private class FakeCliEngineService : NoopOverseerEngineService() {
     override suspend fun getResultsBundle(runId: String): ByteArray? {
         check(runCompleted) { "results bundle requested before RunCompleted was emitted" }
         val config = assertNotNull(capturedConfig)
-        val output = ByteArrayOutputStream()
-        ZipOutputStream(output).use { zip ->
-            fun addEntry(path: String, content: String) {
-                zip.putNextEntry(ZipEntry(path))
-                zip.write(content.toByteArray(Charsets.UTF_8))
-                zip.closeEntry()
+        val entries = config.finalOutputSpec?.let { spec ->
+            val content = if (spec.mediaType.startsWith("text/html", ignoreCase = true)) {
+                "<!doctype html><html><body>${config.runId}</body></html>"
+            } else {
+                """{"runId":"${config.runId}","mediaType":"${spec.mediaType}"}"""
             }
+            mapOf("outputs/${spec.relativePath}" to content)
+        }.orEmpty()
+        return TestOutcomeArchiveFactory.accepted(config.runId, entries)
+    }
+}
 
-            config.finalOutputSpec?.let { spec ->
-                val content = if (spec.mediaType.startsWith("text/html", ignoreCase = true)) {
-                    "<!doctype html><html><body>${config.runId}</body></html>"
-                } else {
-                    """{"runId":"${config.runId}","mediaType":"${spec.mediaType}"}"""
-                }
-                addEntry("outputs/${spec.relativePath}", content)
-            }
-            addEntry("manifest.json", """{"runId":"${config.runId}","artifactCount":${config.contextArtifacts.size}}""")
-        }
-        return output.toByteArray()
+private class FakeRecoveredCliEngineService : NoopOverseerEngineService() {
+    private val _events = MutableSharedFlow<EvoMoliorEvent>(replay = 2, extraBufferCapacity = 8)
+    override val events: SharedFlow<EvoMoliorEvent> = _events.asSharedFlow()
+    private var recoveredRunId: String? = null
+
+    override suspend fun startRun(config: RunConfig): String {
+        _events.emit(EvoMoliorEvent.RunStarted(config.runId, config.objective))
+        recoveredRunId = config.runId
+        _events.emit(
+            EvoMoliorEvent.RunRecovered(
+                runId = config.runId,
+                sourceGroupId = "group-0",
+                recoveredOutputPaths = listOf("recovery/source-sets/000.json"),
+                reason = "Non-accepted diagnostic recovery."
+            )
+        )
+        return config.runId
+    }
+
+    override suspend fun pauseRun(runId: String) = Unit
+    override suspend fun resumeRun(runId: String) = Unit
+    override suspend fun abortRun(runId: String, reason: String) = Unit
+    override suspend fun getState(): EngineState = EngineState(
+        status = EngineStatus.IDLE,
+        activeRunId = null,
+        currentRound = null,
+        groupSummaries = emptyList()
+    )
+    override suspend fun getMetaArchiveSummary(runId: String): MetaArchiveSummary? = null
+    override suspend fun getMetaArchiveEntries(
+        runId: String,
+        entryType: String?
+    ): List<MetaArchiveEntryRecord> = emptyList()
+
+    override suspend fun getResultsBundle(runId: String): ByteArray {
+        check(recoveredRunId == runId)
+        return TestOutcomeArchiveFactory.provisional(runId)
     }
 }
 
@@ -2937,32 +3699,19 @@ private class FakeCliBundleEngineService : NoopOverseerEngineService() {
     )
     override suspend fun getMetaArchiveSummary(runId: String): MetaArchiveSummary? = null
     override suspend fun getMetaArchiveEntries(runId: String, entryType: String?): List<MetaArchiveEntryRecord> = emptyList()
-    override suspend fun getResultsBundle(runId: String): ByteArray? {
+    override suspend fun getResultsBundle(runId: String): ByteArray {
         check(runCompletedEmitted) { "results bundle requested before RunCompleted was emitted" }
         resultsBundleRequestedAfterCompletion = true
-        return buildBundleBytes()
-    }
-    private fun buildBundleBytes(): ByteArray {
-        val output = ByteArrayOutputStream()
-        ZipOutputStream(output).use { zip ->
-            fun addEntry(path: String, content: String) {
-                zip.putNextEntry(ZipEntry(path))
-                zip.write(content.toByteArray(Charsets.UTF_8))
-                zip.closeEntry()
+        val config = assertNotNull(capturedConfig)
+        val entries = config.finalOutputSpec?.let { spec ->
+            val content = if (spec.mediaType.startsWith("text/html", ignoreCase = true)) {
+                "<!doctype html><html><body>MindVortex fast-run article ${config.runId}</body></html>"
+            } else {
+                """{"runId":"${config.runId}","mediaType":"${spec.mediaType}"}"""
             }
-
-            val config = assertNotNull(capturedConfig)
-            config.finalOutputSpec?.let { spec ->
-                val content = if (spec.mediaType.startsWith("text/html", ignoreCase = true)) {
-                    "<!doctype html><html><body>MindVortex fast-run article ${config.runId}</body></html>"
-                } else {
-                    """{"runId":"${config.runId}","mediaType":"${spec.mediaType}"}"""
-                }
-                addEntry("outputs/${spec.relativePath}", content)
-            }
-            addEntry("manifest.json", """{"runId":"${config.runId}","artifactCount":${config.contextArtifacts.size}}""")
-        }
-        return output.toByteArray()
+            mapOf("outputs/${spec.relativePath}" to content)
+        }.orEmpty()
+        return TestOutcomeArchiveFactory.accepted(runId, entries)
     }
 }
 
@@ -3006,34 +3755,25 @@ private class FakeCliPipelineEngineService : NoopOverseerEngineService() {
     )
     override suspend fun getMetaArchiveSummary(runId: String): MetaArchiveSummary? = null
     override suspend fun getMetaArchiveEntries(runId: String, entryType: String?): List<MetaArchiveEntryRecord> = emptyList()
-    override suspend fun getResultsBundle(runId: String): ByteArray? {
+    override suspend fun getResultsBundle(runId: String): ByteArray {
         assertTrue(runId in completedRuns, "results bundle requested before run completion for $runId")
         val config = assertNotNull(configsByRunId[runId])
-        return buildBundleBytes(config)
-    }
-    private fun buildBundleBytes(config: RunConfig): ByteArray {
-        val output = ByteArrayOutputStream()
-        ZipOutputStream(output).use { zip ->
-            fun addEntry(path: String, content: String) {
-                zip.putNextEntry(ZipEntry(path))
-                zip.write(content.toByteArray(Charsets.UTF_8))
-                zip.closeEntry()
+        val entries = linkedMapOf<String, String>()
+        config.finalOutputSpec?.let { spec ->
+            entries["outputs/${spec.relativePath}"] = when {
+                spec.mediaType.startsWith("text/html") ->
+                    "<!doctype html><html><body>${config.runId}</body></html>"
+                spec.mediaType.startsWith("text/markdown") ->
+                    "# Executive Summary\n\nRun ${config.runId}"
+                spec.mediaType.substringBefore(';').trim().equals(
+                    "application/x-ipynb+json",
+                    ignoreCase = true
+                ) -> fakeArcNotebookSource()
+                else -> """{"runId":"${config.runId}","mediaType":"${spec.mediaType}"}"""
             }
-
-            config.finalOutputSpec?.let { spec ->
-                val content = when {
-                    spec.mediaType.startsWith("text/html") ->
-                        "<!doctype html><html><body>${config.runId}</body></html>"
-                    spec.mediaType.startsWith("text/markdown") ->
-                        "# Executive Summary\n\nRun ${config.runId}"
-                    else -> """{"runId":"${config.runId}","mediaType":"${spec.mediaType}"}"""
-                }
-                addEntry("outputs/${spec.relativePath}", content)
-            }
-            addEntry("outputs/assets/images/${config.runId}-hero.png", "fake-image-${config.runId}")
-            addEntry("manifest.json", """{"runId":"${config.runId}","artifactCount":${config.contextArtifacts.size}}""")
         }
-        return output.toByteArray()
+        entries["outputs/assets/images/${config.runId}-hero.png"] = "fake-image-${config.runId}"
+        return TestOutcomeArchiveFactory.accepted(runId, entries)
     }
 }
 
@@ -3048,6 +3788,10 @@ private class FakeAcceptanceRunLease(runId: String) : AcceptanceRunLeaseHandle {
         configurationSha256 = "b".repeat(64),
         modelAssignmentsSha256 = "c".repeat(64),
         jvmVersion = "17",
+        javaHome = "/test/jdk",
+        javaExecutableSha256 = "e".repeat(64),
+        javaReleaseSha256 = "f".repeat(64),
+        javaModulesSha256 = "1".repeat(64),
         codexCliPath = "/tmp/codex",
         codexCliSha256 = "d".repeat(64),
         codexCliVersion = "codex-cli test",
@@ -3143,7 +3887,11 @@ private class FakeCliResumeEngineService : NoopOverseerEngineService() {
     )
     override suspend fun getMetaArchiveSummary(runId: String): MetaArchiveSummary? = null
     override suspend fun getMetaArchiveEntries(runId: String, entryType: String?): List<MetaArchiveEntryRecord> = emptyList()
-    override suspend fun getResultsBundle(runId: String): ByteArray? = byteArrayOf(9, 9, 9)
+    override suspend fun getResultsBundle(runId: String): ByteArray =
+        TestOutcomeArchiveFactory.accepted(
+            runId,
+            outputEntries = mapOf("outputs/final-answer.md" to "# Result\n\nResumed fixture."),
+        )
 }
 
 private fun unzipEntries(bytes: ByteArray): Map<String, String> {
@@ -3167,4 +3915,485 @@ private fun buildZipBytes(entries: Map<String, String>): ByteArray {
         }
     }
     return output.toByteArray()
+}
+
+private fun repositoryFile(relativePath: String): Path {
+    var current = Path.of(System.getProperty("user.dir")).toAbsolutePath()
+    while (current.parent != null) {
+        val candidate = current.resolve(relativePath)
+        if (Files.isRegularFile(candidate)) return candidate
+        current = current.parent
+    }
+    error("Could not locate repository file $relativePath")
+}
+
+private fun fakeArcNotebookSource(): String = """
+    {
+      "cells": [
+        {
+          "cell_type": "markdown",
+          "id": "scope",
+          "metadata": {},
+          "source": "EvoARC-2 symbolic baseline qualification\\n\\nOffline execution. Neural and task-time adaptation branches are deferred. Deterministic equivariance and mutation checks are included."
+        },
+        {
+          "cell_type": "code",
+          "id": "environment",
+          "execution_count": null,
+          "metadata": {},
+          "outputs": [],
+          "source": "import os, json, time\\nimport numpy as np\\n"
+        },
+        {
+          "cell_type": "code",
+          "id": "solvers",
+          "execution_count": null,
+          "metadata": {},
+          "outputs": [],
+          "source": "def is_grid(value): return isinstance(value, list)\\ndef color_permutation(grid, mapping): return [[mapping.get(v, v) for v in row] for row in grid]\\ndef rotate_grid(grid): return [list(row) for row in zip(*grid[::-1])]\\n"
+        },
+        {
+          "cell_type": "code",
+          "id": "selection",
+          "execution_count": null,
+          "metadata": {},
+          "outputs": [],
+          "source": "def select_two_outputs(candidates):\\n    distinct = []\\n    for candidate in candidates:\\n        if candidate not in distinct: distinct.append(candidate)\\n    return (distinct + distinct[:1])[:2]\\n"
+        },
+        {
+          "cell_type": "markdown",
+          "id": "tests-description",
+          "metadata": {},
+          "source": "Contextual Symbolic Relay self-test, rotation/reflection/color equivariance, and adversarial mutation rejection."
+        },
+        {
+          "cell_type": "code",
+          "id": "self-tests",
+          "execution_count": null,
+          "metadata": {},
+          "outputs": [],
+          "source": "def synthetic_equivariant_views(grid):\\n    return [grid, rotate_grid(grid)]\\n\\ndef contextual_symbolic_relay(grid):\\n    return [list(row) for row in grid]\\n\\ndef attempt_1(grid):\\n    return contextual_symbolic_relay(grid)\\n\\ndef attempt_2(grid):\\n    return rotate_grid(grid)\\n\\ndef callable_signature_smoke_test():\\n    assert callable(contextual_symbolic_relay)\\n\\ndef build_task_solvers(demos):\\n    return attempt_1, attempt_2\\n\\ndef load_local_inputs():\\n    challenge_data = {}\\n    prior_data = {}\\n    return {\\\"challenge_data\\\": challenge_data, \\\"prior_data\\\": prior_data}\\n\\ndef execute_challenge(challenges, prior_data):\\n    baseline_fallback = {}\\n    audit = {\\\"challenge_data\\\": challenges, \\\"prior_data\\\": prior_data, \\\"counterfactual\\\": {\\\"baseline\\\": baseline_fallback}, \\\"family_1\\\": [], \\\"family_2\\\": []}\\n    for task_id, task in challenges.items():\\n        demos = list(task.get(\\\"train\\\", []))\\n        test_inputs = task.get(\\\"test\\\", [])\\n        attempt_1_solver, attempt_2_solver = build_task_solvers(demos)\\n        for inp in test_inputs:\\n            attempt_1_solver(inp)\\n            attempt_2_solver(inp)\\n    return audit\\n\\ndef write_receiver(submission):\\n    with open(\\\"submission.json\\\", \\\"w\\\") as handle:\\n        json.dump(submission, handle)\\n\\ndef self_audit_notebook(_provider_path=None):\\n    callable_signature_smoke_test()\\n    return True\\n\\ndef run_self_tests():\\n    mutation = {\\\"invalid_grid\\\": [99]}\\n    assert is_grid([])\\n    assert mutation[\\\"invalid_grid\\\"] != []\\n    callable_signature_smoke_test()\\n\\nrun_self_tests()\\n"
+        },
+        {
+          "cell_type": "code",
+          "id": "required-invocations",
+          "execution_count": null,
+          "metadata": {},
+          "outputs": [],
+          "source": [
+            "# \"challenge_data\": challenge_data\n",
+            "# \"prior_data\": prior_data\n",
+            "def execute_challenge(challenges, prior_data):\n",
+            "    # \"counterfactual\": {\"baseline\": baseline_fallback}\n",
+            "    # \"family_1\" and \"family_2\" are recorded here.\n",
+            "    for task_id, task in challenges.items():\n",
+            "        demos = list(task.get(\"train\", []))\n",
+            "        test_inputs = task.get(\"test\", [])\n",
+            "        attempt_1_solver, attempt_2_solver = build_task_solvers(demos)\n",
+            "        attempt_1_solver(inp)\n",
+            "        attempt_2_solver(inp)\n",
+            "    return {}\n",
+            "callable_signature_smoke_test()\n",
+            "run_self_tests()\n"
+          ]
+        },
+        {
+          "cell_type": "code",
+          "id": "submission-validation",
+          "execution_count": null,
+          "metadata": {},
+          "outputs": [],
+          "source": "def validate_submission(submission):\\n    return all(set(item) == {'attempt_1', 'attempt_2'} for item in submission.values())\\n"
+        },
+        {
+          "cell_type": "code",
+          "id": "challenge",
+          "execution_count": null,
+          "metadata": {},
+          "outputs": [],
+          "source": "deadline = time.monotonic() + 8.0\\nsample_submission = {}\\nsubmission = sample_submission.copy()\\n"
+        },
+        {
+          "cell_type": "code",
+          "id": "write",
+          "execution_count": null,
+          "metadata": {},
+          "outputs": [],
+          "source": "assert validate_submission(submission)\\nwith open('submission.json', 'w') as handle:\\n    json.dump(submission, handle)\\n"
+        }
+      ],
+      "metadata": {"kernelspec": {"display_name": "Python 3", "name": "python3"}},
+      "nbformat": 4,
+      "nbformat_minor": 5
+    }
+""".trimIndent()
+
+internal object TestOutcomeArchiveFactory {
+    private val json = kotlinx.serialization.json.Json {
+        encodeDefaults = true
+        explicitNulls = true
+        ignoreUnknownKeys = false
+    }
+    private val now = Instant.parse("2026-07-26T00:00:00Z")
+    private val archiveService = RunOutcomeArchiveService(json)
+
+    fun accepted(
+        runId: String,
+        outputEntries: Map<String, String>
+    ): ByteArray {
+        val fixture = fixture(runId, RunOutcomeClass.ACCEPTED_DECISION_PACKAGE)
+        val metricsBytes = metricsBytes(runId)
+        val history = acceptedHistory(runId)
+        val historyBytes = json.encodeToString(
+            ListSerializer(PublicationStateEvent.serializer()),
+            history
+        ).encodeToByteArray()
+        val base = archiveService.archiveAccepted(
+            AcceptedOutcomeArchiveRequest(
+                runId = runId,
+                objective = "CLI accepted outcome fixture",
+                groupCount = 2,
+                generationCeiling = 1,
+                admissionDistributionHash = hash("$runId-admission"),
+                startingFieldHash = hash("$runId-starting"),
+                workerAtlasHash = hash("$runId-worker"),
+                graderAtlasHash = hash("$runId-grader"),
+                sealedTestSuiteHash = hash("$runId-tests"),
+                lifecycleReconciliationHash = hash("$runId-lifecycle"),
+                metricsHash = sha256(metricsBytes),
+                metricsBytes = metricsBytes,
+                publicationHistoryHash = sha256(historyBytes),
+                publicationHistory = history,
+                blueprint = fixture.blueprint,
+                decisionPackage = fixture.decisionPackage,
+                mechanismActivationReport = mechanismReport(
+                    runId,
+                    RunOutcomeClass.ACCEPTED_DECISION_PACKAGE
+                )
+            )
+        ).bytes
+        val archive = if (outputEntries.isEmpty()) {
+            base
+        } else {
+            addAcceptedOutputs(base, runId, outputEntries)
+        }
+        val presentation = RunOutcomeBundleInspector.inspect(archive)
+        check(presentation.outcomeClass == RunOutcomeClass.ACCEPTED_DECISION_PACKAGE)
+        return archive
+    }
+
+    fun provisional(
+        runId: String,
+        recoveredOutput: GeneratedOutputFile = GeneratedOutputFile(
+            relativePath = "submission.ipynb",
+            mediaType = "application/x-ipynb+json",
+            content = """{"cells":[],"metadata":{},"nbformat":4,"nbformat_minor":5}""",
+            sourceGroupId = "group-0",
+        ),
+    ): ByteArray {
+        val fixture = fixture(runId, RunOutcomeClass.PROVISIONAL_DECISION_PACKAGE)
+        val metricsBytes = metricsBytes(runId)
+        val sourceSet = RecoverySourceSet.seal(
+            runId,
+            listOf(
+                RecoverySourceCandidate(
+                    groupId = "group-0",
+                    sourceSnapshotHash = hash("$runId-recovery-snapshot"),
+                    publicEvidenceRefs = setOf("recovery-evidence")
+                )
+            )
+        )
+        val archive = archiveService.archiveProvisional(
+            ProvisionalOutcomeArchiveRequest(
+                runId = runId,
+                admissionDistributionHash = hash("$runId-admission"),
+                startingFieldHash = hash("$runId-starting"),
+                workerAtlasHash = hash("$runId-worker"),
+                graderAtlasHash = hash("$runId-grader"),
+                sealedTestSuiteHash = hash("$runId-tests"),
+                lifecycleReconciliationHash = hash("$runId-recovery-lifecycle"),
+                metricsHash = sha256(metricsBytes),
+                metricsBytes = metricsBytes,
+                blueprint = fixture.blueprint,
+                decisionPackage = fixture.decisionPackage,
+                recoverySourceSets = listOf(sourceSet),
+                eligibleGroupIds = setOf("group-0"),
+                recoveryPublicationHistory = recoveryHistory(runId),
+                recoveredOutput = recoveredOutput,
+                recoveredOutputSource = RecoveredDeliverableSource.DETERMINISTIC_RECOVERY_FALLBACK,
+                recoveredOutputRoundIndex = 0,
+                archivedAtMs = 1L
+            )
+        ).bytes
+        val presentation = RunOutcomeBundleInspector.inspect(archive)
+        check(presentation.outcomeClass == RunOutcomeClass.PROVISIONAL_DECISION_PACKAGE)
+        return archive
+    }
+
+    private fun addAcceptedOutputs(
+        archive: ByteArray,
+        runId: String,
+        outputEntries: Map<String, String>
+    ): ByteArray {
+        val files = unzipBinaryEntries(archive).toMutableMap()
+        val additions = outputEntries.map { (path, content) ->
+            require(path.startsWith("outputs/") && path !in files)
+            val bytes = content.encodeToByteArray()
+            files[path] = bytes
+            RunOutcomeManifestEntry(
+                path = path,
+                mediaType = mediaType(path),
+                sizeBytes = bytes.size.toLong(),
+                sha256 = sha256(bytes),
+                category = RunOutcomeManifestEntryCategory.RENDERED_DELIVERABLE
+            )
+        }
+        val existingOutcomeManifest = json.decodeFromString(
+            RunOutcomeManifestV1.serializer(),
+            files.getValue(OUTCOME_MANIFEST_PATH).decodeToString()
+        )
+        val outcomeManifest = existingOutcomeManifest.copy(
+            entries = (existingOutcomeManifest.entries + additions)
+                .sortedBy(RunOutcomeManifestEntry::path),
+            manifestHash = ""
+        ).withComputedHash()
+        val outcomeBytes = json.encodeToString(
+            RunOutcomeManifestV1.serializer(),
+            outcomeManifest
+        ).encodeToByteArray()
+        files[OUTCOME_MANIFEST_PATH] = outcomeBytes
+
+        val runManifest = json.decodeFromString(
+            RunManifest.serializer(),
+            files.getValue("manifest.json").decodeToString()
+        )
+        val runEntries = outputEntries.map { (path, content) ->
+            val bytes = content.encodeToByteArray()
+            RunManifestEntry(
+                runId = runId,
+                path = path,
+                category = RunManifestEntryCategory.OUTPUT,
+                sizeBytes = bytes.size.toLong(),
+                sha256 = sha256(bytes),
+                mediaType = mediaType(path)
+            )
+        }
+        files["manifest.json"] = json.encodeToString(
+            RunManifest.serializer(),
+            runManifest.copy(
+                outcomeManifestSha256 = sha256(outcomeBytes),
+                entries = (
+                    runManifest.entries
+                        .map { entry ->
+                            if (entry.path == OUTCOME_MANIFEST_PATH) {
+                                entry.copy(
+                                    sizeBytes = outcomeBytes.size.toLong(),
+                                    sha256 = sha256(outcomeBytes)
+                                )
+                            } else {
+                                entry
+                            }
+                        } + runEntries
+                    ).sortedBy(RunManifestEntry::path)
+            )
+        ).encodeToByteArray()
+        return zipBinaryEntries(files)
+    }
+
+    private fun fixture(
+        runId: String,
+        outcomeClass: RunOutcomeClass
+    ): OutcomeFixture {
+        val blueprint = DeliverableBlueprint(
+            blueprintId = "cli-outcome-blueprint",
+            receiverContractHash = hash("$runId-receiver"),
+            audience = "CLI operator",
+            decisionOrUse = "Verify CLI publication authority",
+            primaryFormat = DeliverableFormat.MARKDOWN,
+            companionFormats = setOf(DeliverableFormat.JSON),
+            componentSpecs = listOf(
+                DeliverableComponentSpec(
+                    componentId = "summary",
+                    kind = DeliverableComponentKind.EXECUTIVE_SUMMARY,
+                    required = true,
+                    minimumAuthority = ComponentAuthorityClass.ACCEPTED
+                )
+            )
+        ).withComputedHash()
+        val evidence = DeliverableEvidenceLink(
+            evidenceId = "summary-evidence",
+            evidenceHash = hash("$runId-summary-evidence"),
+            authorityClass = ComponentAuthorityClass.ACCEPTED,
+            disclosure = DeliverableEvidenceDisclosure.PUBLIC_COMMITTED,
+            publicSummary = "Public CLI fixture evidence."
+        )
+        val authorityClass = if (outcomeClass == RunOutcomeClass.ACCEPTED_DECISION_PACKAGE) {
+            ComponentAuthorityClass.ACCEPTED
+        } else {
+            ComponentAuthorityClass.PROVISIONAL
+        }
+        val decisionPackage = DeterministicDeliverableAssembler.assemble(
+            DeliverableAssemblyRequest(
+                blueprint = blueprint,
+                packageId = "cli-${outcomeClass.name.lowercase()}-$runId",
+                runId = runId,
+                outcomeClass = outcomeClass,
+                suppliedComponents = listOf(
+                    SuppliedDeliverableComponent(
+                        componentId = "summary",
+                        kind = DeliverableComponentKind.EXECUTIVE_SUMMARY,
+                        title = "Summary",
+                        authorityClass = authorityClass,
+                        blocks = listOf(
+                            DeliverableSemanticBlock.Narrative(
+                                text = "Verified $outcomeClass fixture for $runId.",
+                                origin = DeliverableContentOrigin.DETERMINISTIC_SUPPLIED
+                            )
+                        ),
+                        provenance = DeliverableComponentProvenance(
+                            evidenceIds = setOf(evidence.evidenceId)
+                        )
+                    )
+                ),
+                evidenceLedger = listOf(evidence),
+                knownFailures = if (outcomeClass == RunOutcomeClass.ACCEPTED_DECISION_PACKAGE) {
+                    emptyList()
+                } else {
+                    listOf(
+                        FailedAcceptanceGate(
+                            gateId = "not-accepted",
+                            code = "NOT_ACCEPTED",
+                            publicMessage = "The fixture intentionally remains non-accepted.",
+                            authorityHash = hash("$runId-failed-gate")
+                        )
+                    )
+                },
+                acceptedAuthority = if (outcomeClass == RunOutcomeClass.ACCEPTED_DECISION_PACKAGE) {
+                    AcceptedDeliverableAuthority(
+                        winnerAuthorityId = "winner-group-0",
+                        winnerAuthorityHash = hash("$runId-winner"),
+                        sourceAuthorityIds = setOf("source-group-0"),
+                        writerAuthorityId = "writer-agent",
+                        writerOutputHash = hash("$runId-writer-output")
+                    )
+                } else {
+                    null
+                },
+                generatedAt = now
+            )
+        )
+        return OutcomeFixture(blueprint, decisionPackage)
+    }
+
+    private fun metricsBytes(runId: String): ByteArray = json.encodeToString(
+        RunMetricsV1.serializer(),
+        RunMetricsV1(
+            runId = runId,
+            observations = RunMetricCatalog.orderedMetricIds.map { metricId ->
+                RunMetricObservation(
+                    metricId = metricId,
+                    status = MetricAvailability.UNAVAILABLE,
+                    unit = null,
+                    evidenceRefs = listOf("authority/$metricId"),
+                    unavailableReason = "Fixture evidence is unavailable."
+                )
+            }
+        )
+    ).encodeToByteArray()
+
+    private fun acceptedHistory(runId: String): List<PublicationStateEvent> {
+        var previous: PublicationStateEvent? = null
+        return PublicationState.entries.mapIndexed { index, state ->
+            PublicationStateEvent(
+                eventId = "accepted-$index",
+                runId = runId,
+                state = state,
+                sequence = index,
+                previousEventHash = previous?.eventHash,
+                authorityReferenceIds = setOf("authority-$index"),
+                occurredAt = now
+            ).withComputedHash().also { previous = it }
+        }
+    }
+
+    private fun recoveryHistory(runId: String): List<RecoveryPublicationStateEvent> {
+        var previous: RecoveryPublicationStateEvent? = null
+        return RecoveryPublicationState.entries.mapIndexed { index, state ->
+            RecoveryPublicationStateEvent(
+                eventId = "recovery-$index",
+                runId = runId,
+                state = state,
+                sequence = index,
+                previousEventHash = previous?.eventHash,
+                authorityReferenceIds = setOf("authority-$index"),
+                occurredAt = now
+            ).withComputedHash().also { previous = it }
+        }
+    }
+
+    private fun mechanismReport(
+        runId: String,
+        outcomeClass: RunOutcomeClass
+    ): MechanismActivationReportV1 = MechanismActivationReportV1(
+        runId = runId,
+        outcomeClass = outcomeClass,
+        mechanisms = MechanismActivationCatalog.orderedMechanismIds.map { mechanismId ->
+            MechanismActivation(
+                mechanismId = mechanismId,
+                state = if (mechanismId == "publication-barrier") {
+                    MechanismActivationState.ACTIVATED_WITH_DOWNSTREAM_USE
+                } else {
+                    MechanismActivationState.NOT_CONFIGURED
+                },
+                authorityIds = listOf("authority/$mechanismId")
+            )
+        },
+        generatedAt = now
+    ).withComputedHash()
+
+    private fun mediaType(path: String): String = when {
+        path.endsWith(".html") -> "text/html"
+        path.endsWith(".json") -> "application/json"
+        path.endsWith(".md") -> "text/markdown"
+        path.endsWith(".png") -> "image/png"
+        else -> "application/octet-stream"
+    }
+
+    private fun unzipBinaryEntries(bytes: ByteArray): Map<String, ByteArray> {
+        val entries = linkedMapOf<String, ByteArray>()
+        ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                check(entries.put(entry.name, zip.readBytes()) == null)
+                zip.closeEntry()
+            }
+        }
+        return entries
+    }
+
+    private fun zipBinaryEntries(entries: Map<String, ByteArray>): ByteArray =
+        ByteArrayOutputStream().use { output ->
+            ZipOutputStream(output).use { zip ->
+                entries.toSortedMap().forEach { (path, bytes) ->
+                    zip.putNextEntry(ZipEntry(path).apply { time = 315_532_800_000L })
+                    zip.write(bytes)
+                    zip.closeEntry()
+                }
+            }
+            output.toByteArray()
+        }
+
+    private fun hash(value: String): String = DeliverableHashing.hashText(value)
+
+    private fun sha256(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { "%02x".format(it) }
+
+    private const val OUTCOME_MANIFEST_PATH = "run-outcome-manifest-v1.json"
+
+    private data class OutcomeFixture(
+        val blueprint: DeliverableBlueprint,
+        val decisionPackage: com.achulkov.evomolior.core.deliverable.ReceiverDecisionPackage
+    )
 }

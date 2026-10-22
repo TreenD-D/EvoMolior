@@ -11,6 +11,7 @@ import ai.koog.prompt.dsl.prompt as koogPrompt
 import ai.koog.prompt.llm.LLModel
 import ai.koog.serialization.kotlinx.KotlinxSerializer
 import com.achulkov.evomolior.core.config.LlmBackend
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
 import com.achulkov.evomolior.agents.runner.DeathNoteProtocol
 import com.achulkov.evomolior.agents.tools.EmitFactTool
@@ -56,6 +57,22 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
 
+/** Execution target shared by interactive and typed grader methodology authorship. */
+const val GRADER_AUTHORED_TEST_TARGET_CONTRACT =
+    "AUTOMATED TEST EXECUTION CONTRACT: expectedOutputPattern is an RE2 search over the " +
+        "ROUND_CANON_SNAPSHOT: a bounded, per-entry-truncated substrate digest, not a complete " +
+        "document or final publication candidate. Tests execute after ordinary worker quiescence, " +
+        "before final synthesis. Author only predicates meaningful for that exact target and timing. " +
+        "Final document heading order, word limits, and whole-document citation/quotation fidelity " +
+        "belong to final-candidate validation; do not misrepresent them as snapshot regex checks. " +
+        "Keep those obligations explicit in requirements and rubric guidance. Do not claim a regex " +
+        "checks more than its predicate proves. Mandatory authored failures remain fail-closed."
+
+/** The host, not a model transport, owns automated score adjustments. */
+const val GRADER_RAW_SCORE_CONTRACT =
+    "Submit raw quality scores before automated-test gates or penalties. " +
+        "The host applies the frozen authored-test policy exactly once after collecting your scores."
+
 /**
  * Creates Koog [AIAgent] instances for Grader Group roles.
  *
@@ -78,6 +95,7 @@ import java.util.UUID
 class GraderAgentFactory(
     private val openRouterApiKey: String,
     private val llmBackend: LlmBackend = LlmBackend.OPENROUTER,
+    private val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     private val graderDb: EvoMoliorDatabase,
     private val graderBudgetConfig: BudgetConfig,
     private val graderGroupId: String,
@@ -314,11 +332,13 @@ class GraderAgentFactory(
             apiKey = openRouterApiKey,
             codexToolRegistry = toolRegistry,
             codexActionGate = actionGate,
-            codexAgentId = agentId
+            codexAgentId = agentId,
+            codexReasoningEffort = codexReasoningEffort
         )
 
         // Use agentConfig with KotlinxSerializer so tool Args deserialization works correctly.
         // ignoreUnknownKeys=true prevents failures when LLMs pass extra fields.
+        val costRecorder = providerCostRecorder(runId, agentId)
         val agent: AIAgent<String, String> = AIAgent.builder()
             .promptExecutor(executor)
             .agentConfig(
@@ -337,7 +357,7 @@ class GraderAgentFactory(
             .graphStrategy(singleRunStrategy())
             .maxIterations(20)  // Grader agents have simpler task; 20 is enough
             .install(EventHandler.Feature) { config ->
-                config.installProviderCostRecorder(providerCostRecorder(runId, agentId))
+                config.installProviderCostRecorder(costRecorder)
                 config.onToolCallStarting { ctx ->
                     actionGate.intercept(
                         AgentAction(ActionEventType.TOOL_CALL, agentId, ctx.toolName)
@@ -371,7 +391,8 @@ class GraderAgentFactory(
             textOnlyCompatibilityMode = usesTextOnlyCompatibilityMode(),
             taskPrompt = "Evaluate the competing group '$targetGroupId' " +
                 "based on the Canon Snapshot in your system prompt. " +
-                "Submit grading scores using submit_grading_score for each dimension."
+                "Submit grading scores using submit_grading_score for each dimension.",
+            providerCostRecorder = costRecorder
         )
     }
 
@@ -403,6 +424,8 @@ class GraderAgentFactory(
      * @param graderAtlas Sealed competitive grader frontier.
      * @param graderView Redacted leased frontier visible to this grader civilisation.
      * @param workerAtlas Sealed worker Atlas supplying node-local evaluator context.
+     * @param baselineCriteria Previous round's accepted criteria; when present the agent revises
+     *   that baseline instead of authoring criteria from scratch.
      */
     fun createCriteria(
         role: Role,
@@ -419,7 +442,8 @@ class GraderAgentFactory(
         legacyContext: String? = null,
         graderAtlas: GraderAtlas? = null,
         graderView: GraderView? = null,
-        workerAtlas: NodeAtlas? = null
+        workerAtlas: NodeAtlas? = null,
+        baselineCriteria: String? = null
     ): GraderAgentContext {
         require(role == Role.GraderResearcher || role == Role.GraderBuilder) {
             "createCriteria: expected GraderResearcher or GraderBuilder, got $role"
@@ -472,8 +496,9 @@ class GraderAgentFactory(
             legacyContext = legacyContext,
             graderAtlasContext = methodologyBindingCatalog?.modelView?.let {
                 Json.encodeToString(it)
-            }
-        ))
+            },
+            baselineCriteria = baselineCriteria
+        ) + "\n\n" + GRADER_AUTHORED_TEST_TARGET_CONTRACT)
 
         val toolRegistry = if (usesTextOnlyCompatibilityMode()) ToolRegistry.EMPTY else ToolRegistry {
             tool(ListKBTool(graderDb.knowledgeBaseDao(), runId, graderGroupId))
@@ -551,8 +576,10 @@ class GraderAgentFactory(
             apiKey = openRouterApiKey,
             codexToolRegistry = toolRegistry,
             codexActionGate = actionGate,
-            codexAgentId = agentId
+            codexAgentId = agentId,
+            codexReasoningEffort = codexReasoningEffort
         )
+        val costRecorder = providerCostRecorder(runId, agentId)
         val agent: AIAgent<String, String> = AIAgent.builder()
             .promptExecutor(executor)
             .agentConfig(
@@ -571,7 +598,7 @@ class GraderAgentFactory(
             .graphStrategy(singleRunStrategy())
             .maxIterations(25)
             .install(EventHandler.Feature) { config ->
-                config.installProviderCostRecorder(providerCostRecorder(runId, agentId))
+                config.installProviderCostRecorder(costRecorder)
                 config.onToolCallStarting { ctx ->
                     actionGate.intercept(
                         AgentAction(ActionEventType.TOOL_CALL, agentId, ctx.toolName)
@@ -594,6 +621,7 @@ class GraderAgentFactory(
             targetGroupId = "criteria-phase",
             roundIndex = roundIndex,
             systemPrompt = systemPrompt,
+            providerCostRecorder = costRecorder,
             textOnlyCompatibilityMode = usesTextOnlyCompatibilityMode(),
             taskPrompt = if (usesTextOnlyCompatibilityMode()) {
                 "Develop detailed scoring criteria for all dimensions as described in your system prompt. " +
@@ -685,7 +713,7 @@ class GraderAgentFactory(
             nodeEvaluationContexts = nodeEvaluationContexts,
             roundIndex = roundIndex,
             foundingBrief = foundingBrief
-        ))
+        ) + "\n\n" + GRADER_RAW_SCORE_CONTRACT)
 
         val toolRegistry = if (usesTextOnlyCompatibilityMode()) ToolRegistry.EMPTY else ToolRegistry {
             tool(ListKBTool(graderDb.knowledgeBaseDao(), runId, graderGroupId))
@@ -742,8 +770,10 @@ class GraderAgentFactory(
             apiKey = openRouterApiKey,
             codexToolRegistry = toolRegistry,
             codexActionGate = actionGate,
-            codexAgentId = agentId
+            codexAgentId = agentId,
+            codexReasoningEffort = codexReasoningEffort
         )
+        val costRecorder = providerCostRecorder(runId, agentId)
         val agent: AIAgent<String, String> = AIAgent.builder()
             .promptExecutor(executor)
             .agentConfig(
@@ -762,7 +792,7 @@ class GraderAgentFactory(
             .graphStrategy(singleRunStrategy())
             .maxIterations(30)  // RoundJudge scores N groups × M dimensions — needs more iterations
             .install(EventHandler.Feature) { config ->
-                config.installProviderCostRecorder(providerCostRecorder(runId, agentId))
+                config.installProviderCostRecorder(costRecorder)
                 config.onToolCallStarting { ctx ->
                     actionGate.intercept(
                         AgentAction(ActionEventType.TOOL_CALL, agentId, ctx.toolName)
@@ -783,6 +813,7 @@ class GraderAgentFactory(
             agentId = agentId,
             role = Role.GraderCritic,  // RoundJudge uses the GraderCritic slot
             agent = agent,
+            providerCostRecorder = costRecorder,
             budgetLedger = budgetLedger,
             targetGroupId = targetGroupRef,
             roundIndex = roundIndex,
@@ -865,8 +896,10 @@ class GraderAgentFactory(
             apiKey = openRouterApiKey,
             codexToolRegistry = toolRegistry,
             codexActionGate = actionGate,
-            codexAgentId = agentId
+            codexAgentId = agentId,
+            codexReasoningEffort = codexReasoningEffort
         )
+        val costRecorder = providerCostRecorder(proposal.runId, agentId)
         val agent: AIAgent<String, String> = AIAgent.builder()
             .promptExecutor(executor)
             .agentConfig(
@@ -885,9 +918,7 @@ class GraderAgentFactory(
             .graphStrategy(singleRunStrategy())
             .maxIterations(8)
             .install(EventHandler.Feature) { config ->
-                config.installProviderCostRecorder(
-                    providerCostRecorder(proposal.runId, agentId)
-                )
+                config.installProviderCostRecorder(costRecorder)
                 config.onToolCallStarting { ctx ->
                     actionGate.intercept(
                         AgentAction(ActionEventType.TOOL_CALL, agentId, ctx.toolName)
@@ -904,6 +935,7 @@ class GraderAgentFactory(
             targetGroupId = "redacted",
             roundIndex = roundIndex,
             systemPrompt = systemPrompt,
+            providerCostRecorder = costRecorder,
             textOnlyCompatibilityMode = usesTextOnlyCompatibilityMode(),
             taskPrompt = if (usesTextOnlyCompatibilityMode()) {
                 "Assess the proposal and return only the strict novelty-assessment JSON object."
@@ -954,6 +986,7 @@ class GraderAgentFactory(
  * @param systemPrompt The rendered system prompt injected into the Koog agent.
  * @param textOnlyCompatibilityMode Whether direct substantive text is the backend's typed success path.
  * @param taskPrompt The task prompt passed to [AIAgent.run] when this agent is executed.
+ * @param providerCostRecorder The same recorder installed in Koog, for cancellation-safe runner cleanup.
  */
 data class GraderAgentContext(
     val agentId: String,
@@ -968,7 +1001,8 @@ data class GraderAgentContext(
      * The task prompt passed to [AIAgent.run] when this agent is executed.
      * Defaults to a generic grader instruction if not set by the factory.
      */
-    val taskPrompt: String = "Perform your evaluation task as described in your system prompt."
+    val taskPrompt: String = "Perform your evaluation task as described in your system prompt.",
+    val providerCostRecorder: ProviderCallCostRecorder? = null
 ) {
     init {
         require(systemPrompt.isNotBlank()) { "GraderAgentContext.systemPrompt must not be blank" }

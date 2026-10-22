@@ -3,6 +3,7 @@ package com.achulkov.evomolior.core.serialization
 import com.achulkov.evomolior.core.atlas.PhysicalDimension
 import com.achulkov.evomolior.core.atlas.TypedField
 import com.achulkov.evomolior.core.atlas.TypedFieldType
+import com.achulkov.evomolior.core.repair.QuantitySpec
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -45,7 +46,8 @@ private sealed interface StructuredExecutableTypedField {
         override val description: String,
         override val required: Boolean,
         override val validationRules: List<String>,
-        val physicalDimension: PhysicalDimension?
+        val physicalDimension: PhysicalDimension?,
+        val quantitySpec: QuantitySpec?
     ) : StructuredExecutableTypedField
 
     @Serializable
@@ -55,7 +57,8 @@ private sealed interface StructuredExecutableTypedField {
         override val description: String,
         override val required: Boolean,
         override val validationRules: List<String>,
-        val physicalDimension: PhysicalDimension?
+        val physicalDimension: PhysicalDimension?,
+        val quantitySpec: QuantitySpec?
     ) : StructuredExecutableTypedField
 
     @Serializable
@@ -98,12 +101,18 @@ private sealed interface StructuredExecutableArrayItems {
 
     @Serializable
     @SerialName("INTEGER_ITEMS")
-    data class IntegerItems(val physicalDimension: PhysicalDimension?) :
+    data class IntegerItems(
+        val physicalDimension: PhysicalDimension?,
+        val quantitySpec: QuantitySpec?
+    ) :
         StructuredExecutableArrayItems
 
     @Serializable
     @SerialName("NUMBER_ITEMS")
-    data class NumberItems(val physicalDimension: PhysicalDimension?) :
+    data class NumberItems(
+        val physicalDimension: PhysicalDimension?,
+        val quantitySpec: QuantitySpec?
+    ) :
         StructuredExecutableArrayItems
 
     @Serializable
@@ -146,14 +155,16 @@ internal object ExecutableTypedFieldStructuredOutputSerializer :
                 description = description,
                 required = required,
                 validationRules = sortedRules,
-                physicalDimension = physicalDimension
+                physicalDimension = physicalDimension,
+                quantitySpec = quantitySpec
             )
             TypedFieldType.NUMBER -> StructuredExecutableTypedField.NumberField(
                 name = name,
                 description = description,
                 required = required,
                 validationRules = sortedRules,
-                physicalDimension = physicalDimension
+                physicalDimension = physicalDimension,
+                quantitySpec = quantitySpec
             )
             TypedFieldType.BOOLEAN -> StructuredExecutableTypedField.BooleanField(
                 name = name,
@@ -200,7 +211,8 @@ internal object ExecutableTypedFieldStructuredOutputSerializer :
             description = description,
             required = required,
             validationRules = validationRules.toUniqueSet("validation rule"),
-            physicalDimension = physicalDimension
+            physicalDimension = physicalDimension,
+            quantitySpec = quantitySpec
         )
         is StructuredExecutableTypedField.NumberField -> TypedField(
             name = name,
@@ -208,7 +220,8 @@ internal object ExecutableTypedFieldStructuredOutputSerializer :
             description = description,
             required = required,
             validationRules = validationRules.toUniqueSet("validation rule"),
-            physicalDimension = physicalDimension
+            physicalDimension = physicalDimension,
+            quantitySpec = quantitySpec
         )
         is StructuredExecutableTypedField.BooleanField -> TypedField(
             name = name,
@@ -239,7 +252,8 @@ internal object ExecutableTypedFieldStructuredOutputSerializer :
                 ?.toUniqueObjectFields()
                 .orEmpty(),
             validationRules = validationRules.toUniqueSet("validation rule"),
-            physicalDimension = items.physicalDimension
+            physicalDimension = items.physicalDimension,
+            quantitySpec = items.quantitySpec
         )
     }
 
@@ -247,9 +261,9 @@ internal object ExecutableTypedFieldStructuredOutputSerializer :
         when (requireNotNull(itemType)) {
             TypedFieldType.STRING -> StructuredExecutableArrayItems.StringItems
             TypedFieldType.INTEGER ->
-                StructuredExecutableArrayItems.IntegerItems(physicalDimension)
+                StructuredExecutableArrayItems.IntegerItems(physicalDimension, quantitySpec)
             TypedFieldType.NUMBER ->
-                StructuredExecutableArrayItems.NumberItems(physicalDimension)
+                StructuredExecutableArrayItems.NumberItems(physicalDimension, quantitySpec)
             TypedFieldType.BOOLEAN -> StructuredExecutableArrayItems.BooleanItems
             TypedFieldType.OBJECT -> StructuredExecutableArrayItems.ObjectItems(
                 objectFields.sortedBy(TypedField::name).map(::ExecutableTypedField)
@@ -266,6 +280,15 @@ internal object ExecutableTypedFieldStructuredOutputSerializer :
         get() = when (this) {
             is StructuredExecutableArrayItems.IntegerItems -> physicalDimension
             is StructuredExecutableArrayItems.NumberItems -> physicalDimension
+            StructuredExecutableArrayItems.StringItems,
+            StructuredExecutableArrayItems.BooleanItems,
+            is StructuredExecutableArrayItems.ObjectItems -> null
+        }
+
+    private val StructuredExecutableArrayItems.quantitySpec: QuantitySpec?
+        get() = when (this) {
+            is StructuredExecutableArrayItems.IntegerItems -> quantitySpec
+            is StructuredExecutableArrayItems.NumberItems -> quantitySpec
             StructuredExecutableArrayItems.StringItems,
             StructuredExecutableArrayItems.BooleanItems,
             is StructuredExecutableArrayItems.ObjectItems -> null

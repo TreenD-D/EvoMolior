@@ -22,10 +22,11 @@ group execution.
 ## Budget Semantics
 
 Role allocations and agent ledgers enforce bounded per-agent/per-generation spawning.
-`LifecycleManager` live balances now feed Watchdog telemetry using the authoritative computed
-generation allocation. `BudgetCritical` is generation-scoped observability and does not pause later
-replenished rounds. `GroupSummary.remainingBudget` remains active-agent balance, not cumulative run
-spend.
+`LifecycleManager` emits immutable per-generation allocated/live/spent/returned credit observations.
+Watchdog compares live balance with the same fleet's original live allocation, ignores empty fleets,
+and rejects stale generation/revision updates. `BudgetCritical` is generation-scoped observability
+and does not pause later replenished rounds. `GroupSummary.remainingBudget` is active-agent balance,
+not cumulative run spend or provider USD. Settled unused credits do not grant respawn authority.
 
 Per-generation spawning is the retained product policy.
 

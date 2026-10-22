@@ -4,11 +4,16 @@ import com.achulkov.evomolior.core.atlas.TypedToolSchemaCompiler
 import com.achulkov.evomolior.core.contract.RunInputArtifact
 import com.achulkov.evomolior.core.contract.StartingField
 import com.achulkov.evomolior.core.council.CouncilAgentRunner
+import com.achulkov.evomolior.core.council.CouncilFeasibilityReport
+import com.achulkov.evomolior.core.council.CouncilFeasibilityStatus
+import com.achulkov.evomolior.core.council.ContractPath
+import com.achulkov.evomolior.core.council.FieldCompileErrorCode
 import com.achulkov.evomolior.core.council.CouncilRoleOutputBundle
 import com.achulkov.evomolior.core.council.CouncilRoleExecutionRequest
 import com.achulkov.evomolior.core.council.CouncilSynthesisWireAuthority
 import com.achulkov.evomolior.core.council.EcologistOutput
 import com.achulkov.evomolior.core.council.ExecutionEnvelope
+import com.achulkov.evomolior.core.council.creditAffordableWorkerSlots
 import com.achulkov.evomolior.core.council.FieldCompileError
 import com.achulkov.evomolior.core.council.IncentiveDesignerOutput
 import com.achulkov.evomolior.core.council.KgArchitectOutput
@@ -19,6 +24,7 @@ import com.achulkov.evomolior.core.council.SeedCuratorOutput
 import com.achulkov.evomolior.core.council.StartingFieldCompileResult
 import com.achulkov.evomolior.core.council.SynthesisOutput
 import com.achulkov.evomolior.core.council.TaskAnatomistOutput
+import com.achulkov.evomolior.core.council.compileCouncilToolOpportunityAuthority
 import com.achulkov.evomolior.core.config.AcceptanceProfile
 import com.achulkov.evomolior.core.model.Role
 import com.achulkov.evomolior.core.serialization.CouncilSynthesisContextualOutputSerializer
@@ -76,6 +82,7 @@ class GenesisCouncil(
      * @param inputArtifacts Operator-owned immutable run inputs committed into the fields.
      * @param onProgress Optional operator progress callback.
      * @param maxRetries Maximum malformed-role attempts and shared closure/compiler repair cycles.
+     * @param onFeasibility Final typed scheduling assessment for persistence; never acceptance authority.
      * @return A sealed worker/grader field pair or typed invalid result.
      */
     suspend fun runCompiled(
@@ -83,7 +90,8 @@ class GenesisCouncil(
         agentRunner: CouncilAgentRunner,
         inputArtifacts: List<RunInputArtifact> = emptyList(),
         onProgress: ((String) -> Unit)? = null,
-        maxRetries: Int = DEFAULT_MAX_RETRIES
+        maxRetries: Int = DEFAULT_MAX_RETRIES,
+        onFeasibility: ((CouncilFeasibilityReport) -> Unit)? = null
     ): StartingFieldCompileResult {
         require(maxRetries >= 0) { "maxRetries must be non-negative" }
         Napier.i("GenesisCouncil: starting typed field compilation for run=$runId")
@@ -98,23 +106,17 @@ class GenesisCouncil(
         if (anatomy is RoleExecution.Failure) return invalid(anatomy.error)
         var outputs = PartialCouncilOutputs().with((anatomy as RoleExecution.Success).output)
 
-        val specialists = coroutineScope {
-            dependentSpecialistRoles.map { role ->
-                async {
-                    executeRole(
-                        role = role,
-                        outputs = outputs,
-                        agentRunner = agentRunner,
-                        onProgress = onProgress,
-                        maxRetries = maxRetries
-                    )
-                }
-            }.awaitAll()
-        }
-        val specialistErrors = specialists.filterIsInstance<RoleExecution.Failure>().map { it.error }
-        if (specialistErrors.isNotEmpty()) return invalid(specialistErrors)
-        specialists.filterIsInstance<RoleExecution.Success>().forEach { result ->
-            outputs = outputs.with(result.output)
+        when (
+            val specialists = executeSpecialistRoles(
+                roles = dependentSpecialistRoles,
+                initialOutputs = outputs,
+                agentRunner = agentRunner,
+                onProgress = onProgress,
+                maxRetries = maxRetries
+            )
+        ) {
+            is SpecialistExecutionResolution.Failure -> return invalid(specialists.errors)
+            is SpecialistExecutionResolution.Success -> outputs = specialists.outputs
         }
 
         var repairCyclesUsed = 0
@@ -146,9 +148,46 @@ class GenesisCouncil(
         outputs = outputs.with((synthesis as RoleExecution.Success).output)
 
         var compiled = compileCurrentOutputs(runId, outputs, inputArtifacts)
+        var feasibilityReplansUsed = 0
         while (true) {
-            val compilerInvalid =
-                compiled as? StartingFieldCompileResult.Invalid ?: return compiled
+            val compilerInvalid = when (val result = compiled) {
+                is StartingFieldCompileResult.Invalid -> result
+                is StartingFieldCompileResult.Valid -> {
+                    val feasibility = CouncilFeasibilityPlanner.assess(
+                        outputs.toBundle(), executionEnvelope, feasibilityReplansUsed
+                    )
+                    if (
+                        feasibility.status == CouncilFeasibilityStatus.FITS_SCHEDULING_BOUNDS ||
+                        repairCyclesUsed >= maxRetries
+                    ) {
+                        onFeasibility?.invoke(feasibility)
+                        onProgress?.invoke(
+                            if (feasibility.status == CouncilFeasibilityStatus.PROVISIONAL_ONLY) {
+                                "Council feasibility WARNING: provisional-only delivery permitted. " +
+                                    feasibility.reasons.joinToString(" ") +
+                                    " Strict acceptance gates remain unchanged."
+                            } else {
+                                "Council feasibility: necessary scheduling bounds fit; " +
+                                    "budget sufficiency and strict acceptance are not guaranteed."
+                            }
+                        )
+                        return result
+                    }
+                    feasibilityReplansUsed += 1
+                    onProgress?.invoke(
+                        "Council feasibility replan $feasibilityReplansUsed: " +
+                            feasibility.reasons.joinToString(" ")
+                    )
+                    invalid(FieldCompileError(
+                        code = FieldCompileErrorCode.ENVELOPE_VIOLATION,
+                        path = ContractPath(listOf("councilFeasibility")),
+                        message = feasibility.reasons.joinToString(" ") +
+                            " Replan within the unchanged worker, round, model and budget limits. " +
+                            "Preserve receiver obligations, semantic proof requirements and all strict acceptance gates.",
+                        responsibleCouncilRoles = setOf(Role.CouncilTaskAnatomist)
+                    ))
+                }
+            }
             val roles = compilerInvalid.responsibleCouncilRoles.intersect(councilRoles.toSet())
             if (roles.isEmpty()) return compilerInvalid
             if (repairCyclesUsed >= maxRetries) return compilerInvalid
@@ -195,7 +234,7 @@ class GenesisCouncil(
             val specialistRolesToRepair = if (Role.CouncilTaskAnatomist in roles) {
                 dependentSpecialistRoles
             } else {
-                dependentSpecialistRoles.filter(roles::contains)
+                expandDependentSpecialistRoles(roles)
             }
             val rolesBeingRepaired = buildSet {
                 if (Role.CouncilTaskAnatomist in roles) {
@@ -205,35 +244,32 @@ class GenesisCouncil(
             }
             val frozenRoleHashes = closureBeforeRepair.frozenValidRoleHashes
                 .filterKeys { it !in rolesBeingRepaired }
-            val repairedSpecialists = coroutineScope {
-                specialistRolesToRepair.map { role ->
-                    async {
-                        executeRole(
-                            role = role,
-                            outputs = outputs,
-                            agentRunner = agentRunner,
-                            onProgress = onProgress,
-                            maxRetries = maxRetries,
-                            compilerErrors = if (Role.CouncilTaskAnatomist in roles) {
-                                refreshedCompilerInvalid?.errorsFor(role).orEmpty()
-                            } else {
-                                compilerInvalid.errorsFor(role)
-                            }
-                        )
+            when (
+                val repairedSpecialists = executeSpecialistRoles(
+                    roles = specialistRolesToRepair,
+                    initialOutputs = outputs,
+                    agentRunner = agentRunner,
+                    onProgress = onProgress,
+                    maxRetries = maxRetries,
+                    compilerErrorsFor = { role ->
+                        if (Role.CouncilTaskAnatomist in roles) {
+                            refreshedCompilerInvalid?.errorsFor(role).orEmpty()
+                        } else {
+                            compilerInvalid.errorsFor(role)
+                        }
                     }
-                }.awaitAll()
-            }
-            val repairErrors = repairedSpecialists
-                .filterIsInstance<RoleExecution.Failure>()
-                .map { it.error }
-            if (repairErrors.isNotEmpty()) return invalid(repairErrors)
-            repairedSpecialists.filterIsInstance<RoleExecution.Success>().forEach { result ->
-                outputs = outputs.with(result.output)
+                )
+            ) {
+                is SpecialistExecutionResolution.Failure ->
+                    return invalid(repairedSpecialists.errors)
+                is SpecialistExecutionResolution.Success ->
+                    outputs = repairedSpecialists.outputs
             }
 
             val upstreamOutputsChanged =
-                Role.CouncilTaskAnatomist in roles || repairedSpecialists.isNotEmpty()
+                Role.CouncilTaskAnatomist in roles || specialistRolesToRepair.isNotEmpty()
             if (upstreamOutputsChanged) {
+                outputs = outputs.projectDeterministicAuthority(runId)
                 val frozenErrors = CouncilSpecialistClosureValidator.verifyFrozenRoleHashes(
                     bundle = outputs.toSpecialistBundle(),
                     expectedHashes = frozenRoleHashes
@@ -344,7 +380,7 @@ class GenesisCouncil(
         maxRetries: Int,
         initialRepairCyclesUsed: Int
     ): SpecialistClosureResolution {
-        var outputs = initialOutputs
+        var outputs = initialOutputs.projectDeterministicAuthority(runId)
         var repairCyclesUsed = initialRepairCyclesUsed
         var report = CouncilSpecialistClosureValidator.validate(
             runId = runId,
@@ -376,7 +412,7 @@ class GenesisCouncil(
             val dependentRolesToRepair = if (taskRepair) {
                 dependentSpecialistRoles
             } else {
-                dependentSpecialistRoles.filter(roles::contains)
+                expandDependentSpecialistRoles(roles)
             }
             val rolesBeingRepaired = buildSet {
                 if (taskRepair) add(Role.CouncilTaskAnatomist)
@@ -400,6 +436,7 @@ class GenesisCouncil(
                 }
             }
             val refreshedReport = if (taskRepair) {
+                outputs = outputs.projectDeterministicAuthority(runId)
                 CouncilSpecialistClosureValidator.validate(
                     runId = runId,
                     envelope = executionEnvelope,
@@ -409,30 +446,25 @@ class GenesisCouncil(
                 report
             }
 
-            val repairedSpecialists = coroutineScope {
-                dependentRolesToRepair.map { role ->
-                    async {
-                        executeRole(
-                            role = role,
-                            outputs = outputs,
-                            agentRunner = agentRunner,
-                            onProgress = onProgress,
-                            maxRetries = maxRetries,
-                            compilerErrors = refreshedReport.errorsFor(role)
-                        )
-                    }
-                }.awaitAll()
-            }
-            val repairErrors = repairedSpecialists
-                .filterIsInstance<RoleExecution.Failure>()
-                .map { it.error }
-            if (repairErrors.isNotEmpty()) {
-                return SpecialistClosureResolution.Failure(invalid(repairErrors))
-            }
-            repairedSpecialists.filterIsInstance<RoleExecution.Success>().forEach { result ->
-                outputs = outputs.with(result.output)
+            when (
+                val repairedSpecialists = executeSpecialistRoles(
+                    roles = dependentRolesToRepair,
+                    initialOutputs = outputs,
+                    agentRunner = agentRunner,
+                    onProgress = onProgress,
+                    maxRetries = maxRetries,
+                    compilerErrorsFor = refreshedReport::errorsFor
+                )
+            ) {
+                is SpecialistExecutionResolution.Failure ->
+                    return SpecialistClosureResolution.Failure(
+                        invalid(repairedSpecialists.errors)
+                    )
+                is SpecialistExecutionResolution.Success ->
+                    outputs = repairedSpecialists.outputs
             }
 
+            outputs = outputs.projectDeterministicAuthority(runId)
             val frozenErrors = CouncilSpecialistClosureValidator.verifyFrozenRoleHashes(
                 bundle = outputs.toSpecialistBundle(),
                 expectedHashes = frozenRoleHashes
@@ -447,6 +479,64 @@ class GenesisCouncil(
             )
         }
         return SpecialistClosureResolution.Closed(outputs, repairCyclesUsed)
+    }
+
+    private suspend fun executeSpecialistRoles(
+        roles: Collection<Role>,
+        initialOutputs: PartialCouncilOutputs,
+        agentRunner: CouncilAgentRunner,
+        onProgress: ((String) -> Unit)?,
+        maxRetries: Int,
+        compilerErrorsFor: (Role) -> List<FieldCompileError> = { emptyList() }
+    ): SpecialistExecutionResolution {
+        val requestedRoles = roles.toSet()
+        require(requestedRoles.all { it in dependentSpecialistRoles }) {
+            "Only dependent Council specialist roles may use specialist execution waves"
+        }
+        var outputs = initialOutputs
+        dependentSpecialistRoleWaves.forEach { wave ->
+            val waveRoles = wave.filter(requestedRoles::contains)
+            if (waveRoles.isEmpty()) return@forEach
+            val waveOutputs = outputs
+            val executions = coroutineScope {
+                waveRoles.map { role ->
+                    async {
+                        executeRole(
+                            role = role,
+                            outputs = waveOutputs,
+                            agentRunner = agentRunner,
+                            onProgress = onProgress,
+                            maxRetries = maxRetries,
+                            compilerErrors = compilerErrorsFor(role)
+                        )
+                    }
+                }.awaitAll()
+            }
+            val errors = executions
+                .filterIsInstance<RoleExecution.Failure>()
+                .map(RoleExecution.Failure::error)
+            if (errors.isNotEmpty()) {
+                return SpecialistExecutionResolution.Failure(errors)
+            }
+            executions.filterIsInstance<RoleExecution.Success>().forEach { result ->
+                outputs = outputs.with(result.output)
+            }
+        }
+        return SpecialistExecutionResolution.Success(outputs)
+    }
+
+    private fun expandDependentSpecialistRoles(roles: Set<Role>): List<Role> {
+        val expanded = roles.toMutableSet()
+        if (Role.CouncilKGArchitect in expanded) {
+            expanded += Role.CouncilSeedCurator
+        }
+        if (
+            Role.CouncilEcologist in expanded ||
+            Role.CouncilPromptArchitect in expanded
+        ) {
+            expanded += Role.CouncilModelEcologist
+        }
+        return dependentSpecialistRoles.filter(expanded::contains)
     }
 
     private suspend fun executeRoleAttempt(
@@ -549,6 +639,27 @@ class GenesisCouncil(
                     )
                 )
             }
+            if (role == Role.CouncilTaskAnatomist) {
+                put("feasibilityPlanning", buildJsonObject {
+                    put("maxExecutionWaves", executionEnvelope.maxRounds)
+                    // Plan against workers the credit allocation can fund, not the nominal ceiling.
+                    put("workerSlotsPerGroupPerRound", executionEnvelope.creditAffordableWorkerSlots)
+                    put(
+                        "requirements",
+                        "Plan within the unchanged execution envelope, including models and budgets. " +
+                            "Prerequisites need passing evidence from earlier rounds; parent links are " +
+                            "decomposition, not scheduling dependencies. A candidate group's required " +
+                            "node evidence cannot be pooled across worker groups. Preserve receiver " +
+                            "obligations and strict proof requirements when simplifying the plan."
+                    )
+                })
+                executionEnvelope.quantitativeToolObligation?.let { obligation ->
+                    put(
+                        "quantitativeToolContractAuthority",
+                        obligation.compileCouncilToolOpportunityAuthority()
+                    )
+                }
+            }
             if (contextMode == CouncilContextMode.FULL_DEPENDENCIES) {
                 put("dependencyOutputs", outputs.dependenciesFor(role))
             }
@@ -631,6 +742,16 @@ class GenesisCouncil(
     private fun invalid(error: FieldCompileError): StartingFieldCompileResult.Invalid =
         invalid(listOf(error))
 
+    private fun PartialCouncilOutputs.projectDeterministicAuthority(runId: String): PartialCouncilOutputs {
+        val projected = toSpecialistBundle()
+            .projectDeterministicCompilerAuthority(runId, executionEnvelope)
+        return copy(
+            taskAnatomist = projected.taskAnatomist,
+            modelEcologist = projected.modelEcologist,
+            seedCurator = projected.seedCurator
+        )
+    }
+
     private fun compileCurrentOutputs(
         runId: String,
         outputs: PartialCouncilOutputs,
@@ -671,6 +792,11 @@ class GenesisCouncil(
         data class Failure(
             val invalid: StartingFieldCompileResult.Invalid
         ) : SpecialistClosureResolution
+    }
+
+    private sealed interface SpecialistExecutionResolution {
+        data class Success(val outputs: PartialCouncilOutputs) : SpecialistExecutionResolution
+        data class Failure(val errors: List<FieldCompileError>) : SpecialistExecutionResolution
     }
 
     private enum class CouncilContextMode {
@@ -728,6 +854,19 @@ class GenesisCouncil(
             if (role != Role.CouncilTaskAnatomist) {
                 taskAnatomist?.let {
                     putTyped(Role.CouncilTaskAnatomist, TaskAnatomistOutput.serializer(), it)
+                }
+            }
+            if (role == Role.CouncilModelEcologist) {
+                ecologist?.let {
+                    putTyped(Role.CouncilEcologist, EcologistOutput.serializer(), it)
+                }
+                promptArchitect?.let {
+                    putTyped(Role.CouncilPromptArchitect, PromptArchitectOutput.serializer(), it)
+                }
+            }
+            if (role == Role.CouncilSeedCurator) {
+                kgArchitect?.let {
+                    putTyped(Role.CouncilKGArchitect, KgArchitectOutput.serializer(), it)
                 }
             }
             if (role == Role.CouncilSynthesis) {
@@ -834,6 +973,18 @@ class GenesisCouncil(
             Role.CouncilKGArchitect,
             Role.CouncilModelEcologist,
             Role.CouncilSeedCurator
+        )
+        val dependentSpecialistRoleWaves = listOf(
+            listOf(
+                Role.CouncilIncentiveDesigner,
+                Role.CouncilEcologist,
+                Role.CouncilPromptArchitect,
+                Role.CouncilKGArchitect
+            ),
+            listOf(
+                Role.CouncilModelEcologist,
+                Role.CouncilSeedCurator
+            )
         )
     }
 }

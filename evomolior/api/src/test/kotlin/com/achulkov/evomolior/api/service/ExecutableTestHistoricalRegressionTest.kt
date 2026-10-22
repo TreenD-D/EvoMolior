@@ -6,6 +6,7 @@ import com.achulkov.evomolior.api.model.RunConfig
 import com.achulkov.evomolior.competition.coordinator.GroupCoordinator
 import com.achulkov.evomolior.competition.grader.GraderGroupManager
 import com.achulkov.evomolior.core.atlas.ArtifactType
+import com.achulkov.evomolior.core.atlas.AtlasHashing
 import com.achulkov.evomolior.core.atlas.FinalOutputSpec
 import com.achulkov.evomolior.core.atlas.NodeKind
 import com.achulkov.evomolior.core.config.CouncilExecutionPurpose
@@ -121,6 +122,7 @@ class ExecutableTestHistoricalRegressionTest {
             graderField = legacyGrader,
             atlas = compiled.atlas,
             graderAtlas = compiled.graderAtlas,
+            receiverContract = compiled.receiverContract,
             envelope = envelope,
             report = legacyReport
         )
@@ -281,7 +283,10 @@ class ExecutableTestHistoricalRegressionTest {
             assertEquals(0, lifecycleCalls.get())
             assertEquals(0, coordinatorCalls.get())
             assertFalse(events.any { it is EvoMoliorEvent.RunStarted })
-            assertFalse(substrateFactory.atlasDbFilePath(runId).exists())
+            // Rejected startup now publishes a diagnostic outcome in the control-plane Atlas DB.
+            // Runtime substrate seeding remains forbidden and is asserted by the empty worker,
+            // grader, active-field, and completion authorities below.
+            assertTrue(substrateFactory.atlasDbFilePath(runId).exists())
             assertTrue(workerGroupDirectories(substrateFactory, runId).isEmpty())
             assertTrue(graderDirectories(substrateFactory, runId).isEmpty())
             assertEquals(null, PersistedRunStateStore.read(root, runId))
@@ -371,22 +376,29 @@ class ExecutableTestHistoricalRegressionTest {
                                 bootContext.rolePrompt.contains("Round Submission Summariser")
                             ) {
                                 val now = System.currentTimeMillis()
+                                val submissionId =
+                                    "step7-summary-${bootContext.groupId}-$now"
+                                val content = "ROUND SUBMISSION SUMMARY\n$output"
                                 substrateFactory.get(bootContext.runId, bootContext.groupId)
                                     .stagingDao()
                                     .insert(
                                         StagingSubmissionEntity(
-                                            id = "step7-summary-${bootContext.groupId}-$now",
+                                            id = submissionId,
                                             agentId = bootContext.agentId,
                                             role = bootContext.role.name,
                                             type = "PLAN_UPDATE",
-                                            content = "ROUND SUBMISSION SUMMARY\n$output",
+                                            content = content,
                                             budgetSignature = "step7-summary",
-                                            status = "pending",
+                                            status = "promoted",
+                                            criticAgentId =
+                                                "step7-critic-${bootContext.groupId}",
                                             generation = bootContext.generation,
                                             groupId = bootContext.groupId,
                                             runId = bootContext.runId,
                                             submittedAtMs = now,
-                                            reviewedAtMs = null
+                                            reviewedAtMs = now,
+                                            promotedArtifactRef = "submission:$submissionId",
+                                            promotedArtifactHash = AtlasHashing.hashText(content)
                                         )
                                     )
                             }
@@ -436,7 +448,10 @@ class ExecutableTestHistoricalRegressionTest {
                 }
             }
             assertEquals(2, runtimeAssessments.size)
-            assertTrue(runtimeAssessments.values.all { it.automatedTestsPassed == 7 })
+            assertTrue(
+                runtimeAssessments.values.all { it.automatedTestsPassed == 7 },
+                runtimeAssessments.toString()
+            )
             assertTrue(runtimeAssessments.values.all { it.automatedTestsFailed == 0 })
             assertTrue(runtimeAssessments.values.none { it.mandatoryFailure })
 

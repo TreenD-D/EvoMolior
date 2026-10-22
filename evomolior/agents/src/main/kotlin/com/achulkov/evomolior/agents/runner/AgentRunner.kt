@@ -214,14 +214,20 @@ class AgentRunner(
                 )
             }
         } catch (e: Exception) {
-            Napier.e("AgentRunner: ${bootContext.agentId} agent error: ${e.message}", e)
+            val stopReason = expectedAgentStopReason(e)
+            if (stopReason != null) {
+                Napier.i("AgentRunner: ${bootContext.agentId} stopped by lifecycle: $stopReason")
+            } else {
+                Napier.e("AgentRunner: ${bootContext.agentId} agent error: ${e.message}", e)
+            }
             // Write an emergency death note only if the agent didn't already write its own.
             if (!deathNoteProtocol.isWritten) {
                 factory.writeEmergencyDeathNote(
                     bootContext = bootContext,
-                    reason = e.javaClass.simpleName,
+                    reason = stopReason ?: e.javaClass.simpleName,
                     errorMessage = e.message ?: "unknown error",
-                    finalResult = finalResult
+                    finalResult = finalResult,
+                    noteKind = if (stopReason != null) "controlled-stop" else "emergency"
                 )
             }
         }

@@ -1,0 +1,82 @@
+{
+  "schema_version": "arc2-evidence-index-v1",
+  "sources": [
+    {
+      "path": "reports/arc2-program-prior-v2-full-20260810.md",
+      "kind": "primary trajectory and audit",
+      "date": "2026-08-10",
+      "supports": [
+        "V2 gates",
+        "retrieval",
+        "novel yield",
+        "verifier efficiency",
+        "lineage hashes",
+        "non-finite telemetry"
+      ],
+      "status": "diagnostic-only"
+    },
+    {
+      "path": "ARC2_SUBMISSION_CONTINUATION_20260809.md",
+      "kind": "operator decision context",
+      "date": "2026-08-09",
+      "supports": [
+        "active continuation boundary"
+      ],
+      "status": "diagnostic-only"
+    },
+    {
+      "path": "reports/arc2-program-prior-sweep-20260809.md",
+      "kind": "prior experiment",
+      "date": "2026-08-09",
+      "supports": [
+        "program-prior negative evidence"
+      ],
+      "status": "diagnostic-only"
+    },
+    {
+      "path": "reports/arc2-composition-a2-e04-20260807.md",
+      "kind": "composition experiment",
+      "date": "2026-08-07",
+      "supports": [
+        "typed composition lens"
+      ],
+      "status": "diagnostic-only"
+    },
+    {
+      "path": "reports/arc2-residual-atlas-a2-e01-20260807.md",
+      "kind": "residual atlas",
+      "date": "2026-08-07",
+      "supports": [
+        "residual and relational lens"
+      ],
+      "status": "diagnostic-only"
+    },
+    {
+      "path": "reports/arc2-kaggle-corpus-specialists-20260809.md",
+      "kind": "Kaggle diagnostic",
+      "date": "2026-08-09",
+      "supports": [
+        "offline integration constraints"
+      ],
+      "status": "diagnostic-only"
+    },
+    {
+      "path": "A2_2_INTERFACE_FREEZE.md",
+      "kind": "interface freeze",
+      "date": "2026-08-07",
+      "supports": [
+        "collection boundary"
+      ],
+      "status": "frozen boundary"
+    },
+    {
+      "path": "evomolior_arc2_luna_hypothesis_register.json",
+      "kind": "prior hypothesis register",
+      "date": "2026-08-05",
+      "supports": [
+        "novelty comparison"
+      ],
+      "status": "reference only"
+    }
+  ]
+}

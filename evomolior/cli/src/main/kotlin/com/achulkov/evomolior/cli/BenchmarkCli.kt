@@ -8,6 +8,7 @@ import com.achulkov.evomolior.api.model.FinalOutputKind
 import com.achulkov.evomolior.api.model.FinalOutputSpec
 import com.achulkov.evomolior.api.model.RunConfig
 import com.achulkov.evomolior.api.model.RunInputArtifactUpload
+import com.achulkov.evomolior.api.service.RunOutcomePresentation
 import com.achulkov.evomolior.core.benchmark.BenchmarkAnswerFormat
 import com.achulkov.evomolior.core.benchmark.ComparativeInputCommitments
 import com.achulkov.evomolior.core.benchmark.ComparativeRuntimeInputs
@@ -35,6 +36,9 @@ import com.achulkov.evomolior.core.contract.ContributionAuthorityRef
 import com.achulkov.evomolior.core.council.CouncilDeterministicIds
 import com.achulkov.evomolior.core.model.GroupProfileType
 import com.achulkov.evomolior.core.model.ScoringDimensionCatalog
+import com.achulkov.evomolior.core.deliverable.AcceptanceStatus
+import com.achulkov.evomolior.core.deliverable.ExecutionCompletionStatus
+import com.achulkov.evomolior.core.deliverable.PrimaryArtifactValidationStatus
 import com.achulkov.evomolior.runtime.createProductionRuntime
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
 import com.achulkov.evomolior.substrate.worker.ContributionGraphRepository
@@ -191,6 +195,11 @@ internal data class BenchmarkCliTaskResult(
     val finalDeliverableReferenceId: String? = null,
     val finalDeliverableReferenceHash: String? = null,
     val benchmarkScoreContributionId: String? = null,
+    val executionStatus: ExecutionCompletionStatus? = null,
+    val acceptanceStatus: AcceptanceStatus? = null,
+    val primaryArtifactPath: String? = null,
+    val primaryArtifactValidationStatus: PrimaryArtifactValidationStatus? = null,
+    val processExitCode: Int? = null,
     val observedComparativeCommitments: ComparativeInputCommitments? = null,
     val observedWorkerGroupCount: Int? = null,
     val observedGraderGroupCount: Int? = null,
@@ -272,6 +281,9 @@ internal data class TallBuildingRow(
 
 internal object BenchmarkCliArguments {
     fun parse(args: Array<String>): BenchmarkCliOptions? {
+        if (args.any { it == "-codex-preset" || it == "--codex-preset" }) {
+            throw CliUsageException("-codex-preset is not supported by benchmark commands")
+        }
         if (args.any { it == "-h" || it == "--help" }) return null
         var benchmark = Tier0BenchmarkKind.FRAMES
         var limit = 2
@@ -672,18 +684,27 @@ internal class BenchmarkCliRunner(
             runtime.events.collect { event ->
                 when (event) {
                     is EvoMoliorEvent.RunCompleted -> if (event.runId == runId && !completion.isCompleted) completion.complete(event)
+                    is EvoMoliorEvent.RunCompletedProvisional -> if (event.runId == runId && !completion.isCompleted) completion.complete(event)
+                    is EvoMoliorEvent.RunRecovered -> if (event.runId == runId && !completion.isCompleted) completion.complete(event)
                     is EvoMoliorEvent.RunAborted -> if (event.runId == runId && !completion.isCompleted) completion.complete(event)
                     else -> Unit
                 }
             }
         }
 
-        val status = try {
+        var terminalEvent: EvoMoliorEvent? = null
+        val eventStatus = try {
             withTimeout(options.taskTimeoutMinutes * 60_000L) {
                 runtime.startRun(buildRunConfig(options, task, runId, objective, sourceArtifacts))
-                when (val event = completion.await()) {
+                terminalEvent = completion.await()
+                when (terminalEvent) {
                     is EvoMoliorEvent.RunCompleted -> "COMPLETED"
-                    is EvoMoliorEvent.RunAborted -> "ABORTED: ${event.reason}"
+                    is EvoMoliorEvent.RunCompletedProvisional ->
+                        "COMPLETED: PROVISIONAL: ${terminalEvent.reason}"
+                    is EvoMoliorEvent.RunRecovered ->
+                        "RECOVERED: ${terminalEvent.reason}"
+                    is EvoMoliorEvent.RunAborted ->
+                        "ABORTED: ${terminalEvent.reason}"
                     else -> "UNKNOWN"
                 }
             }
@@ -699,17 +720,80 @@ internal class BenchmarkCliRunner(
             if (eventJob.isActive) eventJob.cancelAndJoin()
         }
 
+        val outcomePresentation = runCatching {
+            runtime.getRunOutcomePresentation(runId)
+        }.getOrNull()
+        val eventTerminalOutcome = when (terminalEvent) {
+            is EvoMoliorEvent.RunCompletedProvisional -> terminalEvent.terminalOutcome
+            is EvoMoliorEvent.RunRecovered -> terminalEvent.terminalOutcome
+            else -> null
+        }
+        val executionStatus = outcomePresentation?.executionStatus
+            ?: eventTerminalOutcome?.executionStatus
+            ?: if (
+                terminalEvent is EvoMoliorEvent.RunCompleted ||
+                    terminalEvent is EvoMoliorEvent.RunCompletedProvisional
+            ) {
+                ExecutionCompletionStatus.COMPLETED
+            } else {
+                null
+            }
+        val acceptanceStatus = outcomePresentation?.acceptanceStatus
+            ?: eventTerminalOutcome?.acceptanceStatus
+        val status = if (executionStatus == ExecutionCompletionStatus.COMPLETED) {
+            "COMPLETED"
+        } else {
+            eventStatus
+        }
         val bundle = runtime.getResultsBundle(runId)
         val bundlePath = bundle?.let { bytes ->
-            taskOutputDir.resolve("results.zip").also { Files.write(it, bytes) }
+            taskOutputDir.resolve(
+                when (outcomePresentation?.outcomeClass) {
+                    com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+                        .PROVISIONAL_DECISION_PACKAGE -> "recovery-results.zip"
+                    com.achulkov.evomolior.core.deliverable.RunOutcomeClass
+                        .ACCEPTED_DECISION_PACKAGE -> "results.zip"
+                    else -> if (status.startsWith("COMPLETED")) {
+                        "results.zip"
+                    } else if (status.startsWith("RECOVERED")) {
+                        "recovery-results.zip"
+                    } else {
+                        "aborted-results.zip"
+                    }
+                }
+            ).also { Files.write(it, bytes) }
         }
         val outputPath = benchmarkPredictionPath(task.benchmark)
         val output = bundle?.let { extractZipEntry(it, "outputs/$outputPath") }
-        if (!status.startsWith("COMPLETED")) {
-            return failedTaskResult(task, runId, taskOutputDir, status, bundlePath?.absolutePathString())
+        if (executionStatus != ExecutionCompletionStatus.COMPLETED) {
+            return failedTaskResult(
+                task,
+                runId,
+                taskOutputDir,
+                status,
+                bundlePath?.absolutePathString(),
+                executionStatus = executionStatus,
+                acceptanceStatus = acceptanceStatus,
+                primaryArtifactPath = outcomePresentation?.primaryArtifactPath,
+                primaryArtifactValidationStatus =
+                    outcomePresentation?.primaryArtifactValidationStatus,
+                processExitCode = 1,
+            )
         }
         if (output.isNullOrBlank()) {
-            return failedTaskResult(task, runId, taskOutputDir, "Missing outputs/$outputPath", bundlePath?.absolutePathString())
+            return failedTaskResult(
+                task,
+                runId,
+                taskOutputDir,
+                "Missing outputs/$outputPath",
+                bundlePath?.absolutePathString(),
+                executionStatus = executionStatus,
+                acceptanceStatus = acceptanceStatus,
+                primaryArtifactPath = outcomePresentation?.primaryArtifactPath,
+                primaryArtifactValidationStatus =
+                    outcomePresentation?.primaryArtifactValidationStatus,
+                processExitCode = 0,
+            )
         }
 
         val prediction = parsePrediction(task.id, output)
@@ -769,7 +853,13 @@ internal class BenchmarkCliRunner(
             resultsBundlePath = bundlePath?.absolutePathString(),
             finalDeliverableReferenceId = benchmarkAuthority?.finalReference?.authorityId,
             finalDeliverableReferenceHash = benchmarkAuthority?.finalReference?.authorityHash,
-            benchmarkScoreContributionId = benchmarkAuthority?.contributionId
+            benchmarkScoreContributionId = benchmarkAuthority?.contributionId,
+            executionStatus = executionStatus,
+            acceptanceStatus = acceptanceStatus,
+            primaryArtifactPath = outcomePresentation?.primaryArtifactPath,
+            primaryArtifactValidationStatus =
+                outcomePresentation?.primaryArtifactValidationStatus,
+            processExitCode = 0,
         )
     }
 
@@ -1678,7 +1768,12 @@ internal class BenchmarkCliRunner(
         runId: String,
         taskOutputDir: Path,
         error: String,
-        bundlePath: String? = null
+        bundlePath: String? = null,
+        executionStatus: ExecutionCompletionStatus? = null,
+        acceptanceStatus: AcceptanceStatus? = null,
+        primaryArtifactPath: String? = null,
+        primaryArtifactValidationStatus: PrimaryArtifactValidationStatus? = null,
+        processExitCode: Int? = null,
     ): BenchmarkCliTaskResult = BenchmarkCliTaskResult(
         taskId = task.id,
         runId = runId,
@@ -1691,6 +1786,11 @@ internal class BenchmarkCliRunner(
         normalizedPrediction = "",
         matchedGoldAnswer = null,
         resultsBundlePath = bundlePath,
+        executionStatus = executionStatus,
+        acceptanceStatus = acceptanceStatus,
+        primaryArtifactPath = primaryArtifactPath,
+        primaryArtifactValidationStatus = primaryArtifactValidationStatus,
+        processExitCode = processExitCode,
         error = error
     )
 
@@ -2161,9 +2261,10 @@ internal class BenchmarkCliRunner(
         URI.create("https://en.wikipedia.org/w/index.php?oldid=$revisionId")
 
     private fun fetchText(uri: URI): String =
-        HttpClient.newHttpClient()
+        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
             .send(
                 HttpRequest.newBuilder(uri)
+                    .timeout(Duration.ofSeconds(20))
                     .header("User-Agent", "EvoMolior Tier0 benchmark runner/1.0 (local evaluation)")
                     .GET()
                     .build(),

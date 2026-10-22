@@ -37,15 +37,31 @@ class RunMetricsV1ArtifactStore(
      * @return Exact durable artifact.
      */
     fun persist(metrics: RunMetricsV1): RunMetricsV1Artifact {
+        return persist(compile(metrics))
+    }
+
+    /** Compiles exact canonical artifact bytes without writing publication authority. */
+    fun compile(metrics: RunMetricsV1): RunMetricsV1Artifact {
         val file = file(metrics.runId)
         val bytes = json.encodeToString(RunMetricsV1.serializer(), metrics)
             .toByteArray(Charsets.UTF_8)
+        return decode(file, bytes, metrics.runId)
+    }
+
+    /** Persists one already compiled artifact once and verifies exact byte identity. */
+    fun persist(artifact: RunMetricsV1Artifact): RunMetricsV1Artifact {
+        val file = file(artifact.metrics.runId)
+        require(
+            artifact.file == file &&
+                artifact.sha256 == sha256Hex(artifact.bytes)
+        ) { "Compiled run metrics artifact identity is invalid" }
+        val bytes = artifact.bytes
         if (file.isFile) {
             val existing = Files.readAllBytes(file.toPath())
             require(existing.contentEquals(bytes)) {
                 "Run metrics authority already exists with different bytes"
             }
-            return decode(file, existing, metrics.runId)
+            return decode(file, existing, artifact.metrics.runId)
         }
         file.parentFile?.mkdirs()
         val temporary = File(file.parentFile, "${file.name}.tmp")
@@ -56,7 +72,7 @@ class RunMetricsV1ArtifactStore(
             StandardCopyOption.REPLACE_EXISTING,
             StandardCopyOption.ATOMIC_MOVE,
         )
-        return decode(file, bytes, metrics.runId)
+        return decode(file, bytes, artifact.metrics.runId)
     }
 
     /**

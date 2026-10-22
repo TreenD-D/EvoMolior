@@ -50,9 +50,7 @@ object ToolProjectSkeletonCompiler {
             ToolImplementationMode.FORMULA_DSL,
             ToolImplementationMode.RULE_DSL,
             ToolImplementationMode.SIMULATION_DSL -> dslFiles(
-                opportunity.preferredImplementationMode,
-                opportunity.requiredOutputs,
-                opportunity.simulationRecordBindings?.randomSeedInputField
+                opportunity
             )
         }
         val contract = ToolSkeletonFile(
@@ -117,23 +115,32 @@ object ToolProjectSkeletonCompiler {
     """.trimIndent()
 
     private fun dslFiles(
-        mode: ToolImplementationMode,
-        outputs: List<TypedField>,
-        randomSeedInputField: String?
+        opportunity: ToolOpportunity
     ): List<ToolSkeletonFile> {
+        val mode = opportunity.preferredImplementationMode
         val kind = when (mode) {
             ToolImplementationMode.FORMULA_DSL -> ToolDslKind.FORMULA
             ToolImplementationMode.RULE_DSL -> ToolDslKind.RULE
             ToolImplementationMode.SIMULATION_DSL -> ToolDslKind.SIMULATION
             else -> error("Non-DSL mode cannot generate a DSL skeleton")
         }
-        val program = ToolDslProgram(
-            kind = kind,
-            outputs = outputs.sortedBy(TypedField::name).map { field ->
-                ToolDslOutput(field.name, ToolDslExpression.Literal(field.placeholder))
-            },
-            randomSeedInputField = randomSeedInputField
-        )
+        val program = when (mode) {
+            ToolImplementationMode.FORMULA_DSL ->
+                requireNotNull(opportunity.formulaDslReferenceProgram) {
+                    "FORMULA_DSL skeleton requires a Council-authored reference program"
+                }
+
+            ToolImplementationMode.RULE_DSL,
+            ToolImplementationMode.SIMULATION_DSL -> ToolDslProgram(
+                kind = kind,
+                outputs = opportunity.requiredOutputs.sortedBy(TypedField::name).map { field ->
+                    ToolDslOutput(field.name, ToolDslExpression.Literal(field.placeholder))
+                },
+                randomSeedInputField = opportunity.simulationRecordBindings?.randomSeedInputField
+            )
+
+            else -> error("Non-DSL mode cannot generate a DSL skeleton")
+        }
         val source = json.encodeToString(program)
         val sourceName = when (kind) {
             ToolDslKind.FORMULA -> "formula.json"

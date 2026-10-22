@@ -72,6 +72,8 @@ object EventTypes {
     const val TRUST_DECAY = "TRUST_DECAY"
     const val STAGE_ADVANCED = "STAGE_ADVANCED"
     const val CONSTITUTIONAL_VIOLATION = "CONSTITUTIONAL_VIOLATION"
+    /** Permitted constitutional observations, including ALWAYS_LOG tool-call audit events. */
+    const val CONSTITUTIONAL_AUDIT = "CONSTITUTIONAL_AUDIT"
     const val INSPECTOR_FLAG = "INSPECTOR_FLAG"
     const val META_PLANNER_SPAWN = "META_PLANNER_SPAWN"
     const val FINAL_SUBMISSION = "FINAL_SUBMISSION"

@@ -9,6 +9,50 @@ on:
       - '**'
 
 jobs:
+  repository-hygiene:
+    runs-on: ubuntu-latest
+    name: Repository hygiene
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject generated and oversized tracked files
+        run: bash scripts/check_repository_hygiene.sh
+      - name: Test repository hygiene policy
+        run: bash scripts/test_repository_hygiene.sh
+
+  engine:
+    runs-on: ubuntu-latest
+    name: Engine tests and CLI distribution
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-gradle
+        with:
+          gradle-cache-encryption-key: ${{ secrets.GRADLE_CACHE_ENCRYPTION_KEY }}
+
+      # Provider-backed tests are opt-in and stay skipped without explicit live flags and keys.
+      - name: Run provider-free engine suites
+        run: >
+          ./gradlew --continue --no-configuration-cache
+          :engine:core:test :engine:substrate:test :engine:sandbox:test
+          :engine:agents:test :engine:orchestration:test :engine:competition:test
+          :engine:api:test :engine:runtime:test :engine:cli:test
+
+      - name: Assemble CLI distribution
+        run: ./gradlew --no-configuration-cache :engine:cli:installDist
+
+      - name: Smoke-test generated launcher
+        run: ./evomolior/cli/build/install/evomolior/bin/evomolior --help
+
+      - name: Upload test reports
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-test-reports
+          retention-days: 7
+          path: evomolior/*/build/reports/tests/
+
   build:
     strategy:
       matrix:

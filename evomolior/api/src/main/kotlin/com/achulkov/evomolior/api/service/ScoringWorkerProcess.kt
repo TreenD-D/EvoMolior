@@ -3,7 +3,9 @@ package com.achulkov.evomolior.api.service
 import com.achulkov.evomolior.api.model.ScoringWorkerHealth
 import com.achulkov.evomolior.api.model.ScoringWorkerRequest
 import com.achulkov.evomolior.api.model.ScoringWorkerResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -56,6 +58,7 @@ internal class ScoringWorkerProcess(
         val stderr = diagnostics.resolve("stderr.log")
         val child = ProcessBuilder(
             javaBinary,
+            "-Djava.io.tmpdir=${System.getProperty("java.io.tmpdir")}",
             "-cp",
             System.getProperty("java.class.path"),
             workerMainClass,
@@ -64,6 +67,7 @@ internal class ScoringWorkerProcess(
             *groupIds.toTypedArray()
         ).apply {
             environment()["EVOMOLIOR_SCORING_WORKER_TOKEN"] = workerToken
+            environment()["EVOMOLIOR_SCORING_WORKER_OWNER_PID"] = ProcessHandle.current().pid().toString()
             redirectOutput(stdout.toFile())
             redirectError(stderr.toFile())
         }.start()
@@ -75,31 +79,42 @@ internal class ScoringWorkerProcess(
         stderrFile = stderr
 
         try {
-            withTimeout(startupTimeoutMs) {
-                while (true) {
-                    check(child.isAlive) {
-                        "Scoring worker exited during startup with code ${child.exitValue()}"
-                    }
-                    if (baseUri == null && Files.isRegularFile(ready)) {
-                        val port = Files.readString(ready).trim().toIntOrNull()
-                        if (port != null) baseUri = URI.create("http://127.0.0.1:$port")
-                    }
-                    if (baseUri == null) {
+            // Child-process readiness is wall-clock I/O. Keeping the timeout on Dispatchers.IO
+            // prevents coroutine test schedulers from virtually elapsing startup before the JVM
+            // has had a chance to publish its ready file.
+            withContext(Dispatchers.IO) {
+                withTimeout(startupTimeoutMs) {
+                    while (true) {
+                        check(child.isAlive) {
+                            "Scoring worker exited during startup with code ${child.exitValue()}"
+                        }
+                        if (baseUri == null && Files.isRegularFile(ready)) {
+                            val port = Files.readString(ready).trim().toIntOrNull()
+                            if (port != null) baseUri = URI.create("http://127.0.0.1:$port")
+                        }
+                        if (baseUri == null) {
+                            delay(50)
+                            continue
+                        }
+                        val health = runCatching { getHealth() }.getOrNull()
+                        if (health?.ready == true) return@withTimeout
                         delay(50)
-                        continue
                     }
-                    val health = runCatching { getHealth() }.getOrNull()
-                    if (health?.ready == true) return@withTimeout
-                    delay(50)
                 }
             }
         } catch (error: Exception) {
             val diagnosticsText = startupDiagnostics(child)
-            stop()
+            val cleanupFailure = runCatching { stop() }.exceptionOrNull()
+            if (error is CancellationException) {
+                cleanupFailure?.let(error::addSuppressed)
+                throw error
+            }
             throw IllegalStateException(
                 "Scoring worker failed to start. $diagnosticsText",
                 error
-            )
+            ).also { failure ->
+                cleanupFailure?.let(failure::addSuppressed)
+            }
         }
     }
 
@@ -126,23 +141,18 @@ internal class ScoringWorkerProcess(
 
     suspend fun stop() {
         val child = process ?: return
-        if (child.isAlive) {
-            runCatching {
-                withTimeout(shutdownTimeoutMs) {
-                    send("/shutdown", "", HttpResponse.BodyHandlers.discarding())
-                }
+        try {
+            terminateScoringWorkerChildProcess(child, shutdownTimeoutMs) {
+                send("/shutdown", "", HttpResponse.BodyHandlers.discarding())
             }
-            withContext(Dispatchers.IO) {
-                if (!child.waitFor(shutdownTimeoutMs, TimeUnit.MILLISECONDS)) {
-                    child.destroy()
-                    if (!child.waitFor(shutdownTimeoutMs, TimeUnit.MILLISECONDS)) child.destroyForcibly()
-                }
+        } finally {
+            if (!child.isAlive) {
+                process = null
+                baseUri = null
+                token = null
+                cleanupDiagnostics()
             }
         }
-        process = null
-        baseUri = null
-        token = null
-        cleanupDiagnostics()
     }
 
     internal fun isAlive(): Boolean = process?.isAlive == true
@@ -203,5 +213,34 @@ internal class ScoringWorkerProcess(
 
     private companion object {
         const val MAX_DIAGNOSTIC_CHARS = 4_096
+    }
+}
+
+internal suspend fun terminateScoringWorkerChildProcess(
+    child: Process,
+    shutdownTimeoutMs: Long,
+    requestGracefulShutdown: suspend () -> Unit
+) {
+    require(shutdownTimeoutMs > 0) { "Scoring worker shutdown timeout must be positive" }
+    withContext(NonCancellable) {
+        if (!child.isAlive) return@withContext
+        runCatching {
+            withTimeout(shutdownTimeoutMs) {
+                requestGracefulShutdown()
+            }
+        }
+        withContext(Dispatchers.IO) {
+            if (child.waitFor(shutdownTimeoutMs, TimeUnit.MILLISECONDS)) {
+                return@withContext
+            }
+            child.destroy()
+            if (child.waitFor(shutdownTimeoutMs, TimeUnit.MILLISECONDS)) {
+                return@withContext
+            }
+            child.destroyForcibly()
+            check(child.waitFor(shutdownTimeoutMs, TimeUnit.MILLISECONDS)) {
+                "Scoring worker did not terminate after forced shutdown"
+            }
+        }
     }
 }

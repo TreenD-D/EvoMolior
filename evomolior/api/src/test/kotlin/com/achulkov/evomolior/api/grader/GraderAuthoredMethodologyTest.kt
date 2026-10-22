@@ -115,6 +115,33 @@ class GraderAuthoredMethodologyTest {
                 .contains("Mandatory grader-authored automated test failed")
         )
         assertTrue(judgePrompt.contains("required-evidence: FAIL"))
+        assertTrue(judgePrompt.contains("Submit raw quality"))
+        val diagnosticEvent = factory.getGrader(runId, graderGroupId).eventLogDao()
+            .getByGeneration(runId, graderGroupId, 1)
+            .single { it.eventType == "AUTHORED_GRADING_DIAGNOSTIC" }
+        val diagnostic = Json.decodeFromString<AuthoredGradingDiagnostic>(diagnosticEvent.payloadJson)
+        assertTrue(diagnosticEvent.payloadJson.contains("\"gateStatus\":\"MANDATORY_FAILURE\""))
+        assertTrue(diagnosticEvent.payloadJson.contains("\"finalCandidateValidationStatus\":\"NOT_EVALUATED\""))
+        assertTrue(diagnosticEvent.payloadJson.contains("\"status\":\"FAIL\""))
+        assertEquals(82.0, diagnostic.rawScores.single().rawScore)
+        assertEquals(
+            "Text-only RoundJudge score for group-0: Strong prose.",
+            diagnostic.rawScores.single().justification
+        )
+        assertTrue(
+            diagnostic.gatedScores.single().justification
+                .startsWith(diagnostic.rawScores.single().justification)
+        )
+        assertEquals(0.0, diagnostic.gatedScores.single().rawScore)
+        assertEquals(AuthoredGateStatus.MANDATORY_FAILURE, diagnostic.gateStatus)
+        assertEquals(AuthoredTestExecutionStatus.FAIL, diagnostic.tests.single().status)
+        assertEquals("required-evidence", diagnostic.tests.single().outcome.testId)
+        assertEquals("REQUIRED_EVIDENCE_MARKER", diagnostic.tests.single().outcome.expectedOutputPattern)
+        assertEquals("ROUND_CANON_SNAPSHOT", diagnostic.targetKind)
+        assertEquals(AuthoredTargetAuthorityStatus.UNSEALED, diagnostic.targetAuthorityStatus)
+        assertEquals("NOT_EVALUATED", diagnostic.finalCandidateValidationStatus)
+        assertEquals("PRE_AGGREGATION", diagnostic.aggregationStatus)
+        assertTrue(diagnostic.targetSnapshotHash.isNotBlank())
     }
 
     @Test

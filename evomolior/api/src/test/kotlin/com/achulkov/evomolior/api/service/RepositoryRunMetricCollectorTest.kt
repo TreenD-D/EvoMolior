@@ -90,6 +90,35 @@ class RepositoryRunMetricCollectorTest {
     }
 
     @Test
+    fun `mandatory coverage denominator includes unrevealed mandatory nodes`() = runTest {
+        val factory = factory()
+        val revealed = NodeId("node-revealed")
+        val future = NodeId("node-future")
+        val atlas = initializeTestWorkerAtlas(
+            factory = factory,
+            runId = "run-1",
+            nodeIds = setOf(revealed, future),
+            groupId = "group-0",
+            revealedNodeIds = setOf(revealed),
+            passedNodeIds = setOf(revealed)
+        )
+
+        val observation = assertIs<RunMetricCollectionResult.Available>(
+            RepositoryRunMetricCollector(factory).collect(
+                "mandatory_node_coverage",
+                context(
+                    workerGroupIds = listOf("group-0"),
+                    atlasId = atlas.atlasId
+                )
+            )
+        )
+
+        assertEquals(1.0, observation.numerator)
+        assertEquals(2.0, observation.denominator)
+        assertEquals(0.5, observation.value)
+    }
+
+    @Test
     fun `typed KG attempts preserve accepted and rejected denominator authority`() = runTest {
         val factory = factory()
         val repository = KgFactAttemptRepository(factory.get("run-1", "group-0"))
@@ -158,7 +187,13 @@ class RepositoryRunMetricCollectorTest {
         )
 
         assertEquals(
-            setOf("claim_grounding_coverage", "score_replay_error"),
+            setOf(
+                "claim_grounding_coverage",
+                "score_replay_error",
+                "exit_identity_conflicts",
+                "exit_finalization_retries",
+                "tool_contract_transport_failure_rate",
+            ),
             missing.missingMeasurementInfrastructureMetricIds,
         )
         val observation = measured.metrics.observations.single {

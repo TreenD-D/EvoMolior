@@ -28,15 +28,32 @@ local.properties
 .evomolior-locks/
 .evomolior-tmp/
 .gradle-user/
+.evomolior-gradle-home/
+.system-cache-relief/
+.gradle-tmp/
 .test-tmp/
 .java-tmp/
 
-# Local run/provider state. Keep the bytes locally; never publish them.
-/results/
-/runs/
-/output/
-/outputs/
+# Generated run/provider state, including nested pipeline output directories.
+results/
+runs/
+output/
+outputs/
 **/.evomolior-data/
+
+# Downloaded model weights and packaged build/run artifacts.
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.safetensors
+*.gguf
+*.onnx
+*.pt
+*.pth
 
 # Internal, generated, or superseded documentation.
 documentation/tmp/

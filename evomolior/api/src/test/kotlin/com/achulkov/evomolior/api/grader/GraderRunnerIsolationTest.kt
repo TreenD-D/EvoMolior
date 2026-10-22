@@ -3,7 +3,7 @@ package com.achulkov.evomolior.api.grader
 import com.achulkov.evomolior.core.model.ScoringDimension
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
 class GraderRunnerIsolationTest {
 
     @Test
-    fun `criteria phase writes only to grader substrate not competing substrate`() = runTest {
+    fun `criteria phase writes only to grader substrate not competing substrate`() = runBlocking {
         val dataRoot = createTempDirectory("grader-runner-isolation-test").toFile()
         val factory = SubstrateDatabaseFactory(dataRoot)
         val runId = "run-1"

@@ -27,10 +27,16 @@ import com.achulkov.evomolior.core.atlas.ToolExecutionPurpose
 import com.achulkov.evomolior.core.atlas.ToolImplementationMode
 import com.achulkov.evomolior.core.atlas.ToolOpportunity
 import com.achulkov.evomolior.core.atlas.ToolOpportunityCommitment
+import com.achulkov.evomolior.core.atlas.ToolOpportunityCommitmentAuthority
 import com.achulkov.evomolior.core.atlas.ToolOpportunityType
 import com.achulkov.evomolior.core.atlas.TypedField
 import com.achulkov.evomolior.core.atlas.TypedFieldType
 import com.achulkov.evomolior.core.contract.WorkerToolCard
+import com.achulkov.evomolior.core.contract.WorkerToolRepairDiagnostic
+import com.achulkov.evomolior.core.repair.ApproachVector
+import com.achulkov.evomolior.core.repair.RepairStrategy
+import com.achulkov.evomolior.core.repair.ToolRepairCode
+import com.achulkov.evomolior.core.repair.ToolRepairSource
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
@@ -110,28 +116,48 @@ class WorkerViewCompilerTest {
         val opportunity = toolOpportunity()
         val atlas = atlas(opportunity)
         val states = states(atlas, initiallyRevealedTo = setOf(groupA))
+        val opportunityCommitments = ToolOpportunityCommitmentAuthority.current(atlas)
+            .byOpportunityId
+        assertFailsWith<IllegalArgumentException> {
+            compiler.compile(
+                atlas,
+                states,
+                groupA,
+                round = 0,
+                assignedNodeId = NodeId("foundation")
+            )
+        }
 
-        val unassigned = compiler.compile(atlas, states, groupA, round = 0)
+        val unassigned = compiler.compile(
+            atlas,
+            states,
+            groupA,
+            round = 0,
+            opportunityCommitments = opportunityCommitments
+        )
         val ordinaryNode = compiler.compile(
             atlas,
             states,
             groupA,
             round = 0,
-            assignedNodeId = NodeId("alternate")
+            assignedNodeId = NodeId("alternate"),
+            opportunityCommitments = opportunityCommitments
         )
         val outlier = compiler.compile(
             atlas,
             states,
             groupA,
             round = 0,
-            outlierMandate = "Propose one connected novelty."
+            outlierMandate = "Propose one connected novelty.",
+            opportunityCommitments = opportunityCommitments
         )
         val assignedTool = compiler.compile(
             atlas,
             states,
             groupA,
             round = 0,
-            assignedNodeId = NodeId("foundation")
+            assignedNodeId = NodeId("foundation"),
+            opportunityCommitments = opportunityCommitments
         )
 
         assertEquals(null, unassigned.assignedToolSkeleton)
@@ -153,8 +179,146 @@ class WorkerViewCompilerTest {
         )
         assertTrue(assignedTool.hasValidHash())
         assertFailsWith<IllegalArgumentException> {
+            assignedTool.copy(assignedToolOpportunityCommitmentHash = null)
+        }
+        assertFailsWith<IllegalArgumentException> {
             assignedTool.copy(
                 assignedToolSkeleton = skeleton.copy(skeletonHash = "tampered")
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            assignedTool.copy(assignedToolOpportunityOriginAtlasHash = "wrong-origin")
+        }
+    }
+
+    @Test
+    fun `assigned tool skeleton retains origin commitment after Atlas amendment`() {
+        val opportunity = toolOpportunity()
+        val parent = atlas(opportunity)
+        val child = parent.copy(
+            version = 2,
+            parentAtlasHash = parent.atlasHash,
+            amendmentIds = listOf("amendment-1"),
+            atlasHash = ""
+        ).withComputedHash()
+        val originCommitments = ToolOpportunityCommitmentAuthority
+            .resolve(listOf(parent, child))
+            .byOpportunityId
+
+        val view = compiler.compile(
+            atlas = child,
+            states = states(child, initiallyRevealedTo = setOf(groupA)),
+            groupId = groupA,
+            round = 1,
+            assignedNodeId = NodeId("foundation"),
+            opportunityCommitments = originCommitments
+        )
+
+        val skeleton = requireNotNull(view.assignedToolSkeleton)
+        val origin = originCommitments.getValue(opportunity.opportunityId)
+        assertEquals(parent.atlasHash, origin.atlasHash)
+        assertEquals(origin.commitmentHash, skeleton.opportunityCommitmentHash)
+        assertEquals(parent.atlasHash, view.assignedToolOpportunityOriginAtlasHash)
+        assertEquals(origin.commitmentHash, view.assignedToolOpportunityCommitmentHash)
+        assertTrue(view.hasValidHash())
+    }
+
+    @Test
+    fun `tool repair diagnostics are hash bound to the exact prior authoring opportunity`() {
+        val opportunity = toolOpportunity()
+        val atlas = atlas(opportunity)
+        val states = states(atlas, initiallyRevealedTo = setOf(groupA))
+        val commitment = ToolOpportunityCommitmentAuthority.current(atlas)
+            .byOpportunityId.getValue(opportunity.opportunityId)
+        val opportunityCommitments = mapOf(opportunity.opportunityId to commitment)
+        val diagnostic = WorkerToolRepairDiagnostic(
+            diagnosticId = "repair-tool-1",
+            runId = atlas.runId,
+            groupId = groupA,
+            opportunityId = opportunity.opportunityId,
+            opportunityCommitmentHash = commitment.commitmentHash,
+            authoringNodeId = NodeId("foundation"),
+            source = ToolRepairSource.PRIVATE_PROMOTION_AUTHORITY,
+            code = ToolRepairCode.OUTPUT_SEMANTICS_MISMATCH,
+            createdRound = 0,
+            visibleFromRound = 1,
+            affectedPublicField = "ratio",
+            diagnosticHash = "d".repeat(64)
+        )
+        val approach = ApproachVector(
+            vectorId = "approach-run-atlas-group-a-1",
+            runId = atlas.runId,
+            groupId = groupA.value,
+            opportunityId = opportunity.opportunityId,
+            round = 1,
+            lineageAttempt = 1,
+            strategy = RepairStrategy.DIMENSIONAL_ANALYSIS_FIRST
+        ).withComputedHash()
+
+        val view = compiler.compile(
+            atlas = atlas,
+            states = states,
+            groupId = groupA,
+            round = 1,
+            assignedNodeId = NodeId("foundation"),
+            opportunityCommitments = opportunityCommitments,
+            assignedToolRepairDiagnostics = listOf(diagnostic),
+            assignedToolRepairApproach = approach
+        )
+
+        assertEquals(listOf(diagnostic), view.assignedToolRepairDiagnostics)
+        assertTrue(view.hasValidHash())
+        assertFalse(
+            view.copy(
+                assignedToolRepairDiagnostics = listOf(
+                    diagnostic.copy(diagnosticHash = "e".repeat(64))
+                ),
+                assignedToolRepairApproach = approach
+            ).hasValidHash()
+        )
+        listOf(
+            diagnostic.copy(groupId = groupB),
+            diagnostic.copy(authoringNodeId = NodeId("alternate")),
+            diagnostic.copy(opportunityId = "other-opportunity"),
+            diagnostic.copy(opportunityCommitmentHash = "other-commitment"),
+            diagnostic.copy(visibleFromRound = 2),
+            diagnostic.copy(affectedPublicField = "private_field")
+        ).forEach { invalid ->
+            assertFailsWith<IllegalArgumentException> {
+                compiler.compile(
+                    atlas = atlas,
+                    states = states,
+                    groupId = groupA,
+                    round = 1,
+                    assignedNodeId = NodeId("foundation"),
+                    opportunityCommitments = opportunityCommitments,
+                    assignedToolRepairDiagnostics = listOf(invalid),
+                    assignedToolRepairApproach = approach
+                )
+            }
+        }
+        assertFailsWith<IllegalArgumentException> {
+            compiler.compile(
+                atlas = atlas,
+                states = states,
+                groupId = groupA,
+                round = 1,
+                assignedNodeId = NodeId("alternate"),
+                opportunityCommitments = opportunityCommitments,
+                assignedToolRepairDiagnostics = listOf(diagnostic),
+                assignedToolRepairApproach = approach
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            compiler.compile(
+                atlas = atlas,
+                states = states,
+                groupId = groupA,
+                round = 1,
+                outlierMandate = "Novelty only.",
+                opportunityCommitments = opportunityCommitments,
+                assignedToolRepairDiagnostics = listOf(diagnostic),
+                assignedToolRepairApproach = approach
             )
         }
     }
@@ -176,6 +340,7 @@ class WorkerViewCompilerTest {
             nodeId = NodeId("foundation"),
             opportunity = opportunity
         ).withComputedHash()
+        val opportunityCommitments = mapOf(opportunity.opportunityId to commitment)
         val card = WorkerToolCard(
             toolId = "foundation-calculator-v1",
             name = "foundation-calculator",
@@ -194,6 +359,7 @@ class WorkerViewCompilerTest {
             groupId = groupA,
             round = 1,
             assignedNodeId = NodeId("future"),
+            opportunityCommitments = opportunityCommitments,
             availableToolCards = listOf(card)
         )
 
@@ -206,6 +372,7 @@ class WorkerViewCompilerTest {
                 groupId = groupA,
                 round = 1,
                 assignedNodeId = NodeId("future"),
+                opportunityCommitments = opportunityCommitments,
                 availableToolCards = listOf(
                     card.copy(opportunityCommitmentHash = "wrong-commitment")
                 )
@@ -218,6 +385,7 @@ class WorkerViewCompilerTest {
                 groupId = groupA,
                 round = 1,
                 assignedNodeId = NodeId("alternate"),
+                opportunityCommitments = opportunityCommitments,
                 availableToolCards = listOf(
                     card.copy(requiredForNodeId = NodeId("alternate"))
                 )
@@ -243,6 +411,7 @@ class WorkerViewCompilerTest {
             nodeId = NodeId("foundation"),
             opportunity = opportunity
         ).withComputedHash()
+        val opportunityCommitments = mapOf(opportunity.opportunityId to commitment)
         val card = WorkerToolCard(
             toolId = "foundation-calculator-v1",
             name = "foundation-calculator",
@@ -262,6 +431,7 @@ class WorkerViewCompilerTest {
             groupId = groupA,
             round = 1,
             assignedNodeId = validationNodeId,
+            opportunityCommitments = opportunityCommitments,
             availableToolCards = listOf(card)
         )
 
@@ -274,6 +444,7 @@ class WorkerViewCompilerTest {
                 groupId = groupA,
                 round = 1,
                 assignedNodeId = validationNodeId,
+                opportunityCommitments = opportunityCommitments,
                 availableToolCards = listOf(
                     card.copy(executionPurpose = ToolExecutionPurpose.AGENT_USE)
                 )
@@ -348,6 +519,8 @@ class WorkerViewCompilerTest {
     fun `pending expected reuse outranks ordinary revealed frontier work`() {
         val opportunity = toolOpportunity()
         val atlas = atlas(opportunity)
+        val opportunityCommitments = ToolOpportunityCommitmentAuthority.current(atlas)
+            .byOpportunityId
         val states = states(atlas, initiallyRevealedTo = setOf(groupA))
             .withPassingGrade(NodeId("foundation"), groupA, round = 0)
             .toMutableMap()
@@ -356,7 +529,15 @@ class WorkerViewCompilerTest {
                     revealedToGroups = setOf(groupA)
                 )
             }
-        val views = listOf(compiler.compile(atlas, states, groupA, round = 1))
+        val views = listOf(
+            compiler.compile(
+                atlas,
+                states,
+                groupA,
+                round = 1,
+                opportunityCommitments = opportunityCommitments
+            )
+        )
 
         val ordinary = allocator.allocate(
             atlas,

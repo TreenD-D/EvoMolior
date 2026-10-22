@@ -12,6 +12,7 @@ import com.achulkov.evomolior.core.contract.DownstreamUseKind
 import com.achulkov.evomolior.core.contract.DownstreamUseRecord
 import com.achulkov.evomolior.substrate.db.dao.KnowledgeBaseDao
 import com.achulkov.evomolior.substrate.worker.ContributionGraphRepository
+import io.github.aakira.napier.Napier
 import java.util.UUID
 import kotlin.time.Clock
 import kotlinx.serialization.Serializable
@@ -41,6 +42,7 @@ class ReadKBTool(
     description = """
         Read selected Knowledge Base entries by ID, or list matching headers without full content.
         First use list_kb/search_kb to inspect titles/headers, then pass entryIds for full bodies.
+        Long bodies are returned in pages; pass offset to continue where a page ended.
         Dead Ends (documented failure approaches) are always included in results.
         Cost: FREE.
     """.trimIndent()
@@ -58,7 +60,9 @@ class ReadKBTool(
         /** Maximum header results to return when entryIds is empty. Default: 5. */
         val maxResults: Int = 5,
         /** Compatibility escape hatch for full text from query results. Prefer entryIds. */
-        val includeContent: Boolean = false
+        val includeContent: Boolean = false,
+        /** Character offset into each requested entry body, for paging through long entries. */
+        val offset: Int = 0
     )
 
     override suspend fun execute(args: Args): String {
@@ -82,7 +86,7 @@ class ReadKBTool(
                     appendLine("Missing or inactive requested IDs: ${missingIds.joinToString(", ")}")
                     appendLine()
                 }
-                append(formatFullEntries(entries))
+                append(formatFullEntries(entries, args.offset.coerceAtLeast(0)))
             }
         }
 
@@ -127,10 +131,13 @@ class ReadKBTool(
             json.encodeToString(Args.serializer(), args)
         )
         authorityIds.forEach { authorityId ->
-            val authority = requireNotNull(
-                repository.canonicalAuthority(runId, groupId, authorityId)
-            ) {
-                "KB read lacks immutable canonical authority for $authorityId"
+            // Lineage is bookkeeping for causal fitness. An entry without a Critic result record
+            // (for example a system-generated or rolled-up entry) is still canonical content, so
+            // a missing lineage anchor skips the record instead of failing the read itself.
+            val authority = repository.canonicalAuthority(runId, groupId, authorityId)
+            if (authority == null) {
+                Napier.w("ReadKBTool: no canonical authority for $authorityId; read not recorded as downstream use")
+                return@forEach
             }
             repository.recordDownstreamUse(
                 DownstreamUseRecord(

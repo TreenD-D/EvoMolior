@@ -23,6 +23,9 @@ import java.util.Base64
  * design freedom. Counts are exact, model cards contain only backend-resolvable IDs, and model
  * overrides are included before field design rather than applied after compilation.
  */
+/** Envelope operator-override key carrying [RunConfig.ordinaryAgentTtlSeconds]. */
+const val ORDINARY_AGENT_TTL_OVERRIDE_KEY = "ordinaryAgentTtlSeconds"
+
 object CouncilExecutionEnvelopeFactory {
     /**
      * Converts [config] into deterministic executable constraints.
@@ -82,6 +85,7 @@ object CouncilExecutionEnvelopeFactory {
             sandboxCapabilities = SandboxCapabilitySummary(
                 capabilityIds = setOf(
                     "browser",
+                    "python",
                     "shell",
                     "source-fetch",
                     "tool-subprocess",
@@ -95,8 +99,13 @@ object CouncilExecutionEnvelopeFactory {
             atomicNodeEffortBound = config.maxAgentsPerGroup,
             councilExecutionPurpose = config.councilExecutionPurpose,
             acceptanceProfile = config.acceptanceProfile,
+            codexReasoningEffort = config.codexReasoningEffort,
+            codexRuntimePreset = config.codexRuntimePreset,
+            quantitativeToolObligation = config.quantitativeToolObligation,
             operatorOverrides = buildMap {
                 put("llmBackend", config.llmBackend.id)
+                put("codexReasoningEffort", config.codexReasoningEffort.configValue)
+                config.codexRuntimePreset?.let { put("codexRuntimePreset", it.id) }
                 put("workerGroupCount", config.groupCount.toString())
                 put(
                     "workerProfiles",
@@ -104,6 +113,9 @@ object CouncilExecutionEnvelopeFactory {
                 )
                 put("rounds", config.rounds.toString())
                 put("maxAgentsPerGroup", config.maxAgentsPerGroup.toString())
+                config.ordinaryAgentTtlSeconds?.let {
+                    put(ORDINARY_AGENT_TTL_OVERRIDE_KEY, it.toString())
+                }
                 config.modelOverrides.toSortedMap().forEach { (role, modelId) ->
                     put("model.$role", modelId)
                 }
@@ -122,9 +134,8 @@ object CouncilExecutionEnvelopeFactory {
                 ModelSelectionConfig.QWEN_CLOUD_QWEN_FAST_MODEL,
                 ModelSelectionConfig.QWEN_CLOUD_DEEPSEEK_FLASH_MODEL
             )
-            LlmBackend.CODEX_CHATGPT -> setOf(
-                ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL
-            )
+            LlmBackend.CODEX_CHATGPT -> config.codexRuntimePreset?.supportedModelIds
+                ?: setOf(ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL)
         }
         val overrides = config.modelOverrides.values.toSet()
         if (config.llmBackend != LlmBackend.OPENROUTER) {
@@ -197,7 +208,11 @@ object CouncilExecutionEnvelopeFactory {
                 ?.requiredMarkdownSectionSignals
                 .orEmpty()
                 .toSet(),
-            minimumEvidenceItems = requested?.validation?.minimumPublicUrlCount ?: 0
+            minimumEvidenceItems = requested?.validation?.minimumPublicUrlCount ?: 0,
+            maximumWordCount = requested?.validation?.maximumWordCount,
+            exactMarkdownHeadings = requested?.validation?.exactMarkdownHeadings.orEmpty(),
+            requiredTextStatements = requested?.validation?.requiredTextStatements.orEmpty(),
+            minimumWordCount = requested?.validation?.minimumWordCount,
         )
     }
 

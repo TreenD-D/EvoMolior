@@ -246,12 +246,20 @@ class SelfImprovementRunOrchestrator(
         val event = withTimeoutOrNull(runTimeoutMs) {
             runService.events.first { event ->
                 event is EvoMoliorEvent.RunCompleted && event.runId == scheduledRunId ||
+                    event is EvoMoliorEvent.RunCompletedProvisional && event.runId == scheduledRunId ||
+                    event is EvoMoliorEvent.RunRecovered && event.runId == scheduledRunId ||
                     event is EvoMoliorEvent.RunAborted && event.runId == scheduledRunId
             }
         }
 
         // Collect basic evidence from the completed run
-        val completed = event is EvoMoliorEvent.RunCompleted
+        val completed =
+            event is EvoMoliorEvent.RunCompleted ||
+                (
+                    event is EvoMoliorEvent.RunCompletedProvisional &&
+                        event.terminalOutcome.executionStatus ==
+                            com.achulkov.evomolior.core.deliverable.ExecutionCompletionStatus.COMPLETED
+                    )
         val runPassed = completed // MVP: treat successful completion as pass
 
         // Try to get results bundle for metric extraction and patch application.

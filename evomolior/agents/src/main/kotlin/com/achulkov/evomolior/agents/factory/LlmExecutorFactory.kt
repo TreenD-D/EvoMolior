@@ -12,6 +12,8 @@ import ai.koog.agents.core.tools.ToolRegistry
 import com.achulkov.evomolior.core.config.LlmBackend
 import com.achulkov.evomolior.core.config.LlmTimeoutPolicy
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
+import com.achulkov.evomolior.core.config.CodexRuntimePreset
 import com.achulkov.evomolior.sandbox.enforcer.ConstitutionalActionGate
 import java.nio.file.Path
 import kotlin.time.Duration
@@ -32,6 +34,7 @@ object LlmExecutorFactory {
         codexActionGate: ConstitutionalActionGate = ConstitutionalActionGate.NONE,
         codexAgentId: String = "codex-agent",
         codexNativeSearchEnabled: Boolean = true,
+        codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
         codexExecutionTimeout: Duration = LlmTimeoutPolicy.DEFAULT_CODEX_EXECUTION,
         codexStructuredOutputDiagnosticRoot: Path? = null
     ): MultiLLMPromptExecutor = when (backend) {
@@ -42,6 +45,7 @@ object LlmExecutorFactory {
                 cliPath = apiKey,
                 onSearchEvents = onCodexSearchEvents,
                 nativeSearchEnabled = codexNativeSearchEnabled,
+                reasoningEffort = codexReasoningEffort,
                 executionTimeout = codexExecutionTimeout,
                 structuredOutputDiagnosticRoot = codexStructuredOutputDiagnosticRoot,
                 codeModeToolRuntime = CodexCodeModeToolRuntime(
@@ -131,6 +135,7 @@ object QwenCloudModelResolver {
     )
 }
 
+/** Resolves only exact model identifiers confirmed in the local Codex catalog. */
 object CodexChatGptModelResolver {
     private val textCapabilities: List<LLMCapability> = listOf(
         LLMCapability.Temperature,
@@ -138,16 +143,21 @@ object CodexChatGptModelResolver {
         LLMCapability.Schema.JSON.Standard
     )
 
-    fun resolve(modelId: String): LLModel = when (modelId) {
-        ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL -> gpt56Luna()
-        else -> error("Unsupported Codex/ChatGPT model id: $modelId")
+    /**
+     * Returns catalog metadata without inferring an unknown output-token limit.
+     *
+     * @param modelId Exact supported Codex model identifier; aliases are rejected.
+     */
+    fun resolve(modelId: String): LLModel {
+        check(modelId in CodexRuntimePreset.ALL_MODEL_IDS) {
+            "Unsupported Codex/ChatGPT model id: $modelId"
+        }
+        return LLModel(
+            provider = LLMProvider.OpenAI,
+            id = modelId,
+            capabilities = textCapabilities,
+            contextLength = 272_000,
+            maxOutputTokens = null
+        )
     }
-
-    private fun gpt56Luna(): LLModel = LLModel(
-        provider = LLMProvider.OpenAI,
-        id = ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL,
-        capabilities = textCapabilities,
-        contextLength = 400_000,
-        maxOutputTokens = 128_000
-    )
 }

@@ -10,6 +10,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class RunMetricsV1ArtifactStoreTest {
@@ -27,6 +28,24 @@ class RunMetricsV1ArtifactStoreTest {
         assertContentEquals(first.bytes, recovered.bytes)
         assertEquals(metrics, recovered.metrics)
         assertTrue(first.file.invariantSeparatorsPath.endsWith("control/run-metrics-v1.json"))
+    }
+
+    @Test
+    fun `compiled metrics remain non-authoritative until explicitly persisted`() {
+        val factory = SubstrateDatabaseFactory(
+            createTempDirectory("metrics-store-compile-only-").toFile()
+        )
+        val store = RunMetricsV1ArtifactStore(factory)
+
+        val compiled = store.compile(metrics("run-compile-only"))
+
+        assertFalse(compiled.file.exists())
+        assertFailsWith<IllegalStateException> {
+            store.readRequired("run-compile-only")
+        }
+        val persisted = store.persist(compiled)
+        assertTrue(persisted.file.isFile)
+        assertContentEquals(compiled.bytes, persisted.bytes)
     }
 
     @Test

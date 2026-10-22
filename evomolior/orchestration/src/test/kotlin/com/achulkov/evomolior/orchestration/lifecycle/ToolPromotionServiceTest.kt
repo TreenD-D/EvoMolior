@@ -15,6 +15,7 @@ import com.achulkov.evomolior.core.atlas.ToolDslExpression
 import com.achulkov.evomolior.core.atlas.ToolDslKind
 import com.achulkov.evomolior.core.atlas.ToolDslOutput
 import com.achulkov.evomolior.core.atlas.ToolDslProgram
+import com.achulkov.evomolior.core.atlas.FormulaDslReferenceSemantics
 import com.achulkov.evomolior.core.atlas.ToolImplementationMode
 import com.achulkov.evomolior.core.atlas.ToolBehavior
 import com.achulkov.evomolior.core.atlas.ToolLifecycleState
@@ -26,6 +27,8 @@ import com.achulkov.evomolior.core.atlas.TypedField
 import com.achulkov.evomolior.core.atlas.TypedFieldType
 import com.achulkov.evomolior.core.atlas.TypedToolSchemaCompiler
 import com.achulkov.evomolior.core.contract.WorkerToolCard
+import com.achulkov.evomolior.core.repair.ToolRepairCode
+import com.achulkov.evomolior.orchestration.repair.PrivatePromotionFailure
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
 import com.achulkov.evomolior.substrate.tools.ToolInfrastructureRepository
@@ -35,6 +38,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
@@ -69,7 +73,10 @@ class ToolPromotionServiceTest {
             )
 
             assertEquals(
-                ToolPromotionResult.Rejected("tool_promotion_invalid_json"),
+                ToolPromotionResult.Rejected(
+                    reason = "tool_promotion_invalid_json",
+                    publicRepairCode = ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
+                ),
                 service.promote(nonstandard, "critic-1")
             )
         } finally {
@@ -101,6 +108,7 @@ class ToolPromotionServiceTest {
                     groupId = groupId,
                     toolsMountHostPath = File(root, "tools").absolutePath,
                     opportunityResolver = { commitment },
+                    sealedPromotionTestResolver = { sealedFixtures(it) },
                     now = { Instant.parse("2026-01-01T00:00:00Z") },
                     idFactory = { ids.removeFirst() }
                 )
@@ -200,8 +208,8 @@ class ToolPromotionServiceTest {
             ).withComputedHash()
             val submission = validSubmission(commitment).copy(
                 content = validSubmission(commitment).content.replace(
-                    "\"input\": {\"value\": 1}",
-                    "\"input\": {\"value\": 1, \"scale\": 999}"
+                    "\"input\": {\"value\": 1.0}",
+                    "\"input\": {\"value\": 1.0, \"scale\": 999.0}"
                 )
             )
             val service = ToolPromotionService(
@@ -215,7 +223,7 @@ class ToolPromotionServiceTest {
                         SealedPromotionTestFixture(
                             id = "identity-test",
                             input = Json.parseToJsonElement("""{"value":1,"scale":2}"""),
-                            expectedOutput = Json.parseToJsonElement("""{"normalized":1}""")
+                            expectedOutput = Json.parseToJsonElement("""{"normalized":1.0}""")
                         )
                     )
                 }
@@ -238,6 +246,125 @@ class ToolPromotionServiceTest {
     }
 
     @Test
+    fun `promotion schema failure exposes only bounded public schema detail`() = runTest {
+        val root = createTempDirectory("tool-promotion-schema-diagnostic-").toFile()
+        val database = SubstrateDatabaseFactory(root).get(runId, groupId)
+        try {
+            val commitment = commitment(runtimeMillis = 1_000).withComputedHash()
+            val service = ToolPromotionService(
+                database = database,
+                runId = runId,
+                groupId = groupId,
+                toolsMountHostPath = File(root, "tools").absolutePath,
+                opportunityResolver = { commitment },
+                sealedPromotionTestResolver = { sealedFixtures(it) }
+            )
+
+            assertEquals(
+                ToolPromotionResult.Rejected(
+                    reason = "tool_promotion_private_test_failed",
+                    authority = ToolPromotionRejectionAuthority.PRIVATE_PROMOTION,
+                    privateFailure = PrivatePromotionFailure.INVALID_OUTPUT_SCHEMA
+                ),
+                service.promote(
+                    validSubmission(
+                        commitment,
+                        code = "cat >/dev/null\necho '{\"normalized\":\"private-value\"}'"
+                    ),
+                    "critic-schema-diagnostic"
+                )
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun `promotion exact output mismatch hides private expected and actual values`() = runTest {
+        val root = createTempDirectory("tool-promotion-exact-diagnostic-").toFile()
+        val database = SubstrateDatabaseFactory(root).get(runId, groupId)
+        try {
+            val commitment = commitment(runtimeMillis = 1_000).withComputedHash()
+            val service = ToolPromotionService(
+                database = database,
+                runId = runId,
+                groupId = groupId,
+                toolsMountHostPath = File(root, "tools").absolutePath,
+                opportunityResolver = { commitment },
+                sealedPromotionTestResolver = {
+                    listOf(
+                        SealedPromotionTestFixture(
+                            id = "identity-test",
+                            input = Json.parseToJsonElement("""{"value":987654}"""),
+                            expectedOutput = Json.parseToJsonElement(
+                                """{"normalized":123456.0}"""
+                            )
+                        )
+                    )
+                }
+            )
+
+            assertEquals(
+                ToolPromotionResult.Rejected(
+                    reason = "tool_promotion_private_test_failed",
+                    authority = ToolPromotionRejectionAuthority.PRIVATE_PROMOTION,
+                    privateFailure = PrivatePromotionFailure.EXPECTED_OUTPUT_MISMATCH
+                ),
+                service.promote(
+                    validSubmission(
+                        commitment,
+                        code = "cat >/dev/null\necho '{\"normalized\":654321.0}'"
+                    ),
+                    "critic-exact-diagnostic"
+                )
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun `promotion failure derives a safe token for an arbitrary committed test id`() = runTest {
+        val root = createTempDirectory("tool-promotion-test-id-token-").toFile()
+        val database = SubstrateDatabaseFactory(root).get(runId, groupId)
+        try {
+            val testId = "line\nbreak/\u03bc"
+            val base = commitment(runtimeMillis = 1_000)
+            val commitment = base.copy(
+                opportunity = base.opportunity.copy(
+                    promotionTestIds = setOf(testId)
+                ),
+                commitmentHash = ""
+            ).withComputedHash()
+            val service = ToolPromotionService(
+                database = database,
+                runId = runId,
+                groupId = groupId,
+                toolsMountHostPath = File(root, "tools").absolutePath,
+                opportunityResolver = { commitment },
+                sealedPromotionTestResolver = { sealedFixtures(it) }
+            )
+
+            assertEquals(
+                ToolPromotionResult.Rejected(
+                    reason = "tool_promotion_private_test_failed",
+                    authority = ToolPromotionRejectionAuthority.PRIVATE_PROMOTION,
+                    privateFailure = PrivatePromotionFailure.INVALID_OUTPUT_SCHEMA
+                ),
+                service.promote(
+                    validSubmission(
+                        commitment,
+                        code = "cat >/dev/null\necho '{\"normalized\":\"private-value\"}'"
+                    ),
+                    "critic-test-id-token"
+                )
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun `ordinary same-name and differently named duplicates cannot replace active opportunity authority`() =
         runTest {
             val root = createTempDirectory("tool-promotion-duplicate-opportunity-").toFile()
@@ -249,7 +376,8 @@ class ToolPromotionServiceTest {
                     runId = runId,
                     groupId = groupId,
                     toolsMountHostPath = File(root, "tools").absolutePath,
-                    opportunityResolver = { commitment }
+                    opportunityResolver = { commitment },
+                    sealedPromotionTestResolver = { sealedFixtures(it) }
                 )
                 assertEquals(
                     ToolPromotionResult.Promoted("normalize-v1"),
@@ -308,17 +436,23 @@ class ToolPromotionServiceTest {
                 runId = runId,
                 groupId = groupId,
                 toolsMountHostPath = File(root, "tools").absolutePath,
-                opportunityResolver = { commitment }
+                opportunityResolver = { commitment },
+                sealedPromotionTestResolver = { sealedFixtures(it) }
             )
             val timeoutSubmission = validSubmission(
                 commitment,
-                code = "cat >/dev/null\nsleep 1\necho '{\"normalized\":1}'"
+                code = "cat >/dev/null\nsleep 1\necho '{\"normalized\":1.0}'"
             )
 
             val timeout = service.promote(timeoutSubmission, "critic-1")
 
             assertIs<ToolPromotionResult.Rejected>(timeout)
-            assertTrue(timeout.reason.contains("TIMEOUT"))
+            assertEquals("tool_promotion_private_test_failed", timeout.reason)
+            assertEquals(
+                ToolPromotionRejectionAuthority.PRIVATE_PROMOTION,
+                timeout.authority
+            )
+            assertEquals(PrivatePromotionFailure.TIMEOUT, timeout.privateFailure)
             assertTrue(database.toolRegistryDao().getActive(runId, groupId, null).isEmpty())
 
             val mismatched = validSubmission(commitment).copy(
@@ -330,10 +464,76 @@ class ToolPromotionServiceTest {
             )
             val mismatchResult = service.promote(mismatched, "critic-1")
             assertEquals(
-                ToolPromotionResult.Rejected("tool_promotion_contract_schema_mismatch"),
+                ToolPromotionResult.Rejected(
+                    reason = "tool_promotion_contract_schema_mismatch",
+                    publicRepairCode = ToolRepairCode.CONTRACT_SCHEMA_MISMATCH
+                ),
                 mismatchResult
             )
             assertTrue(database.toolRegistryDao().getActive(runId, groupId, null).isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun `failed pre-amendment promotion can retry with the origin commitment`() = runTest {
+        val root = createTempDirectory("tool-promotion-origin-retry-").toFile()
+        val database = SubstrateDatabaseFactory(root).get(runId, groupId)
+        try {
+            val originCommitment = commitment(runtimeMillis = 1_000).withComputedHash()
+            val firstAttempt = ToolPromotionService(
+                database = database,
+                runId = runId,
+                groupId = groupId,
+                toolsMountHostPath = File(root, "tools").absolutePath,
+                opportunityResolver = { originCommitment },
+                sealedPromotionTestResolver = { sealedFixtures(it) }
+            )
+            val failed = firstAttempt.promote(
+                validSubmission(
+                    originCommitment,
+                    code = "cat >/dev/null\nsleep 2\necho '{\"normalized\":1.0}'"
+                ),
+                "critic-before-amendment"
+            )
+            assertIs<ToolPromotionResult.Rejected>(failed)
+            assertEquals(
+                originCommitment,
+                ToolInfrastructureRepository(database)
+                    .opportunity(originCommitment.opportunity.opportunityId)
+            )
+
+            val amendedCurrentCommitment = originCommitment.copy(
+                atlasHash = "atlas-hash-v2",
+                commitmentHash = ""
+            ).withComputedHash()
+            assertNotEquals(
+                originCommitment.commitmentHash,
+                amendedCurrentCommitment.commitmentHash
+            )
+
+            val retry = ToolPromotionService(
+                database = database,
+                runId = runId,
+                groupId = groupId,
+                toolsMountHostPath = File(root, "tools").absolutePath,
+                opportunityResolver = { originCommitment },
+                sealedPromotionTestResolver = { sealedFixtures(it) }
+            ).promote(
+                validSubmission(
+                    originCommitment,
+                    id = "submission-after-amendment"
+                ),
+                "critic-after-amendment"
+            )
+
+            assertEquals(ToolPromotionResult.Promoted("normalize-v2"), retry)
+            assertEquals(
+                originCommitment,
+                ToolInfrastructureRepository(database)
+                    .opportunity(originCommitment.opportunity.opportunityId)
+            )
         } finally {
             database.close()
         }
@@ -354,30 +554,42 @@ class ToolPromotionServiceTest {
             )
             val base = validSubmission(commitment)
             val cases = listOf(
-                Triple(
+                ContractRejectionCase(
                     "wrong-opportunity",
                     base.content.replace(
                         commitment.opportunity.opportunityId,
                         "opportunity-other"
                     ),
-                    "tool_promotion_contract_opportunity_id_mismatch"
+                    "tool_promotion_contract_opportunity_id_mismatch",
+                    ToolRepairCode.SCOPE_MISMATCH
                 ),
-                Triple(
+                ContractRejectionCase(
                     "wrong-language",
                     base.content.replace("\"language\": \"shell\"", "\"language\": \"python\""),
-                    "tool_promotion_contract_language_mismatch"
+                    "tool_promotion_contract_language_mismatch",
+                    ToolRepairCode.CONTRACT_SCHEMA_MISMATCH
                 ),
-                Triple(
+                ContractRejectionCase(
                     "wrong-test",
-                    base.content.replace("\"testId\": \"identity-test\"", "\"testId\": \"other\""),
-                    "tool_promotion_contract_tests_mismatch"
+                    base.content.replace(
+                        "\"testId\": \"identity-test\"",
+                        "\"unexpectedTestField\": \"identity-test\""
+                    ),
+                    "tool_promotion_contract_unsupported_test_fields:0:unexpectedTestField",
+                    ToolRepairCode.CONTRACT_SCHEMA_MISMATCH
                 )
             )
 
-            cases.forEach { (id, content, expectedReason) ->
+            cases.forEach { case ->
                 assertEquals(
-                    ToolPromotionResult.Rejected(expectedReason),
-                    service.promote(base.copy(id = id, content = content), "critic-1")
+                    ToolPromotionResult.Rejected(
+                        reason = case.reason,
+                        publicRepairCode = case.repairCode
+                    ),
+                    service.promote(
+                        base.copy(id = case.id, content = case.content),
+                        "critic-1"
+                    )
                 )
             }
             assertTrue(database.toolRegistryDao().getActive(runId, groupId, null).isEmpty())
@@ -392,11 +604,6 @@ class ToolPromotionServiceTest {
             val root = createTempDirectory("tool-dsl-promotion-").toFile()
             val database = SubstrateDatabaseFactory(root).get(runId, groupId)
             try {
-                val commitment = commitment(runtimeMillis = 5_000).copy(
-                    opportunity = commitment(runtimeMillis = 5_000).opportunity.copy(
-                        preferredImplementationMode = ToolImplementationMode.FORMULA_DSL
-                    )
-                ).withComputedHash()
                 val program = ToolDslProgram(
                     kind = ToolDslKind.FORMULA,
                     outputs = listOf(
@@ -410,12 +617,21 @@ class ToolPromotionServiceTest {
                         )
                     )
                 )
+                val commitment = commitment(runtimeMillis = 5_000).copy(
+                    opportunity = commitment(runtimeMillis = 5_000).opportunity.copy(
+                        preferredImplementationMode = ToolImplementationMode.FORMULA_DSL,
+                        formulaDslReferenceSemantics =
+                            FormulaDslReferenceSemantics.DIMENSIONAL_ANALYSIS_V1,
+                        formulaDslReferenceProgram = program
+                    )
+                ).withComputedHash()
                 val service = ToolPromotionService(
                     database = database,
                     runId = runId,
                     groupId = groupId,
                     toolsMountHostPath = File(root, "tools").absolutePath,
-                    opportunityResolver = { commitment }
+                    opportunityResolver = { commitment },
+                    sealedPromotionTestResolver = { sealedFixtures(it) }
                 )
 
                 val promoted = service.promote(
@@ -432,7 +648,10 @@ class ToolPromotionServiceTest {
                     "critic-dsl"
                 )
                 assertEquals(
-                    ToolPromotionResult.Rejected("tool_promotion_contract_invalid_dsl"),
+                    ToolPromotionResult.Rejected(
+                        reason = "tool_promotion_contract_invalid_dsl",
+                        publicRepairCode = ToolRepairCode.CONTRACT_SCHEMA_MISMATCH
+                    ),
                     invalid
                 )
                 val wrongKind = service.promote(
@@ -444,7 +663,9 @@ class ToolPromotionServiceTest {
                 )
                 assertEquals(
                     ToolPromotionResult.Rejected(
-                        "tool_promotion_contract_dsl_validation_failed:wrong_program_kind"
+                        reason =
+                            "tool_promotion_contract_dsl_validation_failed:wrong_program_kind",
+                        publicRepairCode = ToolRepairCode.CONTRACT_SCHEMA_MISMATCH
                     ),
                     wrongKind
                 )
@@ -527,8 +748,9 @@ class ToolPromotionServiceTest {
 
             assertEquals(
                 ToolPromotionResult.Rejected(
-                    "tool_promotion_contract_dsl_validation_failed:" +
-                        "wrong_output_dimension_required_power"
+                    reason = "tool_promotion_contract_dsl_validation_failed:" +
+                        "wrong_output_dimension_required_power",
+                    publicRepairCode = ToolRepairCode.CONTRACT_SCHEMA_MISMATCH
                 ),
                 result
             )
@@ -565,9 +787,27 @@ class ToolPromotionServiceTest {
         )
     )
 
+    private data class ContractRejectionCase(
+        val id: String,
+        val content: String,
+        val reason: String,
+        val repairCode: ToolRepairCode
+    )
+
+    private fun sealedFixtures(
+        commitment: ToolOpportunityCommitment
+    ): List<SealedPromotionTestFixture> =
+        commitment.opportunity.promotionTestIds.map { testId ->
+            SealedPromotionTestFixture(
+                id = testId,
+                input = Json.parseToJsonElement("""{"value":1.0}"""),
+                expectedOutput = Json.parseToJsonElement("""{"normalized":1.0}""")
+            )
+        }
+
     private fun validSubmission(
         commitment: ToolOpportunityCommitment,
-        code: String = "cat >/dev/null\necho '{\"normalized\":1}'",
+        code: String = "cat >/dev/null\necho '{\"normalized\":1.0}'",
         id: String = "submission-tool",
         name: String = "normalize"
     ): StagingSubmissionEntity {
@@ -577,6 +817,7 @@ class ToolPromotionServiceTest {
         val outputSchema = TypedToolSchemaCompiler.compile(
             commitment.opportunity.requiredOutputs
         )
+        val testId = commitment.opportunity.promotionTestIds.single()
         return StagingSubmissionEntity(
             id = id,
             runId = runId,
@@ -595,9 +836,9 @@ class ToolPromotionServiceTest {
                   "code": ${jsonString(code)},
                   "tests": [
                     {
-                      "testId": "identity-test",
-                      "input": {"value": 1},
-                      "expectedOutput": {"normalized": 1}
+                      "testId": ${jsonString(testId)},
+                      "input": {"value": 1.0},
+                      "expectedOutput": {"normalized": 1.0}
                     }
                   ]
                 }
@@ -634,8 +875,8 @@ class ToolPromotionServiceTest {
                   "tests": [
                     {
                       "testId": "identity-test",
-                      "input": {"value": 1},
-                      "expectedOutput": {"normalized": 1}
+                      "input": {"value": 1.0},
+                      "expectedOutput": {"normalized": 1.0}
                     }
                   ]
                 }

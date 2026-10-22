@@ -5,12 +5,11 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermission
-import org.gradle.api.Action
-import org.gradle.api.execution.TaskExecutionGraph
-import org.gradle.api.tasks.compile.JavaCompile
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.services.BuildService
+import org.gradle.api.services.BuildServiceParameters
 import org.gradle.api.tasks.testing.Test
 import org.gradle.jvm.tasks.Jar
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     alias(libs.plugins.multiplatform).apply(false)
@@ -33,91 +32,121 @@ allprojects {
         isPreserveFileTimestamps = false
         isReproducibleFileOrder = true
     }
+    tasks.withType<Test>().configureEach {
+        System.getProperty("java.io.tmpdir")
+            ?.takeIf(String::isNotBlank)
+            ?.let { systemProperty("java.io.tmpdir", it) }
+    }
 }
 
-var appendixBAcceptanceLockChannel: FileChannel? = null
-var appendixBAcceptanceLock: FileLock? = null
-
 /**
- * Holds the Appendix B acceptance lock for the complete protected Gradle task graph. The OS lock
- * is authoritative; owner text is bounded, untrusted diagnostics only.
+ * Owns the cross-process acceptance-distribution lock for the lifetime of its consuming tasks.
+ * Ordinary builds never instantiate this service. Gradle releases it on success or failure.
  */
-gradle.taskGraph.whenReady(object : Action<TaskExecutionGraph> {
-    override fun execute(graph: TaskExecutionGraph) {
-        val protectedTasks = graph.allTasks.filter {
-            it is KotlinCompile || it is JavaCompile || it is Test
+abstract class AcceptanceDistributionLock : BuildService<AcceptanceDistributionLock.Parameters>, AutoCloseable {
+    /** Filesystem authority supplied by the repository build. */
+    interface Parameters : BuildServiceParameters {
+        val lockFile: RegularFileProperty
+    }
+
+    private var channel: FileChannel? = null
+    private var lock: FileLock? = null
+
+    /** Acquires the OS lock once, keeping untrusted owner diagnostics bounded. */
+    @Synchronized
+    fun acquire() {
+        if (lock != null) return
+        val lockPath = parameters.lockFile.get().asFile.toPath()
+        Files.createDirectories(lockPath.parent)
+        runCatching {
+            Files.setPosixFilePermissions(
+                lockPath.parent,
+                setOf(
+                    PosixFilePermission.OWNER_READ,
+                    PosixFilePermission.OWNER_WRITE,
+                    PosixFilePermission.OWNER_EXECUTE,
+                ),
+            )
         }
-        if (protectedTasks.isNotEmpty()) {
-            val lockPath = rootProject.layout.projectDirectory
-                .dir(".evomolior-locks")
-                .file("appendix-b-acceptance.lock")
-                .asFile
-                .toPath()
-            Files.createDirectories(lockPath.parent)
+        val opened = FileChannel.open(
+            lockPath,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.READ,
+            StandardOpenOption.WRITE,
+        )
+        try {
             runCatching {
                 Files.setPosixFilePermissions(
-                    lockPath.parent,
+                    lockPath,
                     setOf(
                         PosixFilePermission.OWNER_READ,
                         PosixFilePermission.OWNER_WRITE,
-                        PosixFilePermission.OWNER_EXECUTE,
                     ),
                 )
             }
-            val channel = FileChannel.open(
-                lockPath,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.READ,
-                StandardOpenOption.WRITE,
-            )
-            try {
-                runCatching {
-                    Files.setPosixFilePermissions(
-                        lockPath,
-                        setOf(
-                            PosixFilePermission.OWNER_READ,
-                            PosixFilePermission.OWNER_WRITE,
-                        ),
-                    )
-                }
-                val lock = try {
-                    channel.tryLock()
-                } catch (_: OverlappingFileLockException) {
-                    null
-                }
-                if (lock == null) {
-                    val diagnostics = runCatching {
-                        channel.position(0)
-                        val buffer = java.nio.ByteBuffer.allocate(512)
-                        channel.read(buffer)
-                        StandardCharsets.UTF_8
-                            .decode(java.nio.ByteBuffer.wrap(buffer.array(), 0, buffer.position()))
-                            .toString()
-                            .replace(Regex("[\\r\\n\\t]+"), " ")
-                            .take(512)
-                    }.getOrDefault("")
-                    error(
-                        "Appendix B acceptance lock is held at $lockPath; refusing to execute " +
-                            "${protectedTasks.size} KotlinCompile/JavaCompile/Test task(s). " +
-                            "Lock-holder diagnostics (untrusted, max 512 chars): " +
-                            diagnostics.ifBlank { "<unavailable>" },
-                    )
-                }
-                appendixBAcceptanceLockChannel = channel
-                appendixBAcceptanceLock = lock
-            } catch (error: Throwable) {
-                channel.close()
-                throw error
+            val acquired = try {
+                opened.tryLock()
+            } catch (_: OverlappingFileLockException) {
+                null
             }
+            if (acquired == null) {
+                val diagnostics = runCatching {
+                    val buffer = java.nio.ByteBuffer.allocate(512)
+                    opened.read(buffer)
+                    StandardCharsets.UTF_8
+                        .decode(java.nio.ByteBuffer.wrap(buffer.array(), 0, buffer.position()))
+                        .toString()
+                        .replace(Regex("[\\r\\n\\t]+"), " ")
+                        .take(512)
+                }.getOrDefault("")
+                error(
+                    "Appendix B acceptance lock is held at $lockPath; refusing acceptance " +
+                        "distribution work. Lock-holder diagnostics (untrusted, max 512 chars): " +
+                        diagnostics.ifBlank { "<unavailable>" },
+                )
+            }
+            channel = opened
+            lock = acquired
+        } catch (error: Throwable) {
+            opened.close()
+            throw error
         }
     }
-})
 
-gradle.buildFinished {
-    runCatching { appendixBAcceptanceLock?.release() }
-    runCatching { appendixBAcceptanceLockChannel?.close() }
-    appendixBAcceptanceLock = null
-    appendixBAcceptanceLockChannel = null
+    /** Releases the OS lock even when an acceptance task fails. */
+    @Synchronized
+    override fun close() {
+        try {
+            lock?.release()
+        } finally {
+            channel?.close()
+            lock = null
+            channel = null
+        }
+    }
+}
+
+val acceptanceDistributionLock = gradle.sharedServices.registerIfAbsent(
+    "acceptanceDistributionLock",
+    AcceptanceDistributionLock::class,
+) {
+    parameters.lockFile.set(layout.projectDirectory.file(".evomolior-locks/appendix-b-acceptance.lock"))
+    maxParallelUsages.set(1)
+}
+
+allprojects {
+    val lockService = acceptanceDistributionLock
+    tasks.configureEach {
+        if (path in setOf(
+                ":engine:cli:prepareAcceptanceDistribution",
+                ":engine:cli:assembleAcceptanceDistribution",
+                ":engine:cli:verifyAcceptanceDistribution",
+            )
+        ) {
+            usesService(lockService)
+            doFirst { lockService.get().acquire() }
+        }
+    }
 }
 
 val remoteCliContainerScript = layout.projectDirectory.file("scripts/remote_cli_container.sh")

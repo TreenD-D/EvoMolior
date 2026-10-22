@@ -8,6 +8,9 @@ import com.achulkov.evomolior.core.config.AcceptanceProfile
 import com.achulkov.evomolior.core.model.GroupProfileType
 import com.achulkov.evomolior.core.model.Role
 import com.achulkov.evomolior.core.model.ScoringDimension
+import com.achulkov.evomolior.core.repair.AggregationSemantics
+import com.achulkov.evomolior.core.repair.QuantitySpec
+import com.achulkov.evomolior.core.repair.TimeBasis
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.*
@@ -48,6 +51,7 @@ class StartingFieldCompilerTest {
                     first.graderField,
                     first.atlas,
                     first.graderAtlas,
+                    first.receiverContract,
                     envelope(),
                     first.report
                 )
@@ -253,6 +257,312 @@ class StartingFieldCompilerTest {
         assertTrue(result.atlas.nodes.values.any { it.toolOpportunity != null })
         assertTrue(result.sealedTests.privateSuite.tests.any { it is SealedTestV3.Promotion })
         assertTrue(result.sealedTests.privateSuite.tests.any { it is SealedTestV3.General })
+    }
+
+    @Test
+    fun `quantitative obligation rejects v3 boolean input and string-only outputs despite prose`() {
+        val runId = "appendix-b-quantitative-v3-rejection"
+        val base = fullAcceptanceOutputs(runId)
+        val authoringNode = base.taskAnatomist.nodes.first { it.toolOpportunity != null }
+        val v3Opportunity = requireNotNull(authoringNode.toolOpportunity).copy(
+            opportunityType = ToolOpportunityType.CALCULATION,
+            repeatedQuestionPattern =
+                "Use W, kW, kWh, and exactly 72 hours for cooling load, power, and energy.",
+            requiredInputs = listOf(
+                TypedField(
+                    name = "scenario",
+                    type = TypedFieldType.BOOLEAN,
+                    description = "Whether to run the exact 72-hour W/kW/kWh scenario."
+                )
+            ),
+            requiredOutputs = listOf(
+                TypedField(
+                    name = "hourly_sensible_cooling_load",
+                    type = TypedFieldType.STRING,
+                    description = "The hourly sensible cooling load in W for 72 hours."
+                ),
+                TypedField(
+                    name = "hourly_electrical_power",
+                    type = TypedFieldType.STRING,
+                    description = "The hourly electrical power in kW for 72 hours."
+                ),
+                TypedField(
+                    name = "hourly_electrical_energy",
+                    type = TypedFieldType.STRING,
+                    description = "The hourly electrical energy in kWh for 72 hours."
+                )
+            )
+        )
+        val candidate = base.copy(
+            taskAnatomist = base.taskAnatomist.copy(
+                nodes = base.taskAnatomist.nodes.map { node ->
+                    if (node.key == authoringNode.key) {
+                        node.copy(toolOpportunity = v3Opportunity)
+                    } else {
+                        node
+                    }
+                }
+            )
+        )
+
+        val invalid = assertIs<StartingFieldCompileResult.Invalid>(
+            compiler.compile(
+                runId = runId,
+                rawObjective =
+                    "Require an hourly sensible cooling-load, power, and energy calculator.",
+                envelope = acceptanceEnvelope(AcceptanceProfile.APPENDIX_B_FULL).copy(
+                    quantitativeToolObligation = gateDQuantitativeToolObligation()
+                ),
+                outputs = candidate
+            )
+        )
+
+        assertTrue(
+            invalid.errors.any {
+                it.path.toString().endsWith("quantitativeToolObligation") &&
+                    it.message.contains("One sealed tool opportunity") &&
+                    it.message.contains("72-hour")
+            },
+            invalid.errors.joinToString()
+        )
+        assertTrue(
+            invalid.errors.any {
+                it.path.toString().endsWith(
+                    "quantitativeToolObligation.shelter_area"
+                ) &&
+                    it.message.contains("Missing required top-level input field") &&
+                    it.message.contains("shelter_area_m2")
+            },
+            invalid.errors.joinToString()
+        )
+        assertTrue(
+            invalid.errors.any {
+                it.path.toString().endsWith(
+                    "quantitativeToolObligation.hourly_electrical_energy"
+                ) &&
+                    it.message.contains("hourly_electrical_energy_kwh")
+            },
+            invalid.errors.joinToString()
+        )
+    }
+
+    @Test
+    fun `quantitative obligation accepts one exact typed bounded contract`() {
+        val runId = "appendix-b-quantitative-valid"
+        val base = fullAcceptanceOutputs(runId)
+        val authoringNode = base.taskAnatomist.nodes.first { it.toolOpportunity != null }
+        val opportunity = gateDQuantitativeOpportunity(
+            requireNotNull(authoringNode.toolOpportunity)
+        )
+        val candidate = withPromotionTestDefinition(
+            outputs = base.copy(
+                taskAnatomist = base.taskAnatomist.copy(
+                    nodes = base.taskAnatomist.nodes.map { node ->
+                        if (node.key == authoringNode.key) {
+                            node.copy(toolOpportunity = opportunity)
+                        } else {
+                            node
+                        }
+                    }
+                )
+            ),
+            origin = authoringNode,
+            opportunity = opportunity,
+            definition = gateDQuantitativePromotionDefinition()
+        )
+        val exactDefinition = json.parseToJsonElement(
+            gateDQuantitativePromotionDefinition()
+        ).jsonObject
+        val exactFixtures = opportunity.promotionTestIds.sorted().map { testId ->
+            QuantitativePromotionFixtureObligation(
+                testId = testId,
+                input = requireNotNull(exactDefinition["input"]),
+                expectedOutput = requireNotNull(exactDefinition["expectedOutput"])
+            )
+        }
+
+        val valid = assertIs<StartingFieldCompileResult.Valid>(
+            compiler.compile(
+                runId = runId,
+                rawObjective =
+                    "Require an hourly sensible cooling-load, power, and energy calculator.",
+                envelope = acceptanceEnvelope(AcceptanceProfile.APPENDIX_B_FULL).copy(
+                    quantitativeToolObligation = gateDQuantitativeToolObligation().copy(
+                        requiredOpportunityId = opportunity.opportunityId,
+                        exactPromotionTestIds = opportunity.promotionTestIds,
+                        exactPromotionFixtures = exactFixtures,
+                        maximumOpportunityRuntimeMillis = opportunity.maximumRuntimeMillis
+                    )
+                ),
+                outputs = candidate
+            )
+        )
+
+        val sealed = valid.atlas.nodes.values
+            .mapNotNull { it.toolOpportunity }
+            .single()
+        assertEquals(72, sealed.requiredOutputs.first().minimumItems)
+        assertEquals("kWh", sealed.requiredOutputs.last().quantitySpec?.unitId)
+    }
+
+    @Test
+    fun `quantitative obligation rejects altered operator owned promotion fixture`() {
+        val runId = "appendix-b-quantitative-promotion-fixture-mismatch"
+        val candidate = gateDQuantitativeAcceptanceOutputs(runId)
+        val opportunity = requireNotNull(
+            candidate.taskAnatomist.nodes.first { it.toolOpportunity != null }.toolOpportunity
+        )
+        val definition = json.parseToJsonElement(
+            gateDQuantitativePromotionDefinition()
+        ).jsonObject
+        val fixtures = opportunity.promotionTestIds.sorted().map { testId ->
+            QuantitativePromotionFixtureObligation(
+                testId = testId,
+                input = requireNotNull(definition["input"]),
+                expectedOutput = json.parseToJsonElement(
+                    """{"hourly_sensible_cooling_load_w":[],"hourly_electrical_power_kw":[],"hourly_electrical_energy_kwh":[]}"""
+                )
+            )
+        }
+
+        val invalid = assertIs<StartingFieldCompileResult.Invalid>(
+            compiler.compile(
+                runId = runId,
+                rawObjective = "Require exact operator-owned promotion fixtures.",
+                envelope = acceptanceEnvelope(AcceptanceProfile.APPENDIX_B_FULL).copy(
+                    quantitativeToolObligation = gateDQuantitativeToolObligation().copy(
+                        requiredOpportunityId = opportunity.opportunityId,
+                        exactPromotionTestIds = opportunity.promotionTestIds,
+                        exactPromotionFixtures = fixtures,
+                        maximumOpportunityRuntimeMillis = opportunity.maximumRuntimeMillis
+                    )
+                ),
+                outputs = candidate
+            )
+        )
+
+        assertTrue(
+            invalid.errors.any {
+                it.path.toString().contains("synthesis.sealedTests") &&
+                    it.message.contains("must exactly equal the operator-owned")
+            },
+            invalid.errors.joinToString()
+        )
+    }
+
+    @Test
+    fun `quantitative obligation reports exact opportunity promotion and runtime mismatches`() {
+        val runId = "appendix-b-quantitative-opportunity-authority-mismatch"
+        val candidate = gateDQuantitativeAcceptanceOutputs(runId)
+        val actual = requireNotNull(
+            candidate.taskAnatomist.nodes.first { it.toolOpportunity != null }.toolOpportunity
+        )
+
+        val invalid = assertIs<StartingFieldCompileResult.Invalid>(
+            compiler.compile(
+                runId = runId,
+                rawObjective = "Require a bounded candidate audit.",
+                envelope = acceptanceEnvelope(AcceptanceProfile.APPENDIX_B_FULL).copy(
+                    quantitativeToolObligation = gateDQuantitativeToolObligation().copy(
+                        requiredOpportunityId = "arc_candidate_portfolio_audit",
+                        exactPromotionTestIds = setOf(
+                            "duplicate_output_diversity_boundary",
+                            "exactly_two_attempt_boundary",
+                            "eight_second_runtime_boundary",
+                            "rate_denominator_boundary"
+                        ),
+                        maximumOpportunityRuntimeMillis = actual.maximumRuntimeMillis - 1
+                    )
+                ),
+                outputs = candidate
+            )
+        )
+
+        assertTrue(
+            invalid.errors.any {
+                it.path.toString().endsWith("quantitativeToolObligation.opportunity_id") &&
+                    it.message.contains("arc_candidate_portfolio_audit") &&
+                    it.message.contains(actual.opportunityId)
+            },
+            invalid.errors.joinToString()
+        )
+        assertTrue(
+            invalid.errors.any {
+                it.path.toString().endsWith("quantitativeToolObligation.promotion_test_ids") &&
+                    it.message.contains("duplicate_output_diversity_boundary")
+            },
+            invalid.errors.joinToString()
+        )
+        assertTrue(
+            invalid.errors.any {
+                it.path.toString().endsWith("quantitativeToolObligation.maximum_runtime_millis") &&
+                    it.message.contains("actual=${actual.maximumRuntimeMillis}")
+            },
+            invalid.errors.joinToString()
+        )
+    }
+
+    @Test
+    fun `quantitative obligation reports exact quantity metadata mismatch`() {
+        val runId = "appendix-b-quantitative-metadata-mismatch"
+        val base = fullAcceptanceOutputs(runId)
+        val authoringNode = base.taskAnatomist.nodes.first { it.toolOpportunity != null }
+        val exact = gateDQuantitativeOpportunity(
+            requireNotNull(authoringNode.toolOpportunity)
+        )
+        val opportunity = exact.copy(
+            requiredOutputs = exact.requiredOutputs.map { field ->
+                if (field.name == "hourly_electrical_energy_kwh") {
+                    field.copy(
+                        quantitySpec = requireNotNull(field.quantitySpec).copy(
+                            aggregation = AggregationSemantics.AVERAGE_OVER_INTERVALS
+                        )
+                    )
+                } else {
+                    field
+                }
+            }
+        )
+        val candidate = withPromotionTestDefinition(
+            outputs = base.copy(
+                taskAnatomist = base.taskAnatomist.copy(
+                    nodes = base.taskAnatomist.nodes.map { node ->
+                        if (node.key == authoringNode.key) {
+                            node.copy(toolOpportunity = opportunity)
+                        } else {
+                            node
+                        }
+                    }
+                )
+            ),
+            origin = authoringNode,
+            opportunity = opportunity,
+            definition = gateDQuantitativePromotionDefinition()
+        )
+
+        val invalid = assertIs<StartingFieldCompileResult.Invalid>(
+            compiler.compile(
+                runId = runId,
+                rawObjective =
+                    "Require an hourly sensible cooling-load, power, and energy calculator.",
+                envelope = acceptanceEnvelope(AcceptanceProfile.APPENDIX_B_FULL).copy(
+                    quantitativeToolObligation = gateDQuantitativeToolObligation()
+                ),
+                outputs = candidate
+            )
+        )
+
+        assertTrue(
+            invalid.errors.any {
+                it.path.toString().endsWith(
+                    "quantitativeToolObligation.hourly_electrical_energy"
+                ) &&
+                    it.message.contains("quantitySpec must be") &&
+                    it.message.contains("SUM_OVER_INTERVALS") &&
+                    it.message.contains("AVERAGE_OVER_INTERVALS")
+            },
+            invalid.errors.joinToString()
+        )
     }
 
     @Test
@@ -621,16 +931,15 @@ class StartingFieldCompilerTest {
             expectedValue = "4.0"
         )
 
-        val result = assertIs<StartingFieldCompileResult.Valid>(
-            compiler.compile(runId, "Objective", envelope(), withOpportunity)
-        )
+        val compiled = compiler.compile(runId, "Objective", envelope(), withOpportunity)
+        val result = assertIs<StartingFieldCompileResult.Valid>(compiled, compiled.toString())
 
         val originId = NodeId(CouncilDeterministicIds.nodeId(runId, origin.key))
         assertEquals(opportunity, result.atlas.nodes.getValue(originId).toolOpportunity)
     }
 
     @Test
-    fun `formula sealing rejects integer expected JSON when production runtime emits decimal`() {
+    fun `formula sealing rejects integer representation for number output before execution`() {
         val runId = "formula-reference-exact-json"
         val staged = splitStages(outputs())
         val origin = staged.taskAnatomist.nodes.first()
@@ -658,9 +967,8 @@ class StartingFieldCompilerTest {
                         "sealedTests.${opportunity.promotionTestIds.single()}." +
                             "testDefinitionJson"
                     ) &&
-                    it.message.contains("expectedOutput={\"heat_loss_coefficient\":4}") &&
                     it.message.contains(
-                        "production reference output={\"heat_loss_coefficient\":4.0}"
+                        "non_canonical_number_root.heat_loss_coefficient"
                     )
             },
             result.errors.joinToString()
@@ -1611,7 +1919,7 @@ class StartingFieldCompilerTest {
         )
     }
 
-    private fun acceptanceEnvelope(profile: AcceptanceProfile): ExecutionEnvelope =
+    internal fun acceptanceEnvelope(profile: AcceptanceProfile): ExecutionEnvelope =
         envelope().copy(
             requiredGraderGroupCount = InclusiveIntRange(2, 2),
             maxRounds = when (profile) {
@@ -1647,7 +1955,7 @@ class StartingFieldCompilerTest {
         )
     }
 
-    private fun fullAcceptanceOutputs(runId: String): CouncilRoleOutputBundle {
+    internal fun fullAcceptanceOutputs(runId: String): CouncilRoleOutputBundle {
         val staged = withAcceptanceGraderGroups(twoRoundStagedOutputs())
         val origin = staged.taskAnatomist.nodes.first()
         val reuse = staged.taskAnatomist.nodes.last()
@@ -1787,6 +2095,270 @@ class StartingFieldCompilerTest {
         assumptions = listOf("Evidence rows conform to the typed input schema."),
         knownInvalidDomains = listOf("Binary evidence payloads.")
     )
+
+    internal fun gateDQuantitativeToolObligation(): QuantitativeToolObligation =
+        QuantitativeToolObligation(
+            horizonTimeBasis = TimeBasis.HOUR,
+            horizonIntervalCount = 72,
+            allowedOpportunityTypes = setOf(
+                ToolOpportunityType.CALCULATION,
+                ToolOpportunityType.SIMULATION,
+                ToolOpportunityType.FORMULA
+            ),
+            requiredFields = listOf(
+                quantitativeFieldObligation(
+                    "shelter_area",
+                    "shelter_area_m2",
+                    QuantitativeToolFieldLocation.INPUT,
+                    QuantitativeToolFieldShape.SCALAR,
+                    areaQuantity()
+                ),
+                quantitativeFieldObligation(
+                    "envelope_u_value",
+                    "envelope_u_value_w_per_m2_k",
+                    QuantitativeToolFieldLocation.INPUT,
+                    QuantitativeToolFieldShape.SCALAR,
+                    uValueQuantity()
+                ),
+                quantitativeFieldObligation(
+                    "hourly_outdoor_temperature",
+                    "hourly_outdoor_temperature_c",
+                    QuantitativeToolFieldLocation.INPUT,
+                    QuantitativeToolFieldShape.HORIZON_SERIES,
+                    temperatureQuantity(AggregationSemantics.AVERAGE_OVER_INTERVALS)
+                ),
+                quantitativeFieldObligation(
+                    "indoor_setpoint_temperature",
+                    "indoor_setpoint_temperature_c",
+                    QuantitativeToolFieldLocation.INPUT,
+                    QuantitativeToolFieldShape.SCALAR,
+                    temperatureQuantity(AggregationSemantics.INSTANTANEOUS)
+                ),
+                quantitativeFieldObligation(
+                    "cooling_system_cop",
+                    "cooling_system_cop",
+                    QuantitativeToolFieldLocation.INPUT,
+                    QuantitativeToolFieldShape.SCALAR,
+                    dimensionlessQuantity()
+                ),
+                quantitativeFieldObligation(
+                    "hourly_sensible_cooling_load",
+                    "hourly_sensible_cooling_load_w",
+                    QuantitativeToolFieldLocation.OUTPUT,
+                    QuantitativeToolFieldShape.HORIZON_SERIES,
+                    powerQuantity("W", 1.0)
+                ),
+                quantitativeFieldObligation(
+                    "hourly_electrical_power",
+                    "hourly_electrical_power_kw",
+                    QuantitativeToolFieldLocation.OUTPUT,
+                    QuantitativeToolFieldShape.HORIZON_SERIES,
+                    powerQuantity("kW", 1_000.0)
+                ),
+                quantitativeFieldObligation(
+                    "hourly_electrical_energy",
+                    "hourly_electrical_energy_kwh",
+                    QuantitativeToolFieldLocation.OUTPUT,
+                    QuantitativeToolFieldShape.HORIZON_SERIES,
+                    QuantitySpec(
+                        dimension = PhysicalDimension(mapOf("energy" to 1)),
+                        unitId = "kWh",
+                        scaleToSi = 3_600_000.0,
+                        aggregation = AggregationSemantics.SUM_OVER_INTERVALS,
+                        timeBasis = TimeBasis.HOUR
+                    )
+                )
+            )
+        )
+
+    internal fun gateDQuantitativeAcceptanceOutputs(
+        runId: String
+    ): CouncilRoleOutputBundle {
+        val base = fullAcceptanceOutputs(runId)
+        val authoringNode = base.taskAnatomist.nodes.first { it.toolOpportunity != null }
+        val opportunity = gateDQuantitativeOpportunity(
+            requireNotNull(authoringNode.toolOpportunity)
+        )
+        return withPromotionTestDefinition(
+            outputs = base.copy(
+                taskAnatomist = base.taskAnatomist.copy(
+                    nodes = base.taskAnatomist.nodes.map { node ->
+                        if (node.key == authoringNode.key) {
+                            node.copy(toolOpportunity = opportunity)
+                        } else {
+                            node
+                        }
+                    }
+                )
+            ),
+            origin = authoringNode,
+            opportunity = opportunity,
+            definition = gateDQuantitativePromotionDefinition()
+        )
+    }
+
+    private fun quantitativeFieldObligation(
+        roleId: String,
+        fieldName: String,
+        location: QuantitativeToolFieldLocation,
+        shape: QuantitativeToolFieldShape,
+        quantitySpec: QuantitySpec
+    ) = QuantitativeToolFieldObligation(
+        roleId = roleId,
+        fieldName = fieldName,
+        location = location,
+        shape = shape,
+        quantitySpec = quantitySpec
+    )
+
+    private fun gateDQuantitativeOpportunity(base: ToolOpportunity): ToolOpportunity =
+        base.copy(
+            opportunityType = ToolOpportunityType.CALCULATION,
+            repeatedQuestionPattern =
+                "Calculate hourly sensible cooling load, electrical power, and energy.",
+            requiredInputs = listOf(
+                scalarNumericField("shelter_area_m2", "Shelter area.", areaQuantity()),
+                scalarNumericField(
+                    "envelope_u_value_w_per_m2_k",
+                    "Envelope heat-transfer coefficient.",
+                    uValueQuantity()
+                ),
+                horizonNumericField(
+                    "hourly_outdoor_temperature_c",
+                    "Hourly outdoor temperature.",
+                    temperatureQuantity(AggregationSemantics.AVERAGE_OVER_INTERVALS)
+                ),
+                scalarNumericField(
+                    "indoor_setpoint_temperature_c",
+                    "Indoor temperature setpoint.",
+                    temperatureQuantity(AggregationSemantics.INSTANTANEOUS)
+                ),
+                scalarNumericField(
+                    "cooling_system_cop",
+                    "Cooling coefficient of performance.",
+                    dimensionlessQuantity()
+                )
+            ),
+            requiredOutputs = listOf(
+                horizonNumericField(
+                    "hourly_sensible_cooling_load_w",
+                    "Hourly sensible cooling load.",
+                    powerQuantity("W", 1.0)
+                ),
+                horizonNumericField(
+                    "hourly_electrical_power_kw",
+                    "Hourly electrical power.",
+                    powerQuantity("kW", 1_000.0)
+                ),
+                horizonNumericField(
+                    "hourly_electrical_energy_kwh",
+                    "Hourly electrical energy.",
+                    QuantitySpec(
+                        dimension = PhysicalDimension(mapOf("energy" to 1)),
+                        unitId = "kWh",
+                        scaleToSi = 3_600_000.0,
+                        aggregation = AggregationSemantics.SUM_OVER_INTERVALS,
+                        timeBasis = TimeBasis.HOUR
+                    )
+                )
+            )
+        )
+
+    private fun scalarNumericField(
+        name: String,
+        description: String,
+        quantitySpec: QuantitySpec
+    ) = TypedField(
+        name = name,
+        type = TypedFieldType.NUMBER,
+        description = description,
+        physicalDimension = quantitySpec.dimension,
+        quantitySpec = quantitySpec
+    )
+
+    private fun horizonNumericField(
+        name: String,
+        description: String,
+        quantitySpec: QuantitySpec
+    ) = TypedField(
+        name = name,
+        type = TypedFieldType.ARRAY,
+        description = description,
+        itemType = TypedFieldType.NUMBER,
+        minimumItems = 72,
+        maximumItems = 72,
+        physicalDimension = quantitySpec.dimension,
+        quantitySpec = quantitySpec
+    )
+
+    private fun areaQuantity() = QuantitySpec(
+        dimension = PhysicalDimension(mapOf("length" to 2)),
+        unitId = "m2",
+        scaleToSi = 1.0,
+        aggregation = AggregationSemantics.INSTANTANEOUS
+    )
+
+    private fun uValueQuantity() = QuantitySpec(
+        dimension = PhysicalDimension(
+            mapOf("power" to 1, "length" to -2, "temperature" to -1)
+        ),
+        unitId = "W/(m2*K)",
+        scaleToSi = 1.0,
+        aggregation = AggregationSemantics.INSTANTANEOUS
+    )
+
+    private fun temperatureQuantity(
+        aggregation: AggregationSemantics
+    ) = QuantitySpec(
+        dimension = PhysicalDimension(mapOf("temperature" to 1)),
+        unitId = "C",
+        scaleToSi = 1.0,
+        aggregation = aggregation,
+        timeBasis = TimeBasis.HOUR.takeIf {
+            aggregation == AggregationSemantics.AVERAGE_OVER_INTERVALS
+        }
+    )
+
+    private fun dimensionlessQuantity() = QuantitySpec(
+        dimension = PhysicalDimension(),
+        unitId = "1",
+        scaleToSi = 1.0,
+        aggregation = AggregationSemantics.INSTANTANEOUS
+    )
+
+    private fun powerQuantity(
+        unitId: String,
+        scaleToSi: Double
+    ) = QuantitySpec(
+        dimension = PhysicalDimension(mapOf("power" to 1)),
+        unitId = unitId,
+        scaleToSi = scaleToSi,
+        aggregation = AggregationSemantics.AVERAGE_OVER_INTERVALS,
+        timeBasis = TimeBasis.HOUR
+    )
+
+    private fun gateDQuantitativePromotionDefinition(): String {
+        val temperatures = List(72) { "35.0" }.joinToString(",")
+        val loads = List(72) { "25000.0" }.joinToString(",")
+        val powers = List(72) { "10.0" }.joinToString(",")
+        val energies = List(72) { "10.0" }.joinToString(",")
+        return """
+            {
+              "input": {
+                "shelter_area_m2": 500.0,
+                "envelope_u_value_w_per_m2_k": 2.0,
+                "hourly_outdoor_temperature_c": [$temperatures],
+                "indoor_setpoint_temperature_c": 24.0,
+                "cooling_system_cop": 2.5
+              },
+              "expectedOutput": {
+                "hourly_sensible_cooling_load_w": [$loads],
+                "hourly_electrical_power_kw": [$powers],
+                "hourly_electrical_energy_kwh": [$energies]
+              }
+            }
+        """.trimIndent()
+    }
 
     private fun evidenceRulePromotionDefinition(): String =
         """

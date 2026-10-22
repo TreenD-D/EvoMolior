@@ -15,7 +15,7 @@ object ModelSelectionConfig {
     const val QWEN_CLOUD_QWEN_FAST_MODEL = "qwen3.6-flash"
     const val QWEN_CLOUD_DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
     const val QWEN_CLOUD_IMAGE_MODEL = "qwen-image-2.0-pro"
-    const val CODEX_CHATGPT_GPT56_LUNA_MODEL = "gpt-5.6-luna"
+    const val CODEX_CHATGPT_GPT56_LUNA_MODEL = CodexRuntimePreset.LUNA
 
     const val DEFAULT_RUNTIME_RESEARCHER_MODEL = "deepseek/deepseek-v4-flash"
     const val DEFAULT_RUNTIME_BUILDER_MODEL = "deepseek/deepseek-v4-flash"
@@ -162,10 +162,9 @@ object ModelSelectionConfig {
     /**
      * Returns a complete role-to-model assignment table for the local Codex/ChatGPT backend.
      *
-     * Codex runs through one local CLI model and cannot use OpenRouter/Qwen role diversity.
-     * Covering every non-Council [Role] prevents objective-specific routing profiles from leaking
-     * unsupported model IDs into Codex runs. Genesis Council roles are transient and must not
-     * become operator-owned runtime assignments.
+     * This is the legacy all-Luna default. Explicit [CodexRuntimePreset] policies own diverse
+     * role pools separately. Covering every non-Council [Role] prevents objective-specific routing
+     * from leaking other provider IDs into legacy Codex runs.
      */
     fun codexChatGptRuntimeAssignments(): Map<String, String> = Role.entries
         .filterNot(Role::isCouncilRole)

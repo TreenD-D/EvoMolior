@@ -1,0 +1,34 @@
+{
+  "schema_version": "arc2-report-validation-v1",
+  "report": "documentation/kaggle-arc/arc2-inference-novelty-20260809/arc2-inference-novelty-report.html",
+  "report_sha256": "96de03d98bf4b30e3326c4fbb2c67d6a95164bfd97117c52a630c2814cfb899d",
+  "source_report": "runs/arc2-inference-novelty-20260810-r7/primary/arc2-inference-novelty-report.html",
+  "source_report_sha256": "acfc4feb769967667447b149845e8cdbe721a64d78a300b622b330a3e09305ce",
+  "path_corrections": {
+    "ARC2_A2_2_INTERFACE_FREEZE.md -> A2_2_INTERFACE_FREEZE.md": 3,
+    "Inference, Novelty & Kaggle-Safe -> Inference, Novelty &amp; Kaggle-Safe": 1
+  },
+  "html5_doctype": true,
+  "standalone_no_external_assets": true,
+  "interactive": true,
+  "required_section_count": 11,
+  "hypothesis_count": 12,
+  "novel_hypothesis_count": 10,
+  "evidence_source_count": 8,
+  "resolved_evidence_paths": {
+    "A2_2_INTERFACE_FREEZE.md": "/Volumes/CrucialX9_1TB/arc2-em/docs/A2_2_INTERFACE_FREEZE.md",
+    "ARC2_SUBMISSION_CONTINUATION_20260809.md": "/Volumes/CrucialX9_1TB/arc2-em/docs/ARC2_SUBMISSION_CONTINUATION_20260809.md",
+    "evomolior_arc2_luna_hypothesis_register.json": "/Volumes/CrucialX9_1TB/arc2-em/docs/evomolior_arc2_luna_hypothesis_register.json",
+    "reports/arc2-composition-a2-e04-20260807.md": "/Volumes/CrucialX9_1TB/arc2-em/docs/reports/arc2-composition-a2-e04-20260807.md",
+    "reports/arc2-kaggle-corpus-specialists-20260809.md": "/Volumes/CrucialX9_1TB/arc2-em/docs/reports/arc2-kaggle-corpus-specialists-20260809.md",
+    "reports/arc2-program-prior-sweep-20260809.md": "/Volumes/CrucialX9_1TB/arc2-em/docs/reports/arc2-program-prior-sweep-20260809.md",
+    "reports/arc2-program-prior-v2-full-20260810.md": "/Volumes/CrucialX9_1TB/arc2-em/docs/reports/arc2-program-prior-v2-full-20260810.md",
+    "reports/arc2-residual-atlas-a2-e01-20260807.md": "/Volumes/CrucialX9_1TB/arc2-em/docs/reports/arc2-residual-atlas-a2-e01-20260807.md"
+  },
+  "embedded_payloads_parse": true,
+  "generated_files": {
+    "hypothesis_register": "documentation/kaggle-arc/arc2-inference-novelty-20260809/hypothesis-register.json",
+    "evidence_index": "documentation/kaggle-arc/arc2-inference-novelty-20260809/evidence-index.json",
+    "experiment_backlog": "documentation/kaggle-arc/arc2-inference-novelty-20260809/experiment-backlog.csv"
+  }
+}

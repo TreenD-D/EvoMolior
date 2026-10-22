@@ -20,6 +20,26 @@ internal fun LLMParams.Schema.JSON.Standard.withoutGeneratorRootId(
 }
 
 /**
+ * Removes JSON Schema keywords unsupported by the Codex structured-output subset.
+ *
+ * Uniqueness remains a runtime/domain invariant. It is intentionally not delegated to the
+ * provider schema because Codex rejects `uniqueItems` during response-format admission.
+ */
+internal fun JsonElement.withoutCodexUnsupportedKeywords(): JsonElement =
+    when (this) {
+        is JsonArray -> JsonArray(map(JsonElement::withoutCodexUnsupportedKeywords))
+        is JsonObject -> JsonObject(
+            entries
+                .asSequence()
+                .filterNot { (name, _) -> name == "uniqueItems" }
+                .associate { (name, value) ->
+                    name to value.withoutCodexUnsupportedKeywords()
+                }
+        )
+        else -> this
+    }
+
+/**
  * Drops generator definitions that cannot be reached from the transported schema root.
  */
 internal fun JsonObject.pruneUnreachableDefinitions(): JsonObject {

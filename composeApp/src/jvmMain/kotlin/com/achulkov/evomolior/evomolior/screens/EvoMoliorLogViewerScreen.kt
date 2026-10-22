@@ -319,6 +319,14 @@ private fun LogViewerRow(event: EvoMoliorEvent) {
             "✅", "[COMPLETED] winner=${event.winnerId ?: "none"}",
             MaterialTheme.colorScheme.primary
         )
+        is EvoMoliorEvent.RunCompletedProvisional -> Triple(
+            "🟡", "[COMPLETED — PROVISIONAL / NOT ACCEPTED] ${event.reason}",
+            MaterialTheme.colorScheme.tertiary
+        )
+        is EvoMoliorEvent.RunRecovered -> Triple(
+            "🛟", "[RECOVERED — NOT ACCEPTED] ${event.reason}",
+            MaterialTheme.colorScheme.tertiary
+        )
         is EvoMoliorEvent.RunAborted -> Triple(
             "❌", "[ABORTED] ${event.reason}",
             MaterialTheme.colorScheme.error

@@ -5,6 +5,7 @@ import ai.koog.agents.core.agent.singleRunStrategy
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.features.eventHandler.feature.EventHandler
 import com.achulkov.evomolior.core.config.LlmBackend
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
 import com.achulkov.evomolior.core.contract.GraderMethodologyBindingCatalog
 import com.achulkov.evomolior.core.contract.GraderMethodologyWireDraft
@@ -28,7 +29,9 @@ data class StructuredGraderMethodologyRequest(
     val bindingCatalog: GraderMethodologyBindingCatalog,
     val priorCriteria: String?,
     val priorDraft: GraderMethodologyWireDraft?,
-    val validationError: String?
+    val validationError: String?,
+    /** Previous round's accepted methodology, bound to this round's handles, to revise. */
+    val baselineDraft: GraderMethodologyWireDraft? = null
 ) {
     init {
         require(
@@ -53,6 +56,7 @@ data class StructuredGraderMethodologyRequest(
 class StructuredGraderMethodologyAuthor(
     private val apiKey: String,
     private val llmBackend: LlmBackend,
+    private val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     private val modelId: String = ModelSelectionConfig.DEFAULT_GRADER_MODEL,
     private val providerCostRecorder: ProviderCallCostRecorder? = null
 ) {
@@ -60,6 +64,7 @@ class StructuredGraderMethodologyAuthor(
         LlmExecutorFactory.create(
             backend = llmBackend,
             apiKey = apiKey,
+            codexReasoningEffort = codexReasoningEffort,
             codexNativeSearchEnabled = false
         )
     }
@@ -78,24 +83,80 @@ class StructuredGraderMethodologyAuthor(
                 providerCostRecorder?.let(config::installProviderCostRecorder)
             }
             .build()
-        return agent.run(
+        return agent.run(structuredMethodologyUserMessage(request)).trim()
+    }
+
+    private fun systemPrompt(request: StructuredGraderMethodologyRequest): String = buildSystemPrompt(request)
+}
+
+/**
+ * Builds the user turn for one structured methodology attempt.
+ *
+ * A validation error turns the attempt into a repair of [StructuredGraderMethodologyRequest.priorDraft].
+ * Otherwise an accepted previous-round [StructuredGraderMethodologyRequest.baselineDraft] is the
+ * starting point to improve, so each round refines last round's methodology instead of
+ * re-authoring it from scratch.
+ *
+ * @param request Structured authorship request.
+ */
+internal fun structuredMethodologyUserMessage(request: StructuredGraderMethodologyRequest): String =
+    structuredMethodologyUserMessage(
+        validationError = request.validationError,
+        priorDraft = request.priorDraft,
+        baselineDraft = request.baselineDraft,
+        bindingGuide = { bindingGuide(request.bindingCatalog) }
+    )
+
+/**
+ * Catalog-independent form of [structuredMethodologyUserMessage].
+ *
+ * @param validationError Feedback from the preceding attempt, or null for a first attempt.
+ * @param priorDraft Draft to repair when [validationError] is present.
+ * @param baselineDraft Accepted previous-round methodology to improve on a first attempt.
+ * @param bindingGuide Renders the sealed handle matrix for repair instructions.
+ */
+internal fun structuredMethodologyUserMessage(
+    validationError: String?,
+    priorDraft: GraderMethodologyWireDraft?,
+    baselineDraft: GraderMethodologyWireDraft?,
+    bindingGuide: () -> String
+): String =
             buildString {
                 appendLine("Author the grader methodology now.")
-                request.validationError?.let {
+                if (validationError == null) {
+                    baselineDraft?.let { baseline ->
+                        appendLine(
+                            "Start from this accepted previous-round methodology. It is already bound " +
+                                "to the current handle matrix and passed Critic review last round:"
+                        )
+                        appendLine(Json.encodeToString(GraderMethodologyWireDraft.serializer(), baseline))
+                        appendLine(
+                            "Return the complete improved JSON value: keep requirements and tests that " +
+                                "still discriminate well, sharpen vague thresholds and weak or generic " +
+                                "tests, address the failure telemetry in the prior context, and add " +
+                                "coverage for any listed handle the baseline does not cover yet."
+                        )
+                    }
+                }
+                validationError?.let {
                     appendLine("The prior attempt failed validation: $it")
                     appendLine("The sealed handle matrix below remains the only binding authority:")
-                    appendLine(bindingGuide(request.bindingCatalog))
-                    request.priorDraft?.let { priorDraft ->
+                    appendLine(bindingGuide())
+                    priorDraft?.let { draft ->
                         appendLine("Repair this prior handle-bound draft:")
                         appendLine(
                             Json.encodeToString(
                                 GraderMethodologyWireDraft.serializer(),
-                                priorDraft
+                                draft
                             )
                         )
                         appendLine(
                             "Preserve its valid semantic fields and make only the corrections " +
                                 "required by the validation error."
+                        )
+                        appendLine(
+                            "The validation error overrides preservation for every named invalid " +
+                                "regex: replace that entire pattern instead of retaining unsupported syntax."
                         )
                     }
                     appendLine(
@@ -105,10 +166,8 @@ class StructuredGraderMethodologyAuthor(
                     appendLine("Return a corrected complete JSON value.")
                 }
             }
-        ).trim()
-    }
 
-    private fun systemPrompt(request: StructuredGraderMethodologyRequest): String = """
+private fun buildSystemPrompt(request: StructuredGraderMethodologyRequest): String = """
         You are the GraderBuilder for isolated grader civilisation ${request.graderGroupId}.
         Author one compact JSON value matching GraderMethodologyWireDraft. Return JSON only, with
         no Markdown fence or prose. You must create objective-specific, falsifiable methodology;
@@ -160,9 +219,11 @@ class StructuredGraderMethodologyAuthor(
           }]
         }
         RE2/J patterns use linear-time regular expressions. Do not use lookahead, lookbehind,
-        backreferences, possessive quantifiers, or atomic groups. Prefer literals, character
-        classes, grouping, alternation, and bounded quantifiers; for example
-        "(?i)(evidence|source)[^\n]{0,120}(id|provenance)".
+        backreferences, possessive quantifiers, or atomic groups. Every bounded-quantifier upper
+        limit must be at most 1000; `{0,2000}` is invalid. Prefer literals, character classes,
+        grouping, alternation, and conservative bounded quantifiers; for example
+        "(?i)(evidence|source)[^\n]{0,120}(id|provenance)" or
+        "(?i)72[\s\S]{0,512}(deterministic|reproducible)".
         Failure score ceilings and difficulty are normalized to 0.0..1.0. Every requirement needs
         at least one executable test, and every test must map to known requirements with nonblank
         exact contract hashes. Give every scoring dimension distinct, dimension-specific guidance;
@@ -178,7 +239,7 @@ class StructuredGraderMethodologyAuthor(
         own sealed contract requires that evidence.
     """.trimIndent()
 
-    private fun bindingGuide(catalog: GraderMethodologyBindingCatalog): String =
+private fun bindingGuide(catalog: GraderMethodologyBindingCatalog): String =
         catalog.modelView.rows
             .sortedBy { it.graderNodeHandle }
             .joinToString("\n") { row ->
@@ -207,7 +268,6 @@ class StructuredGraderMethodologyAuthor(
                     )
                 }
             }
-}
 
 /** One model-authored broad-dimension score in an exact missing-score repair response. */
 @Serializable
@@ -259,6 +319,7 @@ data class StructuredDimensionScoreRequest(
 class StructuredDimensionScoreAuthor(
     private val apiKey: String,
     private val llmBackend: LlmBackend,
+    private val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     private val modelId: String = ModelSelectionConfig.DEFAULT_GRADER_MODEL,
     private val providerCostRecorder: ProviderCallCostRecorder? = null
 ) {
@@ -266,6 +327,7 @@ class StructuredDimensionScoreAuthor(
         LlmExecutorFactory.create(
             backend = llmBackend,
             apiKey = apiKey,
+            codexReasoningEffort = codexReasoningEffort,
             codexNativeSearchEnabled = false
         )
     }
@@ -394,6 +456,7 @@ data class StructuredNodeGradeRequest(
 class StructuredNodeGradeAuthor(
     private val apiKey: String,
     private val llmBackend: LlmBackend,
+    private val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     private val modelId: String = ModelSelectionConfig.DEFAULT_GRADER_MODEL,
     private val providerCostRecorder: ProviderCallCostRecorder? = null
 ) {
@@ -401,6 +464,7 @@ class StructuredNodeGradeAuthor(
         LlmExecutorFactory.create(
             backend = llmBackend,
             apiKey = apiKey,
+            codexReasoningEffort = codexReasoningEffort,
             codexNativeSearchEnabled = false
         )
     }

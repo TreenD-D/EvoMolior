@@ -94,7 +94,14 @@ class CodexCodeModeSession private constructor(
             return@buildString
         }
         appendLine("Call an EvoMolior tool from shell code with:")
-        appendLine("${bridgeCommand.toAbsolutePath()} <tool-name> '<json-arguments>'")
+        appendLine("'${bridgeCommand.toAbsolutePath().toString().replace("'", "'\\''")}' <tool-name> - <<'EVOMOLIOR_JSON'")
+        appendLine("<JSON object serialized from the tool arguments>")
+        appendLine("EVOMOLIOR_JSON")
+        appendLine("The '-' argument reads JSON from stdin without shell evaluation.")
+        appendLine("Always JSON-serialize source/document content; preserve dollars, quotes, backticks and newlines exactly.")
+        appendLine("Use a quoted heredoc delimiter absent from the JSON; never use an unquoted heredoc or interpolate source into shell code.")
+        appendLine("If shell commands are embedded in another language, serialize that outer command string too; do not paste source into JavaScript template literals.")
+        appendLine("Inline JSON is also accepted as the second argument, but shell single quotes inside it require escaping.")
         appendLine("The command prints the real tool result. Use it instead of describing a tool call.")
         appendLine("Available typed APIs:")
         runtime.descriptors.forEach { descriptor ->
@@ -172,7 +179,7 @@ class CodexCodeModeSession private constructor(
                 #!/bin/zsh
                 set -eu
                 if [[ ${'$'}# -ne 2 ]]; then
-                  print -u2 "usage: evomolior-tool <tool-name> '<json-arguments>'"
+                  print -u2 "usage: evomolior-tool <tool-name> <json-arguments|->"
                   exit 64
                 fi
                 script_dir=${'$'}{0:A:h}
@@ -180,7 +187,11 @@ class CodexCodeModeSession private constructor(
                 request_dir="${'$'}script_dir/$CODE_MODE_REQUESTS_DIRECTORY/${'$'}request_id"
                 mkdir -p "${'$'}request_dir"
                 printf '%s' "${'$'}1" > "${'$'}request_dir/tool.txt"
-                printf '%s' "${'$'}2" > "${'$'}request_dir/args.json"
+                if [[ "${'$'}2" == "-" ]]; then
+                  cat > "${'$'}request_dir/args.json"
+                else
+                  printf '%s' "${'$'}2" > "${'$'}request_dir/args.json"
+                fi
                 : > "${'$'}request_dir/ready"
                 for _ in {1..6000}; do
                   if [[ -f "${'$'}request_dir/response.txt" ]]; then

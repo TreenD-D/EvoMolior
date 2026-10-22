@@ -18,6 +18,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -75,48 +76,54 @@ class Phase10AgentChaosAcceptanceTest {
         manager.onAgentDied = { _, _ ->
             if (exitCount.incrementAndGet() == 10) allExited.complete(Unit)
         }
-        manager.spawnGeneration(
-            allocation = RoleAllocation(
-                runId = runId,
-                groupId = groupId,
-                generation = 1,
-                entries = listOf(RoleAllocationEntry(Role.Researcher, count = 10, budgetPerAgent = 10.0)),
-                totalBudgetCeiling = 100.0,
-                rationale = "Phase 10 ten-percent chaos cohort."
-            ),
-            stageDisclosure = "",
-            modelAssignments = emptyMap(),
-            modelPools = emptyMap(),
-            rolePrompts = emptyMap(),
-            scope = scope
-        )
-        repeat(10) { allStarted.receive() }
-        val liveAgents = manager.agentStates.first { it.size == 10 }
-        val killedAgentId = liveAgents.keys.sorted().first()
+        try {
+            manager.spawnGeneration(
+                allocation = RoleAllocation(
+                    runId = runId,
+                    groupId = groupId,
+                    generation = 1,
+                    entries = listOf(RoleAllocationEntry(Role.Researcher, count = 10, budgetPerAgent = 10.0)),
+                    totalBudgetCeiling = 100.0,
+                    rationale = "Phase 10 ten-percent chaos cohort."
+                ),
+                stageDisclosure = "",
+                modelAssignments = emptyMap(),
+                modelPools = emptyMap(),
+                rolePrompts = emptyMap(),
+                scope = scope
+            )
+            val killedAgentId = withTimeout(30_000) {
+                repeat(10) { allStarted.receive() }
+                val liveAgents = manager.agentStates.first { it.size == 10 }
+                val killedId = liveAgents.keys.sorted().first()
 
-        assertTrue(manager.terminateAgent(killedAgentId, "phase_10_random_10_percent_kill"))
-        assertFalse(manager.terminateAgent("missing-agent", "phase_10_missing_agent"))
-        manager.agentStates.first { it.size == 9 }
-        releaseSurvivors.complete(Unit)
-        allExited.await()
-        assertTrue(manager.agentStates.value.isEmpty())
+                assertTrue(manager.terminateAgent(killedId, "phase_10_random_10_percent_kill"))
+                assertFalse(manager.terminateAgent("missing-agent", "phase_10_missing_agent"))
+                manager.agentStates.first { it.size == 9 }
+                releaseSurvivors.complete(Unit)
+                allExited.await()
+                manager.agentStates.first { it.isEmpty() }
+                killedId
+            }
 
-        val staged = db.stagingDao().getAll(runId, groupId)
-        assertEquals(10, staged.size)
-        assertEquals(10, staged.map { it.id }.toSet().size)
-        assertTrue(staged.any { it.agentId == killedAgentId })
-        assertEquals(
-            10,
-            db.eventLogDao().getLatestByType(runId, groupId, EventTypes.AGENT_SPAWN, 20).size
-        )
-        assertEquals(
-            9,
-            db.eventLogDao().getLatestByType(runId, groupId, EventTypes.AGENT_DEATH, 20).size
-        )
-        val killedEvents = db.eventLogDao()
-            .getLatestByType(runId, groupId, EventTypes.AGENT_KILLED, 20)
-        assertEquals(1, killedEvents.size)
-        assertTrue(killedEvents.single().payloadJson.contains(killedAgentId))
-        scope.cancel()
+            val staged = db.stagingDao().getAll(runId, groupId)
+            assertEquals(10, staged.size)
+            assertEquals(10, staged.map { it.id }.toSet().size)
+            assertTrue(staged.any { it.agentId == killedAgentId })
+            assertEquals(
+                10,
+                db.eventLogDao().getLatestByType(runId, groupId, EventTypes.AGENT_SPAWN, 20).size
+            )
+            assertEquals(
+                9,
+                db.eventLogDao().getLatestByType(runId, groupId, EventTypes.AGENT_DEATH, 20).size
+            )
+            val killedEvents = db.eventLogDao()
+                .getLatestByType(runId, groupId, EventTypes.AGENT_KILLED, 20)
+            assertEquals(1, killedEvents.size)
+            assertTrue(killedEvents.single().payloadJson.contains(killedAgentId))
+        } finally {
+            scope.cancel()
+        }
     }
 }

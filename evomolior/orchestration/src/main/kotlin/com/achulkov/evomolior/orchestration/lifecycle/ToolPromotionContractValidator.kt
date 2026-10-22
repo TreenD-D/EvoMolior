@@ -5,8 +5,10 @@ import com.achulkov.evomolior.core.atlas.ToolDslProgram
 import com.achulkov.evomolior.core.atlas.ToolDslValidator
 import com.achulkov.evomolior.core.atlas.ToolImplementationMode
 import com.achulkov.evomolior.core.atlas.ToolOpportunityCommitment
+import com.achulkov.evomolior.core.atlas.TypedToolSchemaValidationCode
 import com.achulkov.evomolior.core.atlas.TypedToolSchemaCompiler
 import com.achulkov.evomolior.core.atlas.TypedToolSchemaValidator
+import com.achulkov.evomolior.core.repair.ToolRepairCode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -38,14 +40,18 @@ internal class ToolPromotionContractValidator(
         if (missingPayloadFields.isNotEmpty()) {
             return rejected(
                 "missing_payload_fields:" +
-                    missingPayloadFields.sorted().joinToString(",")
+                    missingPayloadFields.sorted().joinToString(","),
+                ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
             )
         }
         val opportunity = commitment.opportunity
         if ((payload["opportunityId"] as? JsonPrimitive)?.contentOrNull !=
             opportunity.opportunityId
         ) {
-            return rejected("opportunity_id_mismatch")
+            return rejected(
+                "opportunity_id_mismatch",
+                ToolRepairCode.SCOPE_MISMATCH
+            )
         }
         val name = (payload["name"] as? JsonPrimitive)?.contentOrNull
             ?.takeIf { it.matches(TOOL_NAME_PATTERN) }
@@ -54,13 +60,19 @@ internal class ToolPromotionContractValidator(
             ?.takeIf(String::isNotBlank)
             ?: return rejected("invalid_domain")
         val language = (payload["language"] as? JsonPrimitive)?.contentOrNull?.lowercase()
-            ?: return rejected("missing_language")
+            ?: return rejected(
+                "missing_language",
+                ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
+            )
         if (language != opportunity.preferredImplementationMode.runtimeLanguage) {
             return rejected("language_mismatch")
         }
         val submittedCode = (payload["code"] as? JsonPrimitive)?.contentOrNull
             ?.takeIf(String::isNotBlank)
-            ?: return rejected("missing_code")
+            ?: return rejected(
+                "missing_code",
+                ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
+            )
         val code = if (language == "dsl") {
             val program = runCatching {
                 json.decodeFromString(ToolDslProgram.serializer(), submittedCode)
@@ -68,14 +80,30 @@ internal class ToolPromotionContractValidator(
             ToolDslValidator.validationError(program, opportunity)?.let { reason ->
                 return rejected("dsl_validation_failed:$reason")
             }
+            if (opportunity.preferredImplementationMode == ToolImplementationMode.FORMULA_DSL) {
+                val referenceProgram = opportunity.formulaDslReferenceProgram
+                    ?: return rejected(
+                        "missing_formula_reference_program",
+                        ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
+                    )
+                if (program != referenceProgram) {
+                    return rejected("formula_reference_program_mismatch")
+                }
+            }
             json.encodeToString(ToolDslProgram.serializer(), program)
         } else {
             submittedCode
         }
         val inputSchema = payload["inputSchema"] as? JsonObject
-            ?: return rejected("missing_input_schema")
+            ?: return rejected(
+                "missing_input_schema",
+                ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
+            )
         val outputSchema = payload["outputSchema"] as? JsonObject
-            ?: return rejected("missing_output_schema")
+            ?: return rejected(
+                "missing_output_schema",
+                ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
+            )
         if (AtlasHashing.canonicalJson(inputSchema) !=
             TypedToolSchemaCompiler.compile(opportunity.requiredInputs) ||
             AtlasHashing.canonicalJson(outputSchema) !=
@@ -84,7 +112,10 @@ internal class ToolPromotionContractValidator(
             return rejected("schema_mismatch")
         }
         val testElements = payload["tests"] as? JsonArray
-            ?: return rejected("missing_tests")
+            ?: return rejected(
+                "missing_tests",
+                ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
+            )
         val tests = buildList {
             testElements.forEachIndexed { index, element ->
                 val value = element as? JsonObject
@@ -97,28 +128,62 @@ internal class ToolPromotionContractValidator(
                     )
                 }
                 val id = (value["testId"] as? JsonPrimitive)?.contentOrNull
-                    ?: return rejected("missing_test_id:$index")
+                    ?: return rejected(
+                        "missing_test_id:$index",
+                        ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
+                    )
                 val input = value["input"]
-                    ?: return rejected("missing_test_input:$index")
+                    ?: return rejected(
+                        "missing_test_input:$index",
+                        ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
+                    )
                 TypedToolSchemaValidator.validationError(input, inputSchema)?.let { reason ->
                     return rejected("test_input_invalid:$index:$reason")
                 }
                 val expectedOutput = value["expectedOutput"]
-                    ?: return rejected("missing_expected_output:$index")
+                    ?: return rejected(
+                        "missing_expected_output:$index",
+                        ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
+                    )
                 TypedToolSchemaValidator.validationError(
                     expectedOutput,
                     outputSchema
                 )?.let { reason ->
-                    return rejected("test_expected_output_invalid:$index:$reason")
+                    return rejected(
+                        "test_expected_output_invalid:$index:$reason",
+                        ToolRepairCode.PUBLIC_TEST_EXPECTED_OUTPUT_MISMATCH
+                    )
+                }
+                TypedToolSchemaValidator.canonicalOutputFailure(
+                    expectedOutput,
+                    outputSchema
+                )?.let { failure ->
+                    return rejected(
+                        "test_expected_output_invalid:$index:${failure.stableCode}",
+                        if (
+                            failure.code ==
+                            TypedToolSchemaValidationCode.NON_CANONICAL_NUMBER
+                        ) {
+                            ToolRepairCode.NON_CANONICAL_NUMBER
+                        } else {
+                            ToolRepairCode.PUBLIC_TEST_EXPECTED_OUTPUT_MISMATCH
+                        }
+                    )
                 }
                 add(ValidatedPromotionTest(id, input, expectedOutput))
             }
         }
-        if (tests.size != opportunity.promotionTestIds.size ||
-            tests.mapTo(linkedSetOf(), ValidatedPromotionTest::id) !=
-            opportunity.promotionTestIds
-        ) {
-            return rejected("tests_mismatch")
+        if (tests.isEmpty()) {
+            return rejected(
+                "missing_tests",
+                ToolRepairCode.MISSING_REQUIRED_CONTRACT_FIELD
+            )
+        }
+        if (tests.size > MAX_PUBLIC_SEMANTIC_CASES) {
+            return rejected("too_many_tests")
+        }
+        if (tests.map(ValidatedPromotionTest::id).distinct().size != tests.size) {
+            return rejected("duplicate_test_ids")
         }
         return ToolPromotionContractValidationResult.Accepted(
             ValidatedToolPromotionContract(
@@ -133,8 +198,14 @@ internal class ToolPromotionContractValidator(
         )
     }
 
-    private fun rejected(reason: String): ToolPromotionContractValidationResult.Rejected =
-        ToolPromotionContractValidationResult.Rejected("tool_promotion_contract_$reason")
+    private fun rejected(
+        reason: String,
+        repairCode: ToolRepairCode = ToolRepairCode.CONTRACT_SCHEMA_MISMATCH
+    ): ToolPromotionContractValidationResult.Rejected =
+        ToolPromotionContractValidationResult.Rejected(
+            reason = "tool_promotion_contract_$reason",
+            repairCode = repairCode
+        )
 
     private val ToolImplementationMode.runtimeLanguage: String
         get() = when (this) {
@@ -158,6 +229,7 @@ internal class ToolPromotionContractValidator(
         )
         val TEST_FIELDS = setOf("testId", "input", "expectedOutput")
         val TOOL_NAME_PATTERN = Regex("[A-Za-z0-9_.-]{1,80}")
+        const val MAX_PUBLIC_SEMANTIC_CASES = 32
     }
 }
 
@@ -190,6 +262,7 @@ internal sealed interface ToolPromotionContractValidationResult {
     ) : ToolPromotionContractValidationResult
 
     data class Rejected(
-        val reason: String
+        val reason: String,
+        val repairCode: ToolRepairCode
     ) : ToolPromotionContractValidationResult
 }

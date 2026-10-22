@@ -25,6 +25,7 @@ import com.achulkov.evomolior.api.model.FinalOutputSpec
 import com.achulkov.evomolior.api.model.RunConfig
 import com.achulkov.evomolior.api.service.GeneratedOutputFile
 import com.achulkov.evomolior.api.service.RunArchiveService
+import com.achulkov.evomolior.api.service.RunOutcomeBundleInspector
 import com.achulkov.evomolior.api.service.SealedTestSuiteEvaluator
 import com.achulkov.evomolior.api.service.compiledCouncilTestFixture
 import com.achulkov.evomolior.api.service.resolveAuthoritativeGraderRoundResult
@@ -43,6 +44,7 @@ import com.achulkov.evomolior.core.config.AcceptanceProfile
 import com.achulkov.evomolior.core.config.CouncilExecutionPurpose
 import com.achulkov.evomolior.core.config.LlmBackend
 import com.achulkov.evomolior.core.council.CouncilDeterministicIds
+import com.achulkov.evomolior.core.deliverable.RunOutcomeClass
 import com.achulkov.evomolior.sandbox.shuru.ShuruCheckResult
 import com.achulkov.evomolior.sandbox.shuru.ShuruVmManager
 import com.achulkov.evomolior.substrate.db.entity.EventLogEntryEntity
@@ -88,6 +90,60 @@ import kotlin.reflect.jvm.isAccessible
 class EvoMoliorRunServiceModeGatingTest {
 
     // ── mode contract tests ────────────────────────────────────────────────────
+
+    @Test
+    fun `coordinator construction failure remains a preactivation startup rejection`() = runTest {
+        val runId = "coordinator-preactivation-rejection"
+        val root = createTempDirectory("coordinator-preactivation-rejection-").toFile()
+        val substrateFactory =
+            com.achulkov.evomolior.substrate.SubstrateDatabaseFactory(root)
+        val service = EvoMoliorRunService(
+            lifecycleManagerProvider = { _, _, _, _, _ ->
+                error("lifecycle activation must not begin")
+            },
+            groupCoordinatorProvider = { _, _ ->
+                error("coordinator construction failed")
+            },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = substrateFactory,
+            metaPlannerRunner = MetaPlannerRunner()
+        )
+        val config = RunConfig(
+            runId = runId,
+            objective = "Reject before runtime infrastructure owns the run",
+            groupCount = 2,
+            groupProfiles = listOf(
+                com.achulkov.evomolior.core.model.GroupProfileType.Library,
+                com.achulkov.evomolior.core.model.GroupProfileType.Factory
+            ),
+            rounds = 1,
+            roundDurationMinutes = 1,
+            maxAgentsPerGroup = 1,
+            scoringDimensions = listOf(
+                ScoringDimension(
+                    id = "accuracy",
+                    name = "Accuracy",
+                    description = "Preactivation classification",
+                    weight = 1.0
+                )
+            ),
+            openRouterApiKey = "sk-test",
+            isTestRun = true
+        )
+
+        val failure = assertFailsWith<IllegalStateException> {
+            service.startRun(config)
+        }
+
+        assertTrue(failure.message.orEmpty().contains("coordinator construction failed"))
+        val rejection = assertNotNull(
+            StartupRejectionFileStore(substrateFactory::runControlDir).read(runId)
+        )
+        assertFalse(rejection.activationFlags.runStartedEmitted)
+        assertFalse(rejection.activationFlags.workerInfrastructureActivated)
+        assertFalse(rejection.activationFlags.graderInfrastructureActivated)
+        assertEquals("IDLE", service.getState().status.name)
+    }
 
     @Test
     fun `LifecycleManager with localAgentRunner reports usesInProcessMode true`() {
@@ -306,6 +362,13 @@ class EvoMoliorRunServiceModeGatingTest {
         assertFalse(rejection.activationFlags.workerInfrastructureActivated)
         assertFalse(rejection.activationFlags.graderInfrastructureActivated)
         assertEquals("IDLE", service.getState().status.name)
+        val presentation = RunOutcomeBundleInspector.inspect(
+            assertNotNull(service.getResultsBundle("acceptance-no-archive"))
+        )
+        assertEquals(RunOutcomeClass.STARTUP_DIAGNOSTIC_PACKAGE, presentation.outcomeClass)
+        assertNotNull(presentation.startupDiagnostic)
+        assertEquals(null, presentation.decisionPackage?.acceptedAuthority)
+        assertEquals(null, presentation.metrics)
     }
 
     @Test
@@ -759,9 +822,29 @@ class EvoMoliorRunServiceModeGatingTest {
     fun `council ring profile order is preserved under canonical runtime group ids`() = runTest {
         val tmpDir = createTempDirectory("svc-ring-topology-test-").toFile()
         val substrateFactory = com.achulkov.evomolior.substrate.SubstrateDatabaseFactory(tmpDir)
+        val observedProfileOrder =
+            mutableListOf<com.achulkov.evomolior.core.model.GroupProfileType>()
         val service = EvoMoliorRunService(
-            lifecycleManagerProvider = { _, _, _, _, _ ->
-                throw IllegalStateException("LifecycleManager should not be constructed after ring topology capture")
+            lifecycleManagerProvider = {
+                    runId,
+                    groupId,
+                    openRouterApiKey,
+                    agentJarPath,
+                    groupProfile ->
+                observedProfileOrder += groupProfile.profileType
+                if (observedProfileOrder.size == 2) {
+                    error("stop after ring topology capture")
+                }
+                LifecycleManager(
+                    runId = runId,
+                    groupId = groupId,
+                    shuruVmManager = ShuruVmManager(),
+                    substrateDatabaseFactory = substrateFactory,
+                    agentJarPath = agentJarPath,
+                    openRouterApiKey = openRouterApiKey,
+                    groupProfile = groupProfile,
+                    localAgentRunner = { _, _ -> }
+                )
             },
             groupCoordinatorProvider = { groupIds, dimensions ->
                 GroupCoordinator(groupIds, dimensions)
@@ -823,18 +906,14 @@ class EvoMoliorRunServiceModeGatingTest {
         val lastRunGroupIds = lastRunGroupIdsField.get(service) as List<String>
         assertEquals(2, lastRunGroupIds.size)
         assertTrue(lastRunGroupIds.all { it.startsWith("worker-group_") })
-        val activeGroupProfilesField = service.javaClass.getDeclaredField("activeGroupProfiles").apply {
-            isAccessible = true
-        }
-        @Suppress("UNCHECKED_CAST")
-        val activeGroupProfiles = activeGroupProfilesField.get(service) as List<com.achulkov.evomolior.core.model.GroupProfileType>
         assertEquals(
             listOf(
                 com.achulkov.evomolior.core.model.GroupProfileType.Factory,
                 com.achulkov.evomolior.core.model.GroupProfileType.Library
             ),
-            activeGroupProfiles
+            observedProfileOrder
         )
+        assertEquals("IDLE", service.getState().status.name)
     }
 
     @Test

@@ -3,6 +3,8 @@ package com.achulkov.evomolior.api.util
 import com.achulkov.evomolior.api.model.RunInputArtifactUpload
 import com.achulkov.evomolior.core.contract.RunInputArtifactKind
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -22,7 +24,7 @@ fun File.toRunInputArtifactUpload(bundleBasePath: Path? = null): RunInputArtifac
         }
         ?: normalizedPath.fileName?.toString()
         ?: name
-    val mimeType = detectMimeType(this)
+    val mimeType = detectMimeType(this, bytes)
     val kind = detectArtifactKind(mimeType, this)
     val textPreview = if (kind == RunInputArtifactKind.TEXT) buildTextPreview(bytes) else null
 
@@ -90,8 +92,27 @@ fun loadRunInputArtifacts(inputRoot: Path): List<RunInputArtifactUpload> {
     }
 }
 
-private fun detectMimeType(file: File): String {
+private val shellExtensions = setOf("sh", "bash", "zsh", "ksh", "dash", "fish")
+private val imageAndDocumentExtensions = setOf("png", "jpg", "jpeg", "gif", "webp", "pdf")
+
+private fun detectMimeType(file: File, bytes: ByteArray): String {
     val probed = runCatching { Files.probeContentType(file.toPath()) }.getOrNull()
+    val extension = file.extension.lowercase()
+    // Script sniffing must not override established image/document handling.
+    if (extension !in imageAndDocumentExtensions &&
+        probed?.startsWith("image/") != true && probed != "application/pdf"
+    ) {
+        val hasShebang = bytes.size >= 2 && bytes[0] == '#'.code.toByte() && bytes[1] == '!'.code.toByte()
+        if (extension in shellExtensions || hasShebang) {
+            val text = decodeScriptText(bytes)
+            val interpreter = text?.lineSequence()?.firstOrNull()
+                ?.removePrefix("#!")?.trimStart(' ', '\t')
+                ?.takeWhile { !it.isWhitespace() }
+            val isScript = text != null &&
+                (extension in shellExtensions || (interpreter?.startsWith("/") == true && interpreter.length > 1))
+            return if (isScript) "text/plain" else "application/octet-stream"
+        }
+    }
     if (!probed.isNullOrBlank()) return probed
 
     return when (file.extension.lowercase()) {
@@ -102,6 +123,16 @@ private fun detectMimeType(file: File): String {
         "gif" -> "image/gif"
         "webp" -> "image/webp"
         else -> "application/octet-stream"
+    }
+}
+
+private fun decodeScriptText(bytes: ByteArray): String? {
+    if (bytes.any { it == 0.toByte() }) return null
+    return try {
+        // The decoder reports malformed UTF-8; replacement characters would hide binary content.
+        Charsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString()
+    } catch (_: CharacterCodingException) {
+        null
     }
 }
 

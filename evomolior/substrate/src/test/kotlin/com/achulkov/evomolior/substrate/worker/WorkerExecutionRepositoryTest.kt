@@ -12,11 +12,16 @@ import com.achulkov.evomolior.core.contract.AgentExecutionPhase
 import com.achulkov.evomolior.core.contract.AgentExitRecord
 import com.achulkov.evomolior.core.contract.AgentLifecycleClassification
 import com.achulkov.evomolior.core.contract.AgentLifecycleRegistration
+import com.achulkov.evomolior.core.contract.AgentRuntimePhase
+import com.achulkov.evomolior.core.contract.AgentRuntimeState
+import com.achulkov.evomolior.core.contract.AgentRuntimeStateEvent
+import com.achulkov.evomolior.core.contract.AgentRuntimeTransitionIntent
 import com.achulkov.evomolior.core.contract.CommitType
 import com.achulkov.evomolior.core.contract.ContributionCommit
 import com.achulkov.evomolior.core.contract.DegradedExecutionRecord
 import com.achulkov.evomolior.core.contract.NodeBid
 import com.achulkov.evomolior.core.contract.NodePortfolio
+import com.achulkov.evomolior.core.contract.PersistExitResult
 import com.achulkov.evomolior.core.contract.TtlCheckpointEvent
 import com.achulkov.evomolior.core.contract.TtlCheckpointKind
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
@@ -26,6 +31,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
@@ -224,6 +230,166 @@ class WorkerExecutionRepositoryTest {
         }
     }
 
+    @Test
+    fun `exit persistence returns inserted idempotent and conflict results`() = runTest {
+        val database = database()
+        try {
+            val repository = WorkerExecutionRepository(database)
+            val persisted = exit(
+                exitId = "exit-idempotent",
+                agentId = agentId,
+                acceptedContribution = false,
+                degraded = false
+            )
+
+            val expectedHash = AtlasHashing.hashAgentExitRecord(persisted)
+            assertEquals(
+                PersistExitResult.Inserted(expectedHash),
+                repository.recordExit(persisted)
+            )
+            assertEquals(
+                PersistExitResult.AlreadyPersisted(expectedHash),
+                repository.recordExit(persisted)
+            )
+            val conflict = assertIs<PersistExitResult.Conflict>(
+                repository.recordExit(persisted.copy(wasKilled = true))
+            )
+            assertEquals(
+                AtlasHashing.hashAgentExitRecord(persisted.copy(wasKilled = true)),
+                conflict.exitRecordHash
+            )
+            assertEquals(expectedHash, conflict.persistedExitRecordHash)
+            assertEquals(listOf(persisted), repository.exits(runId, groupId.value))
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun `runtime state events append idempotently and query in immutable revision order`() = runTest {
+        val database = database()
+        try {
+            val repository = WorkerExecutionRepository(database)
+            repository.registerAgent(runtimeRegistration())
+            val registered = runtimeEvent(
+                eventId = "runtime-registered",
+                revision = 1,
+                phase = AgentRuntimePhase.REGISTERED,
+                previousStateHash = null
+            )
+            val running = runtimeEvent(
+                eventId = "runtime-running",
+                revision = 2,
+                phase = AgentRuntimePhase.RUNNING,
+                previousStateHash = registered.state.stateHash
+            )
+
+            assertEquals(registered, repository.appendRuntimeStateEvent(registered))
+            assertEquals(registered, repository.appendRuntimeStateEvent(registered))
+            assertEquals(running, repository.appendRuntimeStateEvent(running))
+            assertEquals(
+                listOf(registered, running),
+                repository.runtimeStateEvents(runId, groupId.value, agentId.value, 1)
+            )
+
+            val mutatedIdentity = registered.copy(
+                state = registered.state.copy(budgetRemaining = 9.0, stateHash = "")
+                    .withComputedHash(),
+                eventHash = ""
+            ).withComputedHash()
+            assertFailsWith<IllegalArgumentException> {
+                repository.appendRuntimeStateEvent(mutatedIdentity)
+            }
+
+            val conflictingRevision = runtimeEvent(
+                eventId = "runtime-running-conflict",
+                revision = 2,
+                phase = AgentRuntimePhase.TERMINATION_REQUESTED,
+                previousStateHash = registered.state.stateHash
+            )
+            assertFailsWith<IllegalArgumentException> {
+                repository.appendRuntimeStateEvent(conflictingRevision)
+            }
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun `runtime state event append rejects invalid hashes and broken chains`() = runTest {
+        val database = database()
+        try {
+            val repository = WorkerExecutionRepository(database)
+            repository.registerAgent(runtimeRegistration())
+            val first = runtimeEvent(
+                eventId = "runtime-first",
+                revision = 1,
+                phase = AgentRuntimePhase.REGISTERED,
+                previousStateHash = null
+            )
+            assertFailsWith<IllegalArgumentException> {
+                repository.appendRuntimeStateEvent(first.copy(eventHash = "invalid"))
+            }
+            assertFailsWith<IllegalArgumentException> {
+                repository.appendRuntimeStateEvent(
+                    runtimeEvent(
+                        eventId = "runtime-skipped",
+                        revision = 2,
+                        phase = AgentRuntimePhase.RUNNING,
+                        previousStateHash = first.state.stateHash
+                    )
+                )
+            }
+
+            repository.appendRuntimeStateEvent(first)
+            assertFailsWith<IllegalArgumentException> {
+                repository.appendRuntimeStateEvent(
+                    runtimeEvent(
+                        eventId = "runtime-broken-link",
+                        revision = 2,
+                        phase = AgentRuntimePhase.RUNNING,
+                        previousStateHash = "wrong-previous-state"
+                    )
+                )
+            }
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun `runtime state events require the exact registered lifecycle generation`() = runTest {
+        val database = database()
+        try {
+            val repository = WorkerExecutionRepository(database)
+            assertFailsWith<IllegalArgumentException> {
+                repository.appendRuntimeStateEvent(
+                    runtimeEvent(
+                        eventId = "runtime-unregistered",
+                        revision = 1,
+                        phase = AgentRuntimePhase.REGISTERED,
+                        previousStateHash = null
+                    )
+                )
+            }
+
+            repository.registerAgent(runtimeRegistration(generation = 1))
+            assertFailsWith<IllegalArgumentException> {
+                repository.appendRuntimeStateEvent(
+                    runtimeEvent(
+                        eventId = "runtime-wrong-generation",
+                        revision = 1,
+                        phase = AgentRuntimePhase.REGISTERED,
+                        previousStateHash = null,
+                        generation = 2
+                    )
+                )
+            }
+        } finally {
+            database.close()
+        }
+    }
+
     private fun database() = SubstrateDatabaseFactory(
         createTempDirectory("worker-execution-repository-").toFile()
     ).get(runId, groupId.value)
@@ -312,6 +478,52 @@ class WorkerExecutionRepositoryTest {
         phase = phase,
         occurredAt = Instant.parse("2026-07-11T10:00:00Z")
     )
+
+    private fun runtimeEvent(
+        eventId: String,
+        revision: Long,
+        phase: AgentRuntimePhase,
+        previousStateHash: String?,
+        generation: Int = 1
+    ): AgentRuntimeStateEvent {
+        val state = AgentRuntimeState(
+            runId = runId,
+            groupId = groupId,
+            agentId = agentId,
+            generation = generation,
+            phase = phase,
+            revision = revision,
+            budgetRemaining = 10.0,
+            registrationRecorded = true
+        ).withComputedHash()
+        return AgentRuntimeStateEvent(
+            eventId = eventId,
+            runId = runId,
+            groupId = groupId,
+            agentId = agentId,
+            generation = generation,
+            revision = revision,
+            intent = if (revision == 1L) {
+                AgentRuntimeTransitionIntent.REGISTER_AGENT
+            } else {
+                AgentRuntimeTransitionIntent.START_EXECUTION
+            },
+            previousStateHash = previousStateHash,
+            state = state,
+            occurredAt = Instant.parse("2026-07-11T10:00:0${revision}Z")
+        ).withComputedHash()
+    }
+
+    private fun runtimeRegistration(generation: Int = 1) = AgentLifecycleRegistration(
+        registrationId = "runtime-registration-$generation",
+        runId = runId,
+        groupId = groupId,
+        agentId = agentId,
+        role = "Runtime worker",
+        generation = generation,
+        classification = AgentLifecycleClassification.NON_DAEMON,
+        registeredAt = Instant.parse("2026-07-11T09:59:00Z")
+    ).withComputedHash()
 
     private fun exit(
         exitId: String,

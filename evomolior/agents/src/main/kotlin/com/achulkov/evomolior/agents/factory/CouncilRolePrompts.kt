@@ -15,6 +15,7 @@ import com.achulkov.evomolior.core.atlas.ToolOpportunityType
 import com.achulkov.evomolior.core.atlas.TypedFieldType
 import com.achulkov.evomolior.core.config.AcceptanceProfile
 import com.achulkov.evomolior.core.council.ExecutionEnvelope
+import com.achulkov.evomolior.core.council.compileCouncilToolOpportunityAuthority
 import com.achulkov.evomolior.core.model.Role
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -65,11 +66,24 @@ object CouncilRolePrompts {
             - Treat relatedNodeContracts and generatedToolSchemas, when supplied, as immutable
               repair authority. invalidOutput is diagnostic only and must never be copied, merged,
               or treated as a partial object.
+            - Treat dependencyOutputs as immutable cross-role authority. When a dependency is
+              present, make this output conjunctively compatible with its exact typed values.
+            - Treat quantitativeToolContractAuthority, when supplied, as copy-ready immutable
+              Task Anatomist provider-wire authority. Transplant every included property exactly
+              into one complete toolOpportunity; never substitute easier schema branches.
             - Treat all repairRequest.errors as one conjunctive repair set. Fix every reported
               defect in the same complete replacement; never alternate between partial fixes.
             - A repair response must never be a patch, partial object, alternate schema, or prose.
 
-            ${acceptanceProfileContract(role, envelope.acceptanceProfile)}
+            ${acceptanceProfileContract(role, envelope)}
+
+            ${if (role == Role.CouncilTaskAnatomist) {
+                quantitativeToolObligationContract(envelope)
+            } else if (role == Role.CouncilSynthesis) {
+                quantitativePromotionFixtureContract(envelope)
+            } else {
+                ""
+            }}
 
             ${contractFor(role)}
         """.trimIndent()
@@ -77,18 +91,18 @@ object CouncilRolePrompts {
 
     private fun acceptanceProfileContract(
         role: Role,
-        profile: AcceptanceProfile
+        envelope: ExecutionEnvelope
     ): String = when {
-        profile == AcceptanceProfile.NORMAL -> ""
+        envelope.acceptanceProfile == AcceptanceProfile.NORMAL -> ""
         role == Role.CouncilTaskAnatomist &&
-            profile == AcceptanceProfile.RUNTIME_USABILITY_SMOKE -> """
+            envelope.acceptanceProfile == AcceptanceProfile.RUNTIME_USABILITY_SMOKE -> """
                 ACCEPTANCE PROFILE: RUNTIME_USABILITY_SMOKE
                 Emit exactly one disclosure-stage key across all nodes. Every node must include
                 `toolOpportunity` with the literal JSON value null. Do not declare reusable tools,
                 promotion tests, or expected reuse. Declare at least one executable GENERAL test.
             """.trimIndent()
         role == Role.CouncilTaskAnatomist &&
-            profile == AcceptanceProfile.APPENDIX_B_FULL -> """
+            envelope.acceptanceProfile == AcceptanceProfile.APPENDIX_B_FULL -> """
                 ACCEPTANCE PROFILE: APPENDIX_B_FULL
                 The provider wire replaces `nodes` with two required arrays:
                 `nodesWithoutToolOpportunity` and `nodesWithToolOpportunity`. Every entry carries
@@ -99,23 +113,96 @@ object CouncilRolePrompts {
                 tests, a distinct executable validation node, a later independent expected-reuse
                 node schedulable inside rounds 0..5, and a DAG path from reuse into later evidence,
                 integration, decision, or final-deliverable authority.
+                The later generic ROLE CONTRACT examples use `nodes` only to explain semantic node
+                contents. They are not a valid full-profile top-level wire. Never emit a `nodes`
+                property for APPENDIX_B_FULL; transpose every example entry into exactly one of
+                the two ordinal-bearing partition arrays above.
             """.trimIndent()
         role == Role.CouncilSynthesis &&
-            profile == AcceptanceProfile.RUNTIME_USABILITY_SMOKE -> """
+            envelope.acceptanceProfile == AcceptanceProfile.RUNTIME_USABILITY_SMOKE -> """
                 ACCEPTANCE PROFILE: RUNTIME_USABILITY_SMOKE
                 Emit exactly one disclosure stage and at least one GENERAL sealed test. Promotion
                 authority is forbidden.
             """.trimIndent()
         role == Role.CouncilSynthesis &&
-            profile == AcceptanceProfile.APPENDIX_B_FULL -> """
+            envelope.acceptanceProfile == AcceptanceProfile.APPENDIX_B_FULL -> """
                 ACCEPTANCE PROFILE: APPENDIX_B_FULL
                 Emit at least two ordered disclosure stages and exact PROMOTION sealed tests for
                 every Task-authored opportunity. Preserve the fixed six-round scheduling authority.
             """.trimIndent()
         else -> """
-            ACCEPTANCE PROFILE: ${profile.name}
+            ACCEPTANCE PROFILE: ${envelope.acceptanceProfile.name}
             Obey the explicit acceptance profile in the execution envelope without inferring or
             weakening it.
+        """.trimIndent()
+    }
+
+    private fun quantitativeToolObligationContract(envelope: ExecutionEnvelope): String {
+        val obligation = envelope.quantitativeToolObligation ?: return """
+            No operator-owned quantitativeToolObligation is present. Do not infer exact field
+            names, units, aggregation semantics, or horizon cardinality from objective prose.
+        """.trimIndent()
+        val providerAuthority = obligation.compileCouncilToolOpportunityAuthority()
+        return """
+            OPERATOR-OWNED QUANTITATIVE TOOL CONTRACT
+            One and the same `toolOpportunity` must satisfy every field role in this exact
+            immutable authority:
+            ${json.encodeToString(obligation)}
+
+            COPY-READY TASK ANATOMIST TOOL-OPPORTUNITY AUTHORITY
+            The following JSON is an exact fragment of the one complete `toolOpportunity` that
+            must carry this contract:
+            ${json.encodeToString(providerAuthority)}
+
+            Copy every property and nested value from that fragment exactly. Its requiredInputs
+            and requiredOutputs arrays are complete: do not add, omit, rename, reorder, simplify,
+            or change the type branch of any field. In particular, never replace a numeric field
+            with BOOLEAN or BOOLEAN_ITEMS and never omit physicalDimension or quantitySpec. During
+            repair, delete every conflicting prior field object and replace it with the exact
+            copy-ready object instead of preserving malformed previousOutput bytes.
+
+            Opportunity-level authority is exact when present:
+            - `requiredOpportunityId` must be copied exactly into `opportunityId`.
+            - A non-empty `exactPromotionTestIds` is the complete promotionTestIds set; do not add,
+              omit, rename, or substitute tests.
+            - A non-empty `exactPromotionFixtures` is immutable operator-owned sealed-test
+              authority. Council synthesis must copy each testId, input, and expectedOutput
+              exactly into the matching PROMOTION definition; never paraphrase or regenerate it.
+            - `maximumOpportunityRuntimeMillis` is an inclusive ceiling for
+              `maximumRuntimeMillis`; a smaller positive bound is allowed.
+
+            For each `requiredFields` entry:
+            - Copy `fieldName` exactly into one top-level field on the declared `location`;
+              INPUT means `requiredInputs`, OUTPUT means `requiredOutputs`. Do not nest, rename,
+              combine, or substitute fields.
+            - The field is required. SCALAR uses the exact `numericType`. HORIZON_SERIES uses
+              ARRAY with `items.type` equal to the numeric type's `_ITEMS` discriminator and both
+              minimumItems and maximumItems equal to `horizonIntervalCount`.
+            - Copy `quantitySpec.dimension` exactly into `physicalDimension`, and copy the complete
+              `quantitySpec` exactly. Do not infer unit aliases, scales, aggregation, or time basis.
+            - On INTEGER or NUMBER fields, `physicalDimension` and `quantitySpec` are siblings of
+              name/type/description/required/validationRules. On numeric ARRAY fields, both belong
+              inside `items`; they are not properties of the outer ARRAY object.
+
+            The closed quantitySpec shape is:
+            {"dimension":{"exponents":[{"key":"...","value":1}]},"unitId":"...",
+             "scaleToSi":1.0,"aggregation":"INSTANTANEOUS","timeBasis":null}
+            Interval aggregations PER_INTERVAL_RATE, SUM_OVER_INTERVALS, and
+            AVERAGE_OVER_INTERVALS require a non-null timeBasis. INSTANTANEOUS and MAXIMUM require
+            `timeBasis:null`. Preserve the exact value from the obligation.
+        """.trimIndent()
+    }
+
+    private fun quantitativePromotionFixtureContract(envelope: ExecutionEnvelope): String {
+        val fixtures = envelope.quantitativeToolObligation
+            ?.exactPromotionFixtures
+            .orEmpty()
+        if (fixtures.isEmpty()) return ""
+        return """
+            OPERATOR-OWNED PROMOTION FIXTURE CONTRACT
+            Emit one PROMOTION sealed test for every entry below. Copy each testId, input, and
+            expectedOutput exactly; do not derive, paraphrase, replace, or add fixture values:
+            ${json.encodeToString(fixtures)}
         """.trimIndent()
     }
 
@@ -139,7 +226,9 @@ object CouncilRolePrompts {
         reference must resolve. Do not add fields that are absent from the exact JSON contract.
         Across all nodes, use no more than executionEnvelope.maximumRounds distinct stageKey
         values. A two-round envelope therefore requires at most two stage keys, regardless of how
-        many nodes exist. Every executable and promotion test ID is globally unique across nodes.
+        many nodes exist. Declare at least one executable or promotion test ID across the field;
+        an empty test authority cannot activate a run. Every executable and promotion test ID is
+        globally unique across nodes.
         The same ID may appear in executableTestIds and promotionTestIds only when both fields
         belong to the same tool-authoring node; a separate validation node needs distinct IDs.
         A toolOpportunity is non-null only on the node that authors the reusable tool or simulator.
@@ -188,7 +277,11 @@ object CouncilRolePrompts {
         bindings exactly equal requiredOutputs, and whose expression tree type-checks against
         requiredInputs. Every
         NUMBER or INTEGER scalar and every ARRAY whose `items.type` is NUMBER_ITEMS or
-        INTEGER_ITEMS in requiredInputs and requiredOutputs must provide physicalDimension. Use
+        INTEGER_ITEMS in requiredInputs and requiredOutputs must provide physicalDimension.
+        Numeric fields may also carry quantitySpec. Its closed properties are dimension, unitId,
+        scaleToSi, aggregation, and nullable timeBasis; quantitySpec.dimension must exactly equal
+        physicalDimension. On numeric ARRAY fields, quantitySpec belongs inside `items` alongside
+        physicalDimension. Use
         {"exponents":[]} for an explicitly dimensionless value. The canonical base-dimension
         identifiers are length, mass, time, temperature, electric_current, amount,
         luminous_intensity, angle, information, currency, count, and power; exponent entries omit
@@ -527,7 +620,11 @@ object CouncilRolePrompts {
     private fun kgArchitectContract(): String = """
         ROLE CONTRACT: KgArchitectOutput
         Relation aliases must target declared canonical relation IDs. Every node mapping key must
-        be a Task Anatomist node key, and every mapped type/relation ID must exist.
+        be a Task Anatomist node key, and every mapped type/relation ID must exist. When
+        dependencyOutputs contains CouncilSeedCurator, every seed fact relation must be either an
+        exact declared relation ID or a distinct alias key whose value is an exact declared
+        relation ID. Preserve valid canonical relations and add the smallest compatible relation
+        or alias; never emit a self-alias or remove authority used by another seed fact.
 
         {
           "schemaVersion":"node-atlas-v1",
@@ -550,6 +647,9 @@ object CouncilRolePrompts {
         available and must not repeat the primary model. Never assign a Council* role: Council
         roles are transient compiler-front-end roles, not runtime roles. Every operator override
         named model.<Role> is mandatory and its primaryModelId must equal the exact override value.
+        dependencyOutputs contains the exact Ecologist and PromptArchitect authorities: assign
+        every prompted runtime role and ensure each declared worker/grader family preference has
+        a matching assignment in that population.
 
         {
           "assignments":[{
@@ -566,7 +666,11 @@ object CouncilRolePrompts {
     private fun seedCuratorContract(): String = """
         ROLE CONTRACT: SeedCuratorOutput
         Keep Stage 0 minimal. Calibration artifacts and dead ends are grader/control material and
-        must not reveal future-node payloads to workers. Artifact sha256 values commit exact content.
+        must not reveal future-node payloads to workers. Artifact sha256 values commit exact
+        content. dependencyOutputs contains the exact KgArchitect authority. Every
+        primordialKgFacts relation must equal an exact declared canonical relation ID or exact
+        distinct alias key from that authority; prefer the canonical relation ID and never invent
+        a relation from natural-language semantics.
 
         {
           "primordialKb":[{"id":"seed-1","content":"...","domain":"general"}],
@@ -646,6 +750,12 @@ object CouncilRolePrompts {
         satisfy every required output field and bound. Wrong tagged roots, duplicate object-entry
         keys, omitted required properties, additional properties, wrong primitive kinds, enum
         mismatches, and invalid array cardinalities fail strict decoding before compilation. For
+        every implementation mode, encode each expectedOutput field declared as NUMBER with the
+        exact finite JVM `Double.toString()` JSON token (for example 500.0, 2.5, 1.0E-7, or -0.0;
+        never 500, 2.50, 1e-7, or 1.00E-7). INTEGER fields use integer tokens. This public
+        schema-directed representation is mandatory because sealed authority stores NUMBER values
+        as finite Doubles and promotion comparison performs no numeric coercion or private-fixture
+        repair. For
         FORMULA_DSL, compute expectedOutput by
         executing the Council-authored formulaDslReferenceProgram under the committed production
         semantics. Preserve exact JSON numeric representation: an output emitted as 500.0 must be

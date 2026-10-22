@@ -26,19 +26,28 @@ import com.achulkov.evomolior.agents.tools.ReadKBTool
 import com.achulkov.evomolior.agents.tools.ReadKGTool
 import com.achulkov.evomolior.agents.tools.ReadMessagesTool
 import com.achulkov.evomolior.agents.tools.ReadRunArtifactTool
+import com.achulkov.evomolior.agents.tools.ReportSourceAdvisory
+import com.achulkov.evomolior.agents.tools.ReportSourceInputs
 import com.achulkov.evomolior.agents.tools.RequestSourceAccessTool
 import com.achulkov.evomolior.agents.tools.SearchKBTool
 import com.achulkov.evomolior.agents.tools.SendMessageTool
 import com.achulkov.evomolior.agents.tools.WriteDeathNoteTool
 import com.achulkov.evomolior.agents.tools.WriteStagingTool
+import com.achulkov.evomolior.agents.tools.AssignedToolSubmissionAuthority
 import com.achulkov.evomolior.agents.tools.ProposeNoveltyVectorTool
+import com.achulkov.evomolior.agents.tools.ToolAuthoringRuntime
+import com.achulkov.evomolior.agents.tools.ToolAuthoringWorkspaceTool
 import com.achulkov.evomolior.sandbox.network.ContentSanitiser
 import com.achulkov.evomolior.agents.runner.DeathNoteProtocol
+import com.achulkov.evomolior.agents.runner.expectedAgentStopReason
 import com.achulkov.evomolior.core.budget.BudgetConfig
 import com.achulkov.evomolior.core.budget.BudgetDeduction
 import com.achulkov.evomolior.core.budget.BudgetLedger
 import com.achulkov.evomolior.core.config.LlmBackend
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
+import com.achulkov.evomolior.core.config.CodexRuntimePreset
 import com.achulkov.evomolior.core.atlas.AtlasGroupId
+import com.achulkov.evomolior.core.atlas.AtlasHashing
 import com.achulkov.evomolior.core.atlas.ToolExecutionPurpose
 import com.achulkov.evomolior.core.atlas.ToolValidationExecutionAuthority
 import com.achulkov.evomolior.core.atlas.ToolVersionId
@@ -92,6 +101,8 @@ import java.util.UUID
  *
  * @param openRouterApiKey API key for the selected [llmBackend].
  * @param llmBackend Backend used for model resolution and prompt execution.
+ * @param codexReasoningEffort Maximum operator-approved Codex reasoning effort.
+ * @param codexRuntimePreset Optional role effort policy; null preserves the configured effort.
  * @param db The Room database for the current (runId, groupId).
  * @param toolSubSandbox The sub-sandbox for tool execution.
  * @param budgetConfig The group's budget configuration.
@@ -101,6 +112,7 @@ import java.util.UUID
 class EvoMoliorAgentFactory(
     private val openRouterApiKey: String,
     private val llmBackend: LlmBackend = LlmBackend.OPENROUTER,
+    private val codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     private val db: EvoMoliorDatabase,
     private val toolSubSandbox: ToolSubSandbox,
     private val budgetConfig: BudgetConfig,
@@ -114,10 +126,13 @@ class EvoMoliorAgentFactory(
         TaskToolCapabilityPolicy.unrestricted,
     private val toolSubmissionPreflight:
         suspend (StagingSubmissionEntity) -> String? = { null },
-    qwenToolSupportEnabled: Boolean = LlmBackendToolSupportPolicy.isQwenToolSupportEnabledByEnvironment()
+    qwenToolSupportEnabled: Boolean = LlmBackendToolSupportPolicy.isQwenToolSupportEnabledByEnvironment(),
+    private val codexRuntimePreset: CodexRuntimePreset? = null
 ) {
     private companion object {
         const val DEFAULT_RUN_ROOT_WIP_REF = "dst:root"
+        val TOOL_CONTRIBUTION_STATUSES = setOf("pending", "promoted")
+        val PUBLIC_TOOL_FAILURE_CODE = Regex("[a-z0-9_]{1,96}")
     }
 
     private val backendToolSupport = LlmBackendToolSupportPolicy.resolve(
@@ -128,6 +143,9 @@ class EvoMoliorAgentFactory(
     internal fun shouldInstallDelegationTool(bootContext: AgentBootContext): Boolean =
         bootContext.role.canDelegateToSubAgents && !bootContext.isSubAgent
 
+    internal fun codexReasoningEffortFor(role: Role): CodexReasoningEffort =
+        codexRuntimePreset?.reasoningEffort(role, codexReasoningEffort) ?: codexReasoningEffort
+
     /**
      * Creates an [AgentContext] containing a Koog [AIAgent] and its [BudgetLedger].
      *
@@ -137,13 +155,22 @@ class EvoMoliorAgentFactory(
      * @param deathNoteProtocol Optional [DeathNoteProtocol] for in-process agent runs.
      *   When provided, [WriteDeathNoteTool] will call [DeathNoteProtocol.markDeathNoteWritten]
      *   so the grace-period hard-kill timer is cancelled on successful Death Note write.
+     * @param toolAuthoringRuntime Optional lifecycle-local generated workspace and compiler.
      * @return An [AgentContext] ready to run.
      */
     fun create(
         bootContext: AgentBootContext,
         existingBudgetLedger: BudgetLedger? = null,
-        deathNoteProtocol: DeathNoteProtocol? = null
+        deathNoteProtocol: DeathNoteProtocol? = null,
+        toolAuthoringRuntime: ToolAuthoringRuntime? = null
     ): AgentContext {
+        if (llmBackend == LlmBackend.CODEX_CHATGPT) {
+            codexRuntimePreset?.let { preset ->
+                require(bootContext.modelAssignment in preset.supportedModelIds) {
+                    "Agent model exceeds the selected Codex preset"
+                }
+            }
+        }
         // Prefer the exact budget allocated by the EvolutionarySelector (bootContext.allocatedBudget).
         // Fall back to the profile's spawn budget only when no allocation was carried
         // (e.g. direct factory construction in tests or older callers).
@@ -159,8 +186,28 @@ class EvoMoliorAgentFactory(
         )
 
         val systemPrompt = buildBackendAdjustedSystemPrompt(bootContext)
+        val sourceAdvisory = reportSourceAdvisory(bootContext)
         val isOutlier = bootContext.role.name == "Outlier"
         val defaultWipTaskRef = bootContext.wipTaskClaim?.nodeId ?: DEFAULT_RUN_ROOT_WIP_REF
+        val workerView = bootContext.workerView
+        val assignedToolAuthority = workerView
+            ?.assignedToolSkeleton
+            ?.let { skeleton ->
+                val assignedNode = requireNotNull(workerView.assignedNode)
+                val opportunity = requireNotNull(assignedNode.toolOpportunity)
+                AssignedToolSubmissionAuthority(
+                    nodeId = assignedNode.nodeId.value,
+                    opportunityId = opportunity.opportunityId,
+                    opportunityCommitmentHash = skeleton.opportunityCommitmentHash
+                )
+            }
+        require(
+            toolAuthoringRuntime == null ||
+                assignedToolAuthority?.opportunityCommitmentHash ==
+                toolAuthoringRuntime.workspace.opportunityCommitmentHash
+        ) {
+            "Tool authoring workspace does not match assigned worker authority"
+        }
         val actionGate = constitutionalActionGate(bootContext)
         val providerCostRecorder = ProviderCallCostRecorder(
             repository = costLedgerRepository,
@@ -297,9 +344,23 @@ class EvoMoliorAgentFactory(
                         defaultWipTaskRef = defaultWipTaskRef,
                         isOutlier = isOutlier,
                         actionGate = actionGate,
-                        toolSubmissionPreflight = toolSubmissionPreflight
+                        requireAssignedToolAuthority = bootContext.role.isOrdinaryWorkerRole,
+                        assignedToolAuthority = assignedToolAuthority,
+                        toolCandidateWireCompiler =
+                            toolAuthoringRuntime?.compileCandidate,
+                        toolSubmissionPreflight = toolSubmissionPreflight,
+                        docSourceCheck = sourceAdvisory?.let { it::check }
                     )
                 )
+                toolAuthoringRuntime?.let { runtime ->
+                    tool(
+                        ToolAuthoringWorkspaceTool(
+                            runtime = runtime,
+                            agentId = bootContext.agentId,
+                            actionGate = actionGate
+                        )
+                    )
+                }
                 tool(
                     WriteDeathNoteTool(
                         stagingDao = db.stagingDao(),
@@ -442,6 +503,7 @@ class EvoMoliorAgentFactory(
             codexToolRegistry = toolRegistry,
             codexActionGate = actionGate,
             codexAgentId = bootContext.agentId,
+            codexReasoningEffort = codexReasoningEffortFor(bootContext.role),
             codexNativeSearchEnabled = taskToolCapabilityPolicy.allows(
                 TaskToolCapabilityPolicy.CODEX_NATIVE_SEARCH
             )
@@ -498,10 +560,17 @@ class EvoMoliorAgentFactory(
                     )
                 }
                 config.onAgentExecutionFailed { ctx ->
-                    io.github.aakira.napier.Napier.e(
-                        "Koog[$roleName/$agentId] agent FAILED: ${ctx.error.message}",
-                        ctx.error
-                    )
+                    val stopReason = expectedAgentStopReason(ctx.error)
+                    if (stopReason != null) {
+                        io.github.aakira.napier.Napier.i(
+                            "Koog[$roleName/$agentId] agent stopped by lifecycle: $stopReason"
+                        )
+                    } else {
+                        io.github.aakira.napier.Napier.e(
+                            "Koog[$roleName/$agentId] agent FAILED: ${ctx.error.message}",
+                            ctx.error
+                        )
+                    }
                 }
                 config.onToolCallStarting { ctx ->
                     actionGate.intercept(
@@ -807,8 +876,11 @@ class EvoMoliorAgentFactory(
                 it.type == SubmissionType.KG_CONSTRAINT.name ||
                 it.content.contains("KG ABSTENTION RATIONALE", ignoreCase = true)
         }
+        val rejectedToolSubmissions = agentSubmissions.filter {
+            it.type == SubmissionType.TOOL.name && it.status == "rejected"
+        }
         val wroteToolArtifact = agentSubmissions.any {
-            it.type == SubmissionType.TOOL.name ||
+            (it.type == SubmissionType.TOOL.name && it.status in TOOL_CONTRIBUTION_STATUSES) ||
                 it.content.contains("TOOL ABSTENTION RATIONALE", ignoreCase = true)
         } || actionLog.any { deduction ->
             deduction.actionType == ActionType.TOOL_EXEC_SUCCESS ||
@@ -828,16 +900,29 @@ class EvoMoliorAgentFactory(
             written += 1
         }
         if (!wroteToolArtifact) {
+            val rejectedToolSubmission = rejectedToolSubmissions.lastOrNull()
             writeSubstrateContractFallback(
                 bootContext = bootContext,
                 heading = "TOOL ABSTENTION RATIONALE",
-                reason = "Runtime-enforced abstention: the agent finished without submitting a tool, " +
+                reason = rejectedToolSubmission?.let { rejected ->
+                    "Runtime-enforced repair required: the agent's TOOL submission was rejected. " +
+                        "submissionId=${rejected.id}; " +
+                        publicToolPreflightFailure(rejected.rejectionReason)
+                } ?: "Runtime-enforced abstention: the agent finished without submitting a tool, " +
                     "executing a reusable tool, or writing its own tool abstention rationale.",
-                finalResult = finalResult
+                finalResult = if (rejectedToolSubmission == null) finalResult else ""
             )
             written += 1
         }
         return written
+    }
+
+    private fun publicToolPreflightFailure(reason: String?): String {
+        val exactReason = reason.orEmpty().ifBlank { "tool_preflight_rejected" }
+        val candidateCode = exactReason.substringBefore(':').trim()
+        val reasonCode = candidateCode.takeIf(PUBLIC_TOOL_FAILURE_CODE::matches)
+            ?: "tool_preflight_rejected"
+        return "reasonCode=$reasonCode; reasonHash=${AtlasHashing.hashText(exactReason)}"
     }
 
     suspend fun recordModelCompletionAttempt(
@@ -1105,6 +1190,15 @@ class EvoMoliorAgentFactory(
             )
         }
     }
+
+    internal fun reportSourceAdvisory(bootContext: AgentBootContext): ReportSourceAdvisory? =
+        if (taskToolCapabilityPolicy.allows(TaskToolCapabilityPolicy.READ_RUN_ARTIFACT)) {
+            ReportSourceAdvisory {
+                ReportSourceInputs.load(bootContext.inputArtifacts, bootContext.artifactsMountPath)
+            }
+        } else {
+            null
+        }
 
     internal fun constitutionalActionGate(bootContext: AgentBootContext): ConstitutionalActionGate =
         databaseConstitutionalActionGate(

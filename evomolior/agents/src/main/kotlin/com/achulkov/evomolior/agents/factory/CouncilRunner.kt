@@ -35,7 +35,8 @@ import kotlin.time.Duration
  * @param executionEnvelope Runtime constraints embedded in every Council role prompt.
  * @param llmBackend Backend used for council model resolution and prompt execution.
  * @param councilModelId The LLM model to use for all council agents. Defaults to the shared
- *   cost-conscious council model from [ModelSelectionConfig].
+ *   cost-conscious council model from [ModelSelectionConfig]. An explicit Codex envelope preset
+ *   supplies its council model instead.
  * @param codexExecutionTimeout Maximum for each Codex process attempt.
  * @param structuredOutputDiagnosticRoot Optional owner-only directory for bounded Codex schema
  *   and invalid-response evidence.
@@ -106,10 +107,24 @@ class CouncilRunner private constructor(
         promptExecutor ?: LlmExecutorFactory.create(
             backend = llmBackend,
             apiKey = openRouterApiKey,
+            // Every council role shares the preset's HIGH tier, bounded by the envelope cap.
+            codexReasoningEffort = codexReasoningEffortFor(Role.CouncilTaskAnatomist),
             codexExecutionTimeout = codexExecutionTimeout,
             codexStructuredOutputDiagnosticRoot = structuredOutputDiagnosticRoot
         )
     }
+
+    internal fun codexReasoningEffortFor(role: Role): CodexReasoningEffort =
+        executionEnvelope.codexRuntimePreset
+            ?.reasoningEffort(role, executionEnvelope.codexReasoningEffort)
+            ?: executionEnvelope.codexReasoningEffort
+
+    internal fun councilModelFor(role: Role): LLModel = resolveModel(
+        executionEnvelope.codexRuntimePreset
+            ?.takeIf { llmBackend == LlmBackend.CODEX_CHATGPT }
+            ?.defaultModel(role)
+            ?: councilModelId
+    )
 
     /**
      * Returns a suspend function compatible with `GenesisCouncil.run`.
@@ -139,7 +154,7 @@ class CouncilRunner private constructor(
         }
 
         val systemPrompt = CouncilRolePrompts.forRole(role, executionEnvelope)
-        val model: LLModel = resolveModel(councilModelId)
+        val model: LLModel = councilModelFor(role)
 
         Napier.i("CouncilRunner: spawning ${role.name} agent")
 
@@ -147,7 +162,11 @@ class CouncilRunner private constructor(
             val roleSchema = CouncilRoleSchemas.forRole(
                 role = role,
                 synthesisAuthority = request.synthesisWireAuthority,
-                acceptanceProfile = request.acceptanceProfile
+                acceptanceProfile = request.acceptanceProfile,
+                quantitativeToolObligation =
+                    executionEnvelope.quantitativeToolObligation.takeIf {
+                        role == Role.CouncilTaskAnatomist
+                    }
             )
             val schemaDocument = CodexOutputSchemaDocument.from(roleSchema)
             val schemaFailures = structuredOutputSchemaValidator(schemaDocument)

@@ -482,7 +482,7 @@ class ExecuteToolTool(
                 subjectType = subjectType,
                 subjectId = executionId,
                 kind = CostLedgerEntryKind.RESERVED,
-                reservedMaximumUsd = null,
+                reservedMaximumUsd = 0.0,
                 occurredAt = Instant.fromEpochMilliseconds(nowEpochMillis())
             ).withComputedHash()
         )
@@ -507,7 +507,7 @@ class ExecuteToolTool(
                 subjectType = subjectType,
                 subjectId = executionId,
                 kind = CostLedgerEntryKind.FINALIZED,
-                toolCost = MonetaryAmount(MonetaryAmountStatus.UNKNOWN),
+                toolCost = MonetaryAmount(MonetaryAmountStatus.KNOWN, 0.0),
                 toolComputeMillis = elapsedMillis,
                 wallTimeMillis = elapsedMillis,
                 occurredAt = completedAt

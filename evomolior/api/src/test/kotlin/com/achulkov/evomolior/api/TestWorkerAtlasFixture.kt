@@ -9,10 +9,12 @@ import com.achulkov.evomolior.core.atlas.DisclosureStage
 import com.achulkov.evomolior.core.atlas.EvidenceKind
 import com.achulkov.evomolior.core.atlas.EvidenceProfile
 import com.achulkov.evomolior.core.atlas.FinalOutputSpec
+import com.achulkov.evomolior.core.atlas.GradeVerdict
 import com.achulkov.evomolior.core.atlas.LimitationNode
 import com.achulkov.evomolior.core.atlas.NodeAtlas
 import com.achulkov.evomolior.core.atlas.NodeDeliverableContract
 import com.achulkov.evomolior.core.atlas.NodeExecutionState
+import com.achulkov.evomolior.core.atlas.NodeGrade
 import com.achulkov.evomolior.core.atlas.NodeId
 import com.achulkov.evomolior.core.atlas.NodeKind
 import com.achulkov.evomolior.core.atlas.ProofContract
@@ -24,6 +26,7 @@ import com.achulkov.evomolior.core.atlas.RevealPolicy
 import com.achulkov.evomolior.core.atlas.RewardClass
 import com.achulkov.evomolior.core.atlas.RewardSpec
 import com.achulkov.evomolior.core.contract.DeliverableSkeletonNode
+import com.achulkov.evomolior.core.contract.DeliverableNodeGradeHistoryEntry
 import com.achulkov.evomolior.core.contract.DeliverableSkeletonTree
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
 import com.achulkov.evomolior.substrate.atlas.AtlasProjectionSet
@@ -41,10 +44,14 @@ internal suspend fun initializeTestWorkerAtlas(
     nodeIds: Set<NodeId>,
     groupId: String = "worker-a",
     requiredSections: Set<String> = emptySet(),
-    capturedNodeIds: Set<NodeId> = emptySet()
+    capturedNodeIds: Set<NodeId> = emptySet(),
+    revealedNodeIds: Set<NodeId> = nodeIds,
+    passedNodeIds: Set<NodeId> = emptySet()
 ): NodeAtlas {
     require(nodeIds.isNotEmpty())
     require(capturedNodeIds.all(nodeIds::contains))
+    require(revealedNodeIds.all(nodeIds::contains))
+    require(passedNodeIds.all(revealedNodeIds::contains))
     val receiver = ReceiverContract(
         rawObjective = "Test exact worker Atlas authority.",
         receiverId = "receiver-$runId",
@@ -82,22 +89,53 @@ internal suspend fun initializeTestWorkerAtlas(
             deliverableContract = NodeDeliverableContract(
                 acceptedArtifactTypes = setOf(ArtifactType.CLAIM_SET)
             ),
-            revealPolicy = RevealPolicy("stage-0", RevealMode.INITIAL),
+            revealPolicy = if (nodeId in revealedNodeIds) {
+                RevealPolicy("stage-0", RevealMode.INITIAL)
+            } else {
+                RevealPolicy("stage-1", RevealMode.STAGE_PASS)
+            },
             replicationPolicy = ReplicationPolicy(),
             capturePolicy = CapturePolicy(minimumGrade = 0.6),
             rewardSpec = RewardSpec(RewardClass.SMALL, 1.0)
         ).withComputedPayloadHash()
     }
-    val stage = DisclosureStage(
-        stageId = "stage-0",
-        stageIndex = 0,
-        title = "Foundation",
-        nodeIds = nodeIds,
-        mandatoryNodeIds = nodeIds,
-        evidenceCoverageThreshold = 1.0,
-        integrationReadinessThreshold = 1.0,
-        revealPayloadHash = AtlasHashing.hashDisclosurePayload("stage-0", nodeIds, nodes)
-    )
+    val hiddenNodeIds = nodeIds - revealedNodeIds
+    val stages = buildList {
+        add(
+            DisclosureStage(
+                stageId = "stage-0",
+                stageIndex = 0,
+                title = "Foundation",
+                nodeIds = revealedNodeIds,
+                mandatoryNodeIds = revealedNodeIds,
+                evidenceCoverageThreshold = 1.0,
+                integrationReadinessThreshold = 1.0,
+                revealPayloadHash = AtlasHashing.hashDisclosurePayload(
+                    "stage-0",
+                    revealedNodeIds,
+                    nodes
+                )
+            )
+        )
+        if (hiddenNodeIds.isNotEmpty()) {
+            add(
+                DisclosureStage(
+                    stageId = "stage-1",
+                    stageIndex = 1,
+                    title = "Future",
+                    nodeIds = hiddenNodeIds,
+                    mandatoryNodeIds = hiddenNodeIds,
+                    evidenceCoverageThreshold = 1.0,
+                    integrationReadinessThreshold = 1.0,
+                    revealPayloadHash = AtlasHashing.hashDisclosurePayload(
+                        "stage-1",
+                        hiddenNodeIds,
+                        nodes
+                    )
+                )
+            )
+        }
+    }
     val atlas = NodeAtlas(
         atlasId = "worker-atlas-$runId",
         runId = runId,
@@ -105,7 +143,7 @@ internal suspend fun initializeTestWorkerAtlas(
         receiverContractHash = AtlasHashing.hashReceiverContract(receiver),
         rootNodeIds = nodeIds,
         nodes = nodes,
-        stageDefinitions = listOf(stage)
+        stageDefinitions = stages
     ).withComputedHash()
     val rootNodeId = nodeIds.sortedBy(NodeId::value).first()
     AtlasTransactionRepository(factory).initialize(
@@ -116,7 +154,26 @@ internal suspend fun initializeTestWorkerAtlas(
                 NodeExecutionState(
                     nodeId = nodeId,
                     round = 0,
-                    revealedToGroups = setOf(AtlasGroupId(groupId)),
+                    revealedToGroups = if (nodeId in revealedNodeIds) {
+                        setOf(AtlasGroupId(groupId))
+                    } else {
+                        emptySet()
+                    },
+                    grades = if (nodeId in passedNodeIds) {
+                        listOf(
+                            NodeGrade(
+                                gradeId = "grade:${nodeId.value}",
+                                groupId = AtlasGroupId(groupId),
+                                evidencePacketId = "packet:${nodeId.value}",
+                                normalizedScore = 0.9,
+                                verdict = GradeVerdict.VALID_PASS,
+                                graderIds = setOf("grader-a", "grader-b"),
+                                round = 0
+                            )
+                        )
+                    } else {
+                        emptyList()
+                    },
                     ownerGroupId = AtlasGroupId(groupId).takeIf {
                         nodeId in capturedNodeIds
                     },
@@ -138,7 +195,21 @@ internal suspend fun initializeTestWorkerAtlas(
                             DeliverableSkeletonNode(
                                 nodeId = nodeId.value,
                                 parentId = if (nodeId == rootNodeId) null else rootNodeId.value,
-                                title = "Evidence ${nodeId.value}"
+                                title = "Evidence ${nodeId.value}",
+                                gradingHistory = if (nodeId in passedNodeIds) {
+                                    listOf(
+                                        DeliverableNodeGradeHistoryEntry(
+                                            checkinId = "grade:${nodeId.value}",
+                                            dimensionScores = mapOf("coverage" to 0.9),
+                                            graderIds = listOf("grader-a", "grader-b"),
+                                            rubricVersion = "fixture-v1",
+                                            passedThreshold = true,
+                                            recordedAtMs = 1
+                                        )
+                                    )
+                                } else {
+                                    emptyList()
+                                }
                             )
                         },
                         createdAtMs = 1,
@@ -162,7 +233,7 @@ internal suspend fun initializeTestWorkerAtlas(
                 ),
                 disclosure = DisclosureProjection(
                     runId,
-                    listOf(stage),
+                    stages,
                     mapOf(groupId to 0)
                 ),
                 mappings = nodeIds.sortedBy(NodeId::value).flatMapIndexed { index, nodeId ->

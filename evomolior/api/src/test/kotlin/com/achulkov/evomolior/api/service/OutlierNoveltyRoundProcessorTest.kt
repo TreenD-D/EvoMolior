@@ -32,6 +32,7 @@ import com.achulkov.evomolior.core.atlas.RewardClass
 import com.achulkov.evomolior.core.atlas.RewardSpec
 import com.achulkov.evomolior.core.atlas.ShadowNodeLifecycleEvent
 import com.achulkov.evomolior.core.atlas.ShadowNodeState
+import com.achulkov.evomolior.core.compounding.OutlierExperimentDisposition
 import com.achulkov.evomolior.core.contract.CommitType
 import com.achulkov.evomolior.core.contract.ContributionCommit
 import com.achulkov.evomolior.core.contract.GraderFailureModeDraft
@@ -57,6 +58,7 @@ import com.achulkov.evomolior.substrate.atlas.ResourceProjection
 import com.achulkov.evomolior.substrate.atlas.ResourceProjectionNode
 import com.achulkov.evomolior.substrate.atlas.WipProjection
 import com.achulkov.evomolior.substrate.atlas.WipProjectionTask
+import com.achulkov.evomolior.substrate.compounding.BoundedCompoundingLedgerRepository
 import com.achulkov.evomolior.substrate.db.entity.OutlierFitnessRecordEntity
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
 import com.achulkov.evomolior.substrate.grader.GraderAuthorityRepository
@@ -147,6 +149,15 @@ class OutlierNoveltyRoundProcessorTest {
             global.lifecycle(proposal.proposalId).last().toState
         )
         assertTrue(global.fitnessForProposal(proposal.proposalId).isEmpty())
+        val groupLedger = BoundedCompoundingLedgerRepository(
+            database = factory.get(runId, groupId.value),
+            outlierAuthorityDatabase = factory.getAtlas(runId),
+        )
+        assertEquals(
+            OutlierExperimentDisposition.DEFERRED_WITH_REASON,
+            groupLedger.outlierExperiments(runId, groupId.value).single().disposition,
+        )
+        assertTrue(groupLedger.validateState(runId, groupId.value).isValid)
 
         val contributionDraft = ContributionCommit(
             commitId = "later-test",
@@ -244,6 +255,11 @@ class OutlierNoveltyRoundProcessorTest {
         )
         assertEquals(1, global.downstreamLineage(proposal.proposalId).size)
         assertEquals(1, global.fitnessForProposal(proposal.proposalId).size)
+        assertEquals(
+            OutlierExperimentDisposition.DEFERRED_WITH_REASON,
+            groupLedger.outlierExperiments(runId, groupId.value).single().disposition,
+        )
+        assertTrue(groupLedger.validateState(runId, groupId.value).isValid)
         val addedNode = evidenceRound.atlas.nodes.values.single { it.id != nodeId }
         assertEquals(3, addedNode.revealPolicy.minimumRound)
         assertNotNull(
@@ -286,6 +302,96 @@ class OutlierNoveltyRoundProcessorTest {
             graderRepository.requirementsForRound(runId, 3, "grader-a")
                 .flatMapTo(linkedSetOf()) { it.mappedWorkerNodeIds }
         )
+    }
+
+    @Test
+    fun `accepted shadow without later evidence is durably deferred`() = runTest {
+        val factory = SubstrateDatabaseFactory(
+            createTempDirectory("outlier-round-deferred-").toFile()
+        )
+        val atlasRepository = AtlasTransactionRepository(factory, now = { 100L })
+        val receiver = receiver()
+        val atlas = atlas(receiver)
+        atlasRepository.initialize(
+            PreparedAtlasMigration(
+                receiverContract = receiver,
+                atlas = atlas,
+                executionStates = listOf(
+                    NodeExecutionState(
+                        nodeId = nodeId,
+                        round = 0,
+                        revealedToGroups = setOf(groupId)
+                    )
+                ),
+                projections = projections(atlas)
+            )
+        )
+        GraderAuthorityRepository(factory, now = { 100L }).appendAtlas(graderAtlas(atlas))
+        val proposal = proposal(atlas)
+        val groupNovelty = OutlierNoveltyRepository(factory.get(runId, groupId.value))
+        groupNovelty.appendInitialProposal(
+            proposal,
+            ShadowNodeLifecycleEvent(
+                eventId = "${proposal.proposalId}:1:PROPOSED",
+                proposalId = proposal.proposalId,
+                proposalHash = proposal.proposalHash,
+                runId = runId,
+                sequence = 1,
+                previousEventHash = null,
+                fromState = null,
+                toState = ShadowNodeState.PROPOSED,
+                round = 0
+            ).withComputedHash()
+        )
+        val processor = OutlierNoveltyRoundProcessor(
+            substrateFactory = factory,
+            atlasRepository = atlasRepository,
+            assessmentRunner = { proposals ->
+                proposals.flatMap { value ->
+                    listOf(assessment(value, "grader-a"), assessment(value, "grader-b"))
+                }
+            }
+        )
+
+        processor.process(
+            runId = runId,
+            atlasId = atlas.atlasId,
+            workerGroupIds = listOf(groupId.value),
+            graderGroupIds = setOf("grader-a", "grader-b"),
+            round = 0
+        )
+        processor.process(
+            runId = runId,
+            atlasId = atlas.atlasId,
+            workerGroupIds = listOf(groupId.value),
+            graderGroupIds = setOf("grader-a", "grader-b"),
+            round = 1
+        )
+
+        val global = OutlierNoveltyRepository(factory.getAtlas(runId))
+        assertEquals(
+            ShadowNodeState.DEFERRED,
+            global.lifecycle(proposal.proposalId).last().toState
+        )
+        assertEquals(
+            listOf(
+                ShadowNodeState.PROPOSED,
+                ShadowNodeState.DUPLICATE_CHECKED,
+                ShadowNodeState.SHADOW_NODE,
+                ShadowNodeState.DEFERRED
+            ),
+            global.lifecycle(proposal.proposalId).map(ShadowNodeLifecycleEvent::toState)
+        )
+        assertTrue(global.fitnessForProposal(proposal.proposalId).isEmpty())
+        val groupLedger = BoundedCompoundingLedgerRepository(
+            database = factory.get(runId, groupId.value),
+            outlierAuthorityDatabase = factory.getAtlas(runId),
+        )
+        assertEquals(
+            OutlierExperimentDisposition.DEFERRED_WITH_REASON,
+            groupLedger.outlierExperiments(runId, groupId.value).single().disposition,
+        )
+        assertTrue(groupLedger.validateState(runId, groupId.value).isValid)
     }
 
     private fun proposal(atlas: NodeAtlas) = NoveltyVectorProposal(

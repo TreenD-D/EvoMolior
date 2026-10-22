@@ -3,6 +3,7 @@ package com.achulkov.evomolior.api.service
 import com.achulkov.evomolior.core.config.AcceptanceProfile
 import java.time.Instant
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 /** One successful local admission check and its bounded non-secret evidence. */
 @Serializable
@@ -33,6 +34,10 @@ data class AcceptanceAdmissionArtifact(
     val configurationSha256: String,
     val modelAssignmentsSha256: String,
     val jvmVersion: String,
+    val javaHome: String,
+    val javaExecutableSha256: String,
+    val javaReleaseSha256: String,
+    val javaModulesSha256: String,
     val codexCliPath: String,
     val codexCliSha256: String,
     val codexCliVersion: String,
@@ -51,6 +56,10 @@ data class AcceptanceAdmissionArtifact(
         require(configurationSha256.isSha256())
         require(modelAssignmentsSha256.isSha256())
         require(jvmVersion.isNotBlank())
+        require(javaHome.isNotBlank())
+        require(javaExecutableSha256.isSha256())
+        require(javaReleaseSha256.isSha256())
+        require(javaModulesSha256.isSha256())
         require(codexCliPath.isNotBlank())
         require(codexCliSha256.isSha256())
         require(codexCliVersion.isNotBlank())
@@ -64,6 +73,34 @@ data class AcceptanceAdmissionArtifact(
     companion object {
         const val SCHEMA_VERSION = "acceptance-admission-v1"
         const val FILE_NAME = "acceptance-admission-v1.json"
+    }
+}
+
+private val acceptanceAdmissionJson = Json {
+    ignoreUnknownKeys = false
+}
+
+/** Decodes exact persisted admission bytes without accepting undeclared fields. */
+internal fun decodeAcceptanceAdmissionArtifact(bytes: ByteArray): AcceptanceAdmissionArtifact =
+    acceptanceAdmissionJson.decodeFromString(
+        AcceptanceAdmissionArtifact.serializer(),
+        bytes.decodeToString(),
+    )
+
+/** Requires this admission to match the terminal archive authority it accompanies. */
+internal fun AcceptanceAdmissionArtifact.requireMatches(
+    runId: String,
+    acceptanceProfile: AcceptanceProfile,
+    distributionManifestSha256: String,
+): AcceptanceAdmissionArtifact = also {
+    require(it.runId == runId) {
+        "Acceptance admission belongs to runId=${it.runId}, expected $runId"
+    }
+    require(it.acceptanceProfile == acceptanceProfile) {
+        "Acceptance admission profile does not match terminal archive profile"
+    }
+    require(it.distributionManifestSha256 == distributionManifestSha256) {
+        "Acceptance admission distribution hash does not match terminal archive commitment"
     }
 }
 

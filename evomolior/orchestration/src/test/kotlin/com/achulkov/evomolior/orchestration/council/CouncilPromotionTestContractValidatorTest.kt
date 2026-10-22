@@ -17,6 +17,32 @@ import kotlin.test.assertTrue
 
 class CouncilPromotionTestContractValidatorTest {
     @Test
+    fun `number expected outputs require public decimal representation`() {
+        val opportunity = opportunity(setOf("numeric"))
+        val integerDefinition =
+            """{"input":{"scenario":{"hours":72}},"expectedOutput":{"hourly_load":${values(72, "4")}}}"""
+        val decimalDefinition =
+            """{"input":{"scenario":{"hours":72}},"expectedOutput":{"hourly_load":${values(72, "4.0")}}}"""
+
+        val rejected = CouncilPromotionTestContractValidator.validate(
+            opportunity,
+            listOf(test("numeric", integerDefinition))
+        )
+        assertTrue(
+            rejected.failures.single().message.contains(
+                "non_canonical_number_root.hourly_load[0]"
+            )
+        )
+
+        val accepted = CouncilPromotionTestContractValidator.validate(
+            opportunity,
+            listOf(test("numeric", decimalDefinition))
+        )
+        assertTrue(accepted.failures.isEmpty(), accepted.failures.joinToString())
+        assertEquals(1, accepted.fixtures.size)
+    }
+
+    @Test
     fun `v68 rejects non-object promotion definitions exactly and accepts an object`() {
         val tests = listOf(
             test("array-definition", "[]"),
@@ -224,8 +250,8 @@ class CouncilPromotionTestContractValidatorTest {
             }
         """.trimIndent()
 
-    private fun values(count: Int): String =
-        List(count) { "1.0" }.joinToString(prefix = "[", postfix = "]")
+    private fun values(count: Int, value: String = "1.0"): String =
+        List(count) { value }.joinToString(prefix = "[", postfix = "]")
 
     private fun v66Definition(inputValues: Int, outputValues: Int): String =
         """

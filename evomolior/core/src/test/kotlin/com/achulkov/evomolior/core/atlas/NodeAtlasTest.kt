@@ -5,6 +5,7 @@ import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -104,6 +105,128 @@ class NodeAtlasTest {
             }
         )
         assertTrue(separated.validate().isValid, separated.validate().errors.joinToString())
+    }
+
+    @Test
+    fun `tool opportunity commitment remains bound to its origin Atlas version`() {
+        val parent = toolTopologyAtlas(NodeId("node-reuse"))
+        val child = parent.copy(
+            version = 2,
+            parentAtlasHash = parent.atlasHash,
+            amendmentIds = listOf("amendment-1"),
+            atlasHash = ""
+        ).withComputedHash()
+
+        val authority = ToolOpportunityCommitmentAuthority.resolve(listOf(parent, child))
+        val commitment = authority.byOpportunityId.getValue("opportunity-1")
+
+        assertEquals(parent.atlasHash, commitment.atlasHash)
+        assertNotEquals(child.atlasHash, commitment.atlasHash)
+        assertEquals(commitment, authority.byNodeId.getValue(NodeId("node-origin")))
+    }
+
+    @Test
+    fun `amendment introduced opportunity binds to its introduction version`() {
+        val parent = toolTopologyAtlas(NodeId("node-reuse"))
+        val addedNodeId = NodeId("node-added-tool")
+        val addedOpportunity = parent.nodes.getValue(NodeId("node-origin"))
+            .toolOpportunity!!
+            .copy(opportunityId = "opportunity-2")
+        val addedNode = fixtureNode(addedNodeId).copy(
+            kind = NodeKind.TOOL,
+            toolOpportunity = addedOpportunity
+        ).withComputedPayloadHash()
+        val childNodes = parent.nodes + (addedNodeId to addedNode)
+        val childStages = parent.stageDefinitions.map { stage ->
+            if (stage.stageId != "stage-0") {
+                stage
+            } else {
+                val nodeIds = stage.nodeIds + addedNodeId
+                stage.copy(
+                    nodeIds = nodeIds,
+                    mandatoryNodeIds = stage.mandatoryNodeIds + addedNodeId,
+                    revealPayloadHash = AtlasHashing.hashDisclosurePayload(
+                        stage.stageId,
+                        nodeIds,
+                        childNodes
+                    )
+                )
+            }
+        }
+        val child = parent.copy(
+            version = 2,
+            rootNodeIds = parent.rootNodeIds + addedNodeId,
+            nodes = childNodes,
+            stageDefinitions = childStages,
+            parentAtlasHash = parent.atlasHash,
+            amendmentIds = listOf("amendment-1"),
+            atlasHash = ""
+        ).withComputedHash()
+
+        val authority = ToolOpportunityCommitmentAuthority.resolve(listOf(parent, child))
+
+        assertEquals(
+            parent.atlasHash,
+            authority.byOpportunityId.getValue("opportunity-1").atlasHash
+        )
+        assertEquals(
+            child.atlasHash,
+            authority.byOpportunityId.getValue("opportunity-2").atlasHash
+        )
+    }
+
+    @Test
+    fun `tool opportunity authority rejects duplicate IDs and mutated existing nodes`() {
+        val parent = toolTopologyAtlas(NodeId("node-reuse"))
+        val originId = NodeId("node-origin")
+        val mutatedOrigin = parent.nodes.getValue(originId).copy(
+            atomicQuestion = "Mutated after sealing."
+        ).withComputedPayloadHash()
+        val mutated = parent.copy(
+            version = 2,
+            nodes = parent.nodes + (originId to mutatedOrigin),
+            parentAtlasHash = parent.atlasHash,
+            amendmentIds = listOf("amendment-mutated"),
+            atlasHash = ""
+        ).withComputedHash()
+        assertFailsWith<IllegalArgumentException> {
+            ToolOpportunityCommitmentAuthority.resolve(listOf(parent, mutated))
+        }
+
+        val duplicateId = NodeId("node-duplicate-tool")
+        val duplicateNode = fixtureNode(duplicateId).copy(
+            kind = NodeKind.TOOL,
+            toolOpportunity = parent.nodes.getValue(originId).toolOpportunity
+        ).withComputedPayloadHash()
+        val duplicateNodes = parent.nodes + (duplicateId to duplicateNode)
+        val duplicateStages = parent.stageDefinitions.map { stage ->
+            if (stage.stageId != "stage-0") {
+                stage
+            } else {
+                val nodeIds = stage.nodeIds + duplicateId
+                stage.copy(
+                    nodeIds = nodeIds,
+                    mandatoryNodeIds = stage.mandatoryNodeIds + duplicateId,
+                    revealPayloadHash = AtlasHashing.hashDisclosurePayload(
+                        stage.stageId,
+                        nodeIds,
+                        duplicateNodes
+                    )
+                )
+            }
+        }
+        val duplicate = parent.copy(
+            version = 2,
+            rootNodeIds = parent.rootNodeIds + duplicateId,
+            nodes = duplicateNodes,
+            stageDefinitions = duplicateStages,
+            parentAtlasHash = parent.atlasHash,
+            amendmentIds = listOf("amendment-duplicate"),
+            atlasHash = ""
+        ).withComputedHash()
+        assertFailsWith<IllegalArgumentException> {
+            ToolOpportunityCommitmentAuthority.resolve(listOf(parent, duplicate))
+        }
     }
 
     private fun fixtureAtlas(

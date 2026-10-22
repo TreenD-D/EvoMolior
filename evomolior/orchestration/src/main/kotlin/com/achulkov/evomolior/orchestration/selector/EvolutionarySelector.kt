@@ -20,6 +20,7 @@ import java.util.UUID
  * - Total budget across all agents stays within the caller-provided ceiling when the ceiling is
  *   positive
  * - At least one core worker is spawned while budget allows
+ * - Agent count stays within the caller's available slots and the profile fleet size
  * - Outliers spawn on cadence and are preserved preferentially over ordinary Builders when budget
  *   pressure would otherwise prune novelty away
  *
@@ -39,18 +40,26 @@ class EvolutionarySelector(
      * Computes the role allocation for [generation].
      *
      * @param generation The generation to allocate for.
-     * @param globalBudgetCeiling The maximum total budget for this group this generation.
+     * @param globalBudgetCeiling The maximum total budget for this group this generation. Nonpositive
+     *   ceilings disable spawning; a positive ceiling below the profile spawn budget funds one scaled worker.
      * @param stasisDetected Whether the Watchdog/Inspector has flagged a stasis condition.
      * @param formalDispatchDue Whether this multi-group generation needs a Connector-authored
      *   formal dispatch contribution.
+     * @param artifactWorkRequired Whether a productive Builder owner must remain scheduled for
+     *   host-owned artifact production under budget pressure.
+     * @param maximumAgents Available agent slots, capped by the profile fleet size. Zero disables spawning.
      * @return The computed [RoleAllocation].
      */
     suspend fun computeAllocation(
         generation: Int,
         globalBudgetCeiling: Double,
         stasisDetected: Boolean = false,
-        formalDispatchDue: Boolean = false
+        formalDispatchDue: Boolean = false,
+        artifactWorkRequired: Boolean = false,
+        maximumAgents: Int = profile.maxFleetSize,
     ): RoleAllocation {
+        require(maximumAgents >= 0) { "maximumAgents must be non-negative" }
+        val availableSlots = minOf(maximumAgents, profile.maxFleetSize)
         val signals = gatherSignals(generation)
         Napier.d { "[$groupId] Signals for gen $generation: $signals" }
 
@@ -59,9 +68,13 @@ class EvolutionarySelector(
             signals = signals,
             stasisDetected = stasisDetected,
             budgetCeiling = globalBudgetCeiling,
-            formalDispatchDue = formalDispatchDue
+            formalDispatchDue = formalDispatchDue,
+            artifactWorkRequired = artifactWorkRequired,
+            maximumAgents = availableSlots,
         )
-        val boundedEntries = enforceBoundedHeterogeneity(entries, globalBudgetCeiling)
+        val boundedEntries = enforceBoundedHeterogeneity(
+            entries, globalBudgetCeiling, maximumAgents = availableSlots
+        )
         val turnTakingBalancedEntries = enforceTurnTakingBalance(boundedEntries, globalBudgetCeiling)
         val rationale = buildRationale(signals, turnTakingBalancedEntries, stasisDetected)
         val diversityMetrics = roleDiversityMetrics(turnTakingBalancedEntries)
@@ -158,19 +171,22 @@ class EvolutionarySelector(
         signals: SelectionSignals,
         stasisDetected: Boolean,
         budgetCeiling: Double,
-        formalDispatchDue: Boolean
+        formalDispatchDue: Boolean,
+        artifactWorkRequired: Boolean,
+        maximumAgents: Int,
     ): List<RoleAllocationEntry> {
-        if (budgetCeiling <= 0.0) return emptyList()
-        if (budgetCeiling < profile.spawnBudget) {
+        if (budgetCeiling <= 0.0 || maximumAgents == 0) return emptyList()
+        // A reviewer cannot produce the work it reviews. Reserve the only affordable slot for its owner.
+        if (maximumAgents == 1 || budgetCeiling < 2 * profile.spawnBudget) {
             return listOf(
                 RoleAllocationEntry(
-                    role = Role.Researcher,
+                    role = if (artifactWorkRequired) Role.Builder else Role.Researcher,
                     count = 1,
-                    budgetPerAgent = budgetCeiling
+                    budgetPerAgent = minOf(budgetCeiling, profile.spawnBudget)
                 )
             )
         }
-        val maxFleet = profile.maxFleetSize
+        val maxFleet = maximumAgents
         val budgetPerAgent = profile.spawnBudget
         val entries = mutableListOf<RoleAllocationEntry>()
 
@@ -235,29 +251,72 @@ class EvolutionarySelector(
             }
         }
 
-        // Validate total budget doesn't exceed ceiling
+        // Core roles and cadence can exceed a small fleet even when all grants are affordable.
         val totalBudget = entries.sumOf { it.count * it.budgetPerAgent }
-        return if (totalBudget <= budgetCeiling) {
+        return if (totalBudget <= budgetCeiling && entries.sumOf { it.count } <= maxFleet) {
             entries
         } else {
-            // Scale down by removing non-critical roles until budget fits
-            pruneToFitBudget(entries, budgetCeiling)
+            // Remove agents until both the credit and slot constraints fit.
+            pruneToFitBudget(
+                entries = entries,
+                budgetCeiling = budgetCeiling,
+                preserveBuilder = artifactWorkRequired,
+                maximumAgents = maxFleet,
+            )
         }
     }
 
     private fun pruneToFitBudget(
         entries: MutableList<RoleAllocationEntry>,
-        budgetCeiling: Double
+        budgetCeiling: Double,
+        preserveBuilder: Boolean,
+        maximumAgents: Int,
     ): List<RoleAllocationEntry> {
         if (budgetCeiling <= 0.0) return emptyList()
         val mutable = entries.toMutableList()
-        while (mutable.sumOf { it.count * it.budgetPerAgent } > budgetCeiling && mutable.isNotEmpty()) {
-            val removable = mutable.indexOfFirst { it.role == Role.Builder && mutable.any { entry -> entry.role == Role.Outlier } }
-                .takeIf { it >= 0 }
-                ?: mutable.indexOfLast { it.role != Role.Critic && it.role != Role.Researcher }
+        val productiveRole = if (preserveBuilder) Role.Builder else Role.Researcher
+        while (
+            mutable.isNotEmpty() &&
+            (mutable.sumOf { it.count * it.budgetPerAgent } > budgetCeiling ||
+                mutable.sumOf { it.count } > maximumAgents)
+        ) {
+            val removable = if (preserveBuilder) {
+                mutable.indexOfLast { it.role == Role.Outlier }
                     .takeIf { it >= 0 }
-                ?: mutable.lastIndex
-            if (removable >= 0) mutable.removeAt(removable) else break
+                    ?: mutable.indexOfLast {
+                        it.role != Role.Builder &&
+                            it.role != Role.Critic
+                    }.takeIf { it >= 0 }
+                    ?: mutable.indexOfLast {
+                        it.role != Role.Builder
+                    }.takeIf { it >= 0 }
+                    ?: mutable.lastIndex
+            } else {
+                mutable.indexOfFirst {
+                    it.role == Role.Builder &&
+                        mutable.any { entry -> entry.role == Role.Outlier }
+                }.takeIf { it >= 0 }
+                    ?: mutable.indexOfLast {
+                        it.role != Role.Critic && it.role != Role.Researcher
+                    }.takeIf { it >= 0 }
+                    ?: mutable.lastIndex
+            }
+            // The initial small-fleet branch guarantees room for this pair. Pruning duplicates
+            // must not sacrifice its final productive worker or its final reviewer.
+            fun canRemove(index: Int): Boolean {
+                val role = mutable[index].role
+                return role != productiveRole && role != Role.Critic ||
+                    mutable.filter { it.role == role }.sumOf { it.count } > 1
+            }
+            val boundedRemovable = removable.takeIf { it >= 0 && canRemove(it) }
+                ?: mutable.indices.lastOrNull { canRemove(it) }
+                ?: break
+            val source = mutable[boundedRemovable]
+            if (source.count > 1) {
+                mutable[boundedRemovable] = source.copy(count = source.count - 1)
+            } else {
+                mutable.removeAt(boundedRemovable)
+            }
         }
         return mutable
     }
@@ -266,7 +325,8 @@ class EvolutionarySelector(
         entries: List<RoleAllocationEntry>,
         budgetCeiling: Double,
         maxOutliers: Int = 1,
-        minDistinctRoles: Int = 3
+        minDistinctRoles: Int = 3,
+        maximumAgents: Int = profile.maxFleetSize,
     ): List<RoleAllocationEntry> {
         if (budgetCeiling <= 0.0) return emptyList()
         val normalized = entries.toMutableList()
@@ -279,11 +339,18 @@ class EvolutionarySelector(
         }
 
         val distinctRoles = normalized.map { it.role }.toSet()
-        if (distinctRoles.size < minDistinctRoles && normalized.sumOf { it.count * it.budgetPerAgent } + profile.spawnBudget <= budgetCeiling) {
-            if (Role.Planner !in distinctRoles) {
-                normalized.add(RoleAllocationEntry(Role.Planner, 1, profile.spawnBudget * 1.5))
+        if (distinctRoles.size < minDistinctRoles && normalized.sumOf { it.count } < maximumAgents) {
+            val candidate = if (Role.Planner !in distinctRoles) {
+                RoleAllocationEntry(Role.Planner, 1, profile.spawnBudget * 1.5)
             } else if (Role.Archivist !in distinctRoles) {
-                normalized.add(RoleAllocationEntry(Role.Archivist, 1, profile.spawnBudget))
+                RoleAllocationEntry(Role.Archivist, 1, profile.spawnBudget)
+            } else {
+                null
+            }
+            if (candidate != null &&
+                normalized.sumOf { it.count * it.budgetPerAgent } + candidate.budgetPerAgent <= budgetCeiling
+            ) {
+                normalized.add(candidate)
             }
         }
 
@@ -358,12 +425,15 @@ class EvolutionarySelector(
             val dominantEntry = budgetsByRole.maxBy { it.value }
             val dominantShare = dominantEntry.value / totalBudget
             if (dominantShare <= maxDominantShare) return mutable
+            // Keep singleton role coverage (especially productive owners and Critics). A large
+            // indivisible grant cannot be balanced by repeatedly relabeling its only agent.
+            if (mutable.filter { it.role == dominantEntry.key }.sumOf { it.count } <= 1) return mutable
 
             val dominantIndex = mutable.indexOfLast { it.role == dominantEntry.key && it.count > 0 }
             if (dominantIndex < 0) return mutable
 
             val replacementRole = listOf(Role.Planner, Role.Archivist, Role.Connector, Role.Educator)
-                .firstOrNull { candidate -> candidate != dominantEntry.key }
+                .firstOrNull { candidate -> mutable.none { it.role == candidate } }
                 ?: return mutable
 
             val source = mutable[dominantIndex]

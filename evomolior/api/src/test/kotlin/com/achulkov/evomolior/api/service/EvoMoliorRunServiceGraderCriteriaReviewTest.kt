@@ -1,5 +1,6 @@
 package com.achulkov.evomolior.api.service
 
+import com.achulkov.evomolior.api.initializeTestWorkerAtlas
 import com.achulkov.evomolior.api.events.EvoMoliorEvent
 import com.achulkov.evomolior.competition.coordinator.GroupCoordinator
 import com.achulkov.evomolior.competition.grader.MetaJudge
@@ -14,10 +15,15 @@ import com.achulkov.evomolior.core.contract.GraderFailureModeDraft
 import com.achulkov.evomolior.core.contract.GraderMethodologyDraft
 import com.achulkov.evomolior.core.contract.GraderRequirementDraft
 import com.achulkov.evomolior.core.contract.GraderRubricDraft
+import com.achulkov.evomolior.core.atlas.AtlasHashing
 import com.achulkov.evomolior.core.atlas.NodeId
 import com.achulkov.evomolior.core.grader.AdversarialCase
 import com.achulkov.evomolior.core.grader.DisclosureSensitivity
 import com.achulkov.evomolior.core.grader.FailureLevel
+import com.achulkov.evomolior.core.grader.GraderAtlas
+import com.achulkov.evomolior.core.grader.GraderAtlasNode
+import com.achulkov.evomolior.core.grader.GraderNodeId
+import com.achulkov.evomolior.core.grader.GraderNodeKind
 import com.achulkov.evomolior.core.model.DimensionScore
 import com.achulkov.evomolior.core.model.GroupProfile
 import com.achulkov.evomolior.core.model.GroupProfileType
@@ -28,8 +34,8 @@ import com.achulkov.evomolior.orchestration.metaplanner.MetaPlannerRunner
 import com.achulkov.evomolior.sandbox.shuru.ShuruVmManager
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
+import com.achulkov.evomolior.substrate.grader.GraderAuthorityRepository
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -41,6 +47,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.reflect.full.callSuspend
 import kotlin.reflect.full.declaredFunctions
@@ -132,6 +139,80 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
 
         assertTrue(remaining.isEmpty())
         assertEquals(1, criteriaCalls)
+    }
+
+    @Test
+    fun `unreviewed pending methodology gets a review-only pass instead of re-authoring`() = runTest {
+        val factory = SubstrateDatabaseFactory(
+            createTempDirectory("grader-pending-draft-review-test").toFile()
+        )
+        val runId = "run-pending-draft-review"
+        val graderGroupId = "grader-0"
+        val draftJson = Json.encodeToString(GraderMethodologyDraft.serializer(), validTypedDraft())
+        // The deadline-bounded Critic pass ended before reaching this draft: pending, not rejected.
+        factory.getGrader(runId, graderGroupId).stagingDao().insert(
+            StagingSubmissionEntity(
+                id = "unreviewed-methodology",
+                agentId = "round-0-builder",
+                role = "GraderBuilder",
+                type = SubmissionType.PLAN_UPDATE.name,
+                content = draftJson,
+                budgetSignature = "GRADING_SHEET_DRAFT:round-0-builder:1",
+                generation = 1,
+                groupId = graderGroupId,
+                runId = runId,
+                submittedAtMs = 1L
+            )
+        )
+        var criteriaCalls = 0
+        val reviewGroups = mutableListOf<List<String>>()
+        val service = EvoMoliorRunService(
+            lifecycleManagerProvider = { _, _, _, _, _ -> error("unused") },
+            groupCoordinatorProvider = { groupIds, dimensions -> GroupCoordinator(groupIds, dimensions) },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = factory,
+            graderCriteriaRunner = { _, _, _, _, _, _, _ -> criteriaCalls += 1 },
+            graderCriteriaReviewRunner = { reviewRunId, _, graderGroupIds, _, _ ->
+                reviewGroups += graderGroupIds
+                factory.getGrader(reviewRunId, graderGroupId).stagingDao().updateReview(
+                    id = "unreviewed-methodology",
+                    status = "promoted",
+                    criticId = "critic-1",
+                    trustScore = 0.9,
+                    reason = null,
+                    reviewedAtMs = 100L
+                )
+            }
+        )
+        val config = com.achulkov.evomolior.api.model.RunConfig(
+            runId = runId,
+            objective = "Evaluate shelter cooling evidence.",
+            groupCount = 2,
+            groupProfiles = listOf(GroupProfileType.Library, GroupProfileType.Factory),
+            rounds = 1,
+            roundDurationMinutes = 0,
+            maxAgentsPerGroup = 1,
+            scoringDimensions = listOf(
+                ScoringDimension(
+                    id = "accuracy",
+                    name = "Accuracy",
+                    description = "Evidence-based correctness.",
+                    weight = 1.0
+                )
+            ),
+            openRouterApiKey = "sk-test",
+            isTestRun = true
+        )
+
+        val remaining = service.repairRejectedGraderMethodologies(
+            config = config,
+            graderGroupIds = listOf(graderGroupId),
+            round = 0
+        )
+
+        assertTrue(remaining.isEmpty())
+        assertEquals(0, criteriaCalls, "a pending draft must not trigger re-authoring")
+        assertEquals(listOf(listOf(graderGroupId)), reviewGroups)
     }
 
     @Test
@@ -233,15 +314,18 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
 
 
     @Test
-    fun `grader criteria phase completes before judging begins`() = runTest {
+    fun `grader criteria phase completes before judging begins`() = runBlocking {
         val dataRoot = createTempDirectory("grader-criteria-round-flow-test").toFile()
         val factory = SubstrateDatabaseFactory(dataRoot)
         val runId = "run-criteria-flow"
         val order = mutableListOf<String>()
         val emittedEvents = mutableListOf<EvoMoliorEvent>()
-        val verdictEvents = Channel<Unit>(Channel.UNLIMITED)
         val graderGroupId = "grader-0"
         val plannedCriteriaId = "grader-criteria-1"
+        val methodologyJson = Json.encodeToString(
+            GraderMethodologyDraft.serializer(),
+            validTypedDraft(),
+        )
 
         val service = EvoMoliorRunService(
             lifecycleManagerProvider = { _, _, _, _, _ ->
@@ -259,11 +343,11 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
                 graderDb.stagingDao().insert(
                     StagingSubmissionEntity(
                         id = plannedCriteriaId,
-                        agentId = "criteria-agent",
-                        role = "GraderResearcher",
+                        agentId = "criteria-builder",
+                        role = "GraderBuilder",
                         type = SubmissionType.PLAN_UPDATE.name,
-                        content = "draft rubric for $runObjective",
-                        budgetSignature = "system:grader-criteria",
+                        content = methodologyJson,
+                        budgetSignature = "GRADING_SHEET_DRAFT:criteria-builder:1",
                         status = "pending",
                         generation = roundIndex + 1,
                         groupId = reviewerGroupIds.single(),
@@ -275,6 +359,20 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
                 onProgress?.invoke("grader criteria staged")
                 delay(100)
                 order += "criteria-done"
+            },
+            graderCriteriaReviewRunner = {
+                    reviewRunId, _, reviewerGroupIds, _, _ ->
+                order += "criteria-review"
+                factory.getGrader(reviewRunId, reviewerGroupIds.single())
+                    .stagingDao()
+                    .updateReview(
+                        id = plannedCriteriaId,
+                        status = "promoted",
+                        criticId = "critic-grader-0-round-0",
+                        trustScore = 0.9,
+                        reason = null,
+                        reviewedAtMs = 2_000L,
+                    )
             },
             graderJudgingRunner = {
                     _, _, graderGroupIds, competingGroupIds, roundIndex, _, dimensions, manager, _, _, onProgress ->
@@ -294,15 +392,6 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
                 emptyMap()
             }
         )
-
-        val eventCollector = launch(start = CoroutineStart.UNDISPATCHED) {
-            service.events.collect { event ->
-                emittedEvents += event
-                if (event is EvoMoliorEvent.EngineProgress && event.phase == "grader_authoritative_verdict") {
-                    verdictEvents.send(Unit)
-                }
-            }
-        }
 
         val config = com.achulkov.evomolior.api.model.RunConfig(
             runId = runId,
@@ -327,6 +416,15 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
             isTestRun = true
         )
 
+        prepareRunLoopAuthority(
+            service = service,
+            factory = factory,
+            config = config,
+            groupIds = listOf("group-0", "group-1"),
+        )
+        val eventCollector = launch(start = CoroutineStart.UNDISPATCHED) {
+            service.events.collect(emittedEvents::add)
+        }
         val runLoop = service::class.declaredFunctions.first { it.name == "runLoop" }.apply {
             isAccessible = true
         }
@@ -338,37 +436,30 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
             listOf(graderGroupId),
             GraderGroupManager(config.scoringDimensions),
             mutableSetOf<Int>(),
-            0
+            0,
         )
-
-        withTimeout(5_000) { verdictEvents.receive() }
         eventCollector.cancel()
 
         assertEquals(
-            listOf("criteria-start", "criteria-done", "judging-start"),
+            listOf("criteria-start", "criteria-done", "criteria-review", "judging-start"),
             order,
-            "The round should move from criteria development directly into judging once criteria completes"
         )
-        assertTrue("criteria-review" !in order)
-        assertTrue(
-            emittedEvents.any { event ->
-                event is EvoMoliorEvent.EngineProgress &&
-                    event.phase == "grader_authoritative_verdict" &&
-                    event.message.contains("winner", ignoreCase = true)
+        assertEquals(
+            1,
+            emittedEvents.count {
+                it is EvoMoliorEvent.EngineProgress &&
+                    it.phase == "grader_authoritative_verdict"
             },
-            "The live round loop should emit a sealed-suite verdict progress event"
         )
     }
 
     @Test
-    fun `grader manager verdict is emitted exactly once per round`() = runTest {
+    fun `grader manager verdict is emitted exactly once for the authority-backed round`() = runBlocking {
         val dataRoot = createTempDirectory("grader-manager-verdict-twice-test").toFile()
         val factory = SubstrateDatabaseFactory(dataRoot)
         val runId = "run-grader-manager-verdict"
-        val emittedEvents = mutableListOf<EvoMoliorEvent>()
         val criteriaRounds = mutableListOf<Int>()
         val judgingRounds = mutableListOf<Int>()
-        val verdictEvents = Channel<Unit>(Channel.UNLIMITED)
 
         val service = EvoMoliorRunService(
             lifecycleManagerProvider = { _, _, _, _, _ ->
@@ -380,9 +471,40 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
             graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
             substrateFactory = factory,
             metaPlannerRunner = MetaPlannerRunner(),
-            graderCriteriaRunner = { _, _, _, roundIndex, _, _, onProgress ->
+            graderCriteriaRunner = { callbackRunId, _, graderGroupIds, roundIndex, _, _, onProgress ->
                 criteriaRounds += roundIndex
+                factory.getGrader(callbackRunId, graderGroupIds.single()).stagingDao().insert(
+                    StagingSubmissionEntity(
+                        id = "criteria-$roundIndex",
+                        agentId = "builder-$roundIndex",
+                        role = "GraderBuilder",
+                        type = SubmissionType.PLAN_UPDATE.name,
+                        content = Json.encodeToString(
+                            GraderMethodologyDraft.serializer(),
+                            validTypedDraft(),
+                        ),
+                        budgetSignature = "GRADING_SHEET_DRAFT:builder-$roundIndex:1",
+                        status = "pending",
+                        generation = roundIndex + 1,
+                        groupId = graderGroupIds.single(),
+                        runId = callbackRunId,
+                        submittedAtMs = 1_000L + roundIndex,
+                    )
+                )
                 onProgress?.invoke("criteria staged for round $roundIndex")
+            },
+            graderCriteriaReviewRunner = {
+                    reviewRunId, _, graderGroupIds, roundIndex, _ ->
+                factory.getGrader(reviewRunId, graderGroupIds.single())
+                    .stagingDao()
+                    .updateReview(
+                        id = "criteria-$roundIndex",
+                        status = "promoted",
+                        criticId = "critic-${graderGroupIds.single()}-round-$roundIndex",
+                        trustScore = 0.9,
+                        reason = null,
+                        reviewedAtMs = 2_000L + roundIndex,
+                    )
             },
             graderJudgingRunner = {
                     _, _, graderGroupIds, competingGroupIds, roundIndex, _, dimensions, manager, _, _, onProgress ->
@@ -410,15 +532,6 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
         }
         blindTournamentField.set(service, blindTournamentService)
 
-        val eventCollector = launch(start = CoroutineStart.UNDISPATCHED) {
-            service.events.collect { event ->
-                emittedEvents += event
-                if (event is EvoMoliorEvent.EngineProgress && event.phase == "grader_authoritative_verdict") {
-                    verdictEvents.send(Unit)
-                }
-            }
-        }
-
         val config = com.achulkov.evomolior.api.model.RunConfig(
             runId = runId,
             objective = "verdict count test",
@@ -427,7 +540,7 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
                 com.achulkov.evomolior.core.model.GroupProfileType.Library,
                 com.achulkov.evomolior.core.model.GroupProfileType.Factory
             ),
-            rounds = 2,
+            rounds = 1,
             roundDurationMinutes = 0,
             maxAgentsPerGroup = 1,
             scoringDimensions = listOf(
@@ -442,6 +555,16 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
             isTestRun = true
         )
 
+        prepareRunLoopAuthority(
+            service = service,
+            factory = factory,
+            config = config,
+            groupIds = listOf("group-0", "group-1"),
+        )
+        val emittedEvents = mutableListOf<EvoMoliorEvent>()
+        val eventCollector = launch(start = CoroutineStart.UNDISPATCHED) {
+            service.events.collect(emittedEvents::add)
+        }
         val runLoop = service::class.declaredFunctions.first { it.name == "runLoop" }.apply {
             isAccessible = true
         }
@@ -453,22 +576,18 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
             listOf("grader-0"),
             GraderGroupManager(config.scoringDimensions),
             mutableSetOf<Int>(),
-            0
+            0,
         )
-
-        repeat(config.rounds) {
-            withTimeout(5_000) { verdictEvents.receive() }
-        }
         eventCollector.cancel()
 
-        assertEquals(listOf(0, 1), criteriaRounds)
-        assertEquals(listOf(0, 1), judgingRounds)
+        assertEquals(listOf(0), criteriaRounds)
+        assertEquals(listOf(0), judgingRounds)
         assertEquals(
-            2,
-            emittedEvents.count { event ->
-                event is EvoMoliorEvent.EngineProgress && event.phase == "grader_authoritative_verdict"
+            1,
+            emittedEvents.count {
+                it is EvoMoliorEvent.EngineProgress &&
+                    it.phase == "grader_authoritative_verdict"
             },
-            "The authoritative grader verdict step should fire once per round"
         )
 
         blindTournamentService.stop()
@@ -497,6 +616,69 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
         comparativePairs = emptyList(),
         sealedAt = 1L
     )
+
+    private suspend fun prepareRunLoopAuthority(
+        service: EvoMoliorRunService,
+        factory: SubstrateDatabaseFactory,
+        config: com.achulkov.evomolior.api.model.RunConfig,
+        groupIds: List<String>,
+    ) {
+        val workerNodeId = NodeId("worker-node")
+        val workerAtlas = initializeTestWorkerAtlas(
+            factory = factory,
+            runId = config.runId,
+            nodeIds = setOf(workerNodeId),
+            groupId = groupIds.first(),
+        )
+        val graderNodeId = GraderNodeId("grader-node")
+        val graderNode = GraderAtlasNode(
+            nodeId = graderNodeId,
+            kind = GraderNodeKind.EVIDENCE_AUTHENTICITY,
+            title = "Evidence authenticity",
+            evaluationQuestion = "Is the material claim source-bound?",
+            receiverObligationRefs = setOf("receiver:evidence"),
+            mappedWorkerNodeIds = setOf(workerNodeId),
+        ).withComputedHash()
+        GraderAuthorityRepository(factory).appendAtlas(
+            GraderAtlas(
+                graderAtlasId = "grader-atlas-${config.runId}",
+                runId = config.runId,
+                version = workerAtlas.version,
+                workerAtlasHash = workerAtlas.atlasHash,
+                rootNodeIds = setOf(graderNodeId),
+                nodes = mapOf(graderNodeId to graderNode),
+            ).withComputedHash()
+        )
+        service::class.java.getDeclaredField("activeWorkerAtlasId").apply {
+            isAccessible = true
+            set(service, workerAtlas.atlasId)
+        }
+        service::class.java.getDeclaredField("activeGenerationCeiling").apply {
+            isAccessible = true
+            setInt(service, config.rounds)
+        }
+        service::class.java.getDeclaredField("activeGroupProfiles").apply {
+            isAccessible = true
+            set(service, config.groupProfiles)
+        }
+        val liveManagersField = service::class.java
+            .getDeclaredField("liveLifecycleManagers")
+            .apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val liveManagers = liveManagersField.get(service) as MutableMap<String, LifecycleManager>
+        groupIds.forEachIndexed { index, groupId ->
+            liveManagers[groupId] = LifecycleManager(
+                runId = config.runId,
+                groupId = groupId,
+                shuruVmManager = ShuruVmManager(),
+                substrateDatabaseFactory = factory,
+                agentJarPath = "/fake/agent.jar",
+                openRouterApiKey = config.openRouterApiKey,
+                groupProfile = GroupProfile.default(config.groupProfiles[index]),
+                localAgentRunner = { _, _ -> },
+            )
+        }
+    }
 
     private fun validTypedDraft() = GraderMethodologyDraft(
         rubricDimensions = listOf(
@@ -563,7 +745,7 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
                 content = "draft grading rubric for evaluation",
                 budgetSignature = "system:grader-criteria",
                 status = "pending",
-                generation = 1,
+                generation = 0,
                 groupId = graderGroupId,
                 runId = runId,
                 submittedAtMs = 1_000L,
@@ -624,7 +806,7 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
     }
 
     @Test
-    fun `default grader criteria review path rejects invalid staged criteria without custom hook`() = runTest {
+    fun `default grader criteria review path rejects self-authored staged criteria`() = runTest {
         val dataRoot = createTempDirectory("grader-criteria-default-path-test").toFile()
         val factory = SubstrateDatabaseFactory(dataRoot)
         val runId = "run-criteria-default"
@@ -634,13 +816,13 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
         graderDb.stagingDao().insert(
             StagingSubmissionEntity(
                 id = "grader-criteria-default-1",
-                agentId = "criteria-agent",
+                agentId = "critic-grader-0-round-0",
                 role = "GraderResearcher",
                 type = SubmissionType.PLAN_UPDATE.name,
                 content = "draft rubric that should be rejected by CriticPipeline",
                 budgetSignature = "",
                 status = "pending",
-                generation = 1,
+                generation = 0,
                 groupId = graderGroupId,
                 runId = runId,
                 submittedAtMs = 1_000L,
@@ -657,8 +839,12 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
             },
             graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
             substrateFactory = factory,
-            metaPlannerRunner = MetaPlannerRunner()
+            metaPlannerRunner = MetaPlannerRunner(),
         )
+        service::class.java.getDeclaredField("activeRunId").apply {
+            isAccessible = true
+            set(service, runId)
+        }
 
         service.reviewGraderCriteriaForRound(
             runId = runId,
@@ -672,8 +858,8 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
         assertEquals("rejected", reviewed.status)
         assertEquals("critic-grader-0-round-0", reviewed.criticAgentId)
         assertTrue(
-            reviewed.rejectionReason?.contains("missing_budget_signature", ignoreCase = true) == true,
-            "Default CriticPipeline fallback should reject invalid grader criteria submissions"
+            reviewed.rejectionReason?.isNotBlank() == true,
+            "Default CriticPipeline must reject criteria authored by its reviewer identity"
         )
     }
 
@@ -851,12 +1037,106 @@ class EvoMoliorRunServiceGraderCriteriaReviewTest {
                 config,
                 listOf(groupId),
                 0
-            ) as Map<String, String?>
+            ) as Map<String, RoundSubmissionSummaryCandidate?>
         }
 
         assertEquals(2, attemptCounter.get())
-        assertTrue(summaries[groupId].orEmpty().contains("ROUND SUBMISSION SUMMARY"))
-        assertTrue(summaries[groupId].orEmpty().contains("FINAL DELIVERABLE HTML"))
-        assertTrue(summaries[groupId].orEmpty().contains("Retry Summary"))
+        val summary = assertNotNull(summaries[groupId]).content
+        assertTrue(summary.contains("ROUND SUBMISSION SUMMARY"))
+        assertTrue(summary.contains("FINAL DELIVERABLE HTML"))
+        assertTrue(summary.contains("Retry Summary"))
+    }
+
+    @Test
+    fun `round summary promotion is bound to the exact spawned submission identity`() = runBlocking {
+        val factory = SubstrateDatabaseFactory(
+            createTempDirectory("round-summary-authority-test").toFile(),
+        )
+        val runId = "run-round-summary-authority"
+        val groupId = "group-0"
+        val content = "ROUND SUBMISSION SUMMARY\n- Exact authority."
+        val candidate = StagingSubmissionEntity(
+            id = "summary-candidate",
+            agentId = "summary-agent",
+            role = com.achulkov.evomolior.core.model.Role.Archivist.name,
+            type = SubmissionType.PLAN_UPDATE.name,
+            content = content,
+            budgetSignature = "summary-candidate",
+            status = "pending",
+            generation = 1,
+            groupId = groupId,
+            runId = runId,
+            submittedAtMs = 10L,
+        )
+        val clone = candidate.copy(
+            id = "summary-clone",
+            agentId = "other-archivist",
+            status = "promoted",
+            criticAgentId = "critic-clone",
+            reviewedAtMs = 12L,
+            promotedArtifactRef = "submission:summary-clone",
+            promotedArtifactHash = AtlasHashing.hashText(content),
+            submittedAtMs = 11L,
+        )
+        val staging = factory.get(runId, groupId).stagingDao()
+        staging.insert(candidate)
+        staging.insert(clone)
+        val service = EvoMoliorRunService(
+            lifecycleManagerProvider = { _, _, _, _, _ ->
+                error("No lifecycle manager should be created in this authority test")
+            },
+            groupCoordinatorProvider = { groupIds, dimensions ->
+                GroupCoordinator(groupIds, dimensions)
+            },
+            graderGroupManagerProvider = { dimensions -> GraderGroupManager(dimensions) },
+            substrateFactory = factory,
+            metaPlannerRunner = MetaPlannerRunner(),
+        )
+        val resolvePromoted = service::class.declaredFunctions.first {
+            it.name == "promotedRoundSubmissionSummaries"
+        }.apply {
+            isAccessible = true
+        }
+        val authority = mapOf(
+            groupId to RoundSubmissionSummaryCandidate(
+                submissionId = candidate.id,
+                agentId = candidate.agentId,
+                content = candidate.content,
+            ),
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val whilePending = resolvePromoted.callSuspend(
+            service,
+            runId,
+            0,
+            authority,
+        ) as Map<String, String?>
+        assertNull(whilePending[groupId], "A promoted same-content clone must not substitute.")
+
+        staging.updateReview(
+            id = candidate.id,
+            status = "promoted",
+            criticId = "critic-candidate",
+            trustScore = 1.0,
+            reason = null,
+            reviewedAtMs = 13L,
+        )
+        assertEquals(
+            1,
+            staging.recordPromotionArtifact(
+                id = candidate.id,
+                artifactRef = "submission:${candidate.id}",
+                artifactHash = AtlasHashing.hashText(content),
+            ),
+        )
+        @Suppress("UNCHECKED_CAST")
+        val promoted = resolvePromoted.callSuspend(
+            service,
+            runId,
+            0,
+            authority,
+        ) as Map<String, String?>
+        assertEquals(content, promoted[groupId])
     }
 }

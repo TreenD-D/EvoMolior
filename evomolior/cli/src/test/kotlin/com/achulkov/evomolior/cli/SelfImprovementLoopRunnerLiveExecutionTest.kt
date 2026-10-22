@@ -30,6 +30,10 @@ class SelfImprovementLoopRunnerLiveExecutionTest {
 
     @Test
     fun `real hypothesis and experiment plan record an accepted overseer result without bootstrap fallback`() = runBlocking {
+        assumeTrue(
+            System.getenv("EVOMOLIOR_LIVE_SELF_IMPROVEMENT_SMOKE").equals("true", ignoreCase = true),
+            "Set EVOMOLIOR_LIVE_SELF_IMPROVEMENT_SMOKE=true to authorize provider-backed execution",
+        )
         val apiKey = readOpenRouterApiKey()
         assumeTrue(apiKey.isNotBlank(), "OPENROUTER_API_KEY must be present in local.properties to run this live regression")
 

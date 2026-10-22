@@ -15,8 +15,17 @@ import kotlinx.serialization.json.JsonObject
 internal data class ToolPromotionOutputValidation(
     val output: JsonElement?,
     val failure: String?,
+    val failureClass: ToolPromotionOutputFailure?,
     val expectedOutput: JsonElement?
 )
+
+/** Closed output-validation class retained without private expected/actual values. */
+internal enum class ToolPromotionOutputFailure {
+    OUTPUT_NOT_JSON,
+    SCHEMA_MISMATCH,
+    NON_CANONICAL_REPRESENTATION,
+    EXPECTED_OUTPUT_MISMATCH
+}
 
 /** Shared strict output semantics for Council reference tests and production tool promotion. */
 internal object ToolPromotionOutputValidator {
@@ -43,8 +52,14 @@ internal object ToolPromotionOutputValidator {
         } else {
             TypedToolSchemaValidator.validationError(output, outputSchema)
         }
+        val representationFailure = if (schemaFailure == null && output != null) {
+            TypedToolSchemaValidator.canonicalOutputFailure(output, outputSchema)?.stableCode
+        } else {
+            null
+        }
         val exactFailure = if (
             schemaFailure == null &&
+            representationFailure == null &&
             expectedOutput != null &&
             output != expectedOutput
         ) {
@@ -54,7 +69,15 @@ internal object ToolPromotionOutputValidator {
         }
         return ToolPromotionOutputValidation(
             output = output,
-            failure = schemaFailure ?: exactFailure,
+            failure = schemaFailure ?: representationFailure ?: exactFailure,
+            failureClass = when {
+                output == null -> ToolPromotionOutputFailure.OUTPUT_NOT_JSON
+                schemaFailure != null -> ToolPromotionOutputFailure.SCHEMA_MISMATCH
+                representationFailure != null ->
+                    ToolPromotionOutputFailure.NON_CANONICAL_REPRESENTATION
+                exactFailure != null -> ToolPromotionOutputFailure.EXPECTED_OUTPUT_MISMATCH
+                else -> null
+            },
             expectedOutput = expectedOutput
         )
     }

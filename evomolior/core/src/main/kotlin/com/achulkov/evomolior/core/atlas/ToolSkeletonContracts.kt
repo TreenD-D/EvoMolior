@@ -179,6 +179,7 @@ object TypedToolSchemaCompiler {
 enum class TypedToolSchemaValidationCode {
     MISSING_TYPE,
     WRONG_TYPE,
+    NON_CANONICAL_NUMBER,
     ENUM_MISMATCH,
     TOO_FEW_ITEMS,
     TOO_MANY_ITEMS,
@@ -233,6 +234,8 @@ data class TypedToolSchemaValidationFailure(
         get() = when (code) {
             TypedToolSchemaValidationCode.MISSING_TYPE -> "missing_type_$path"
             TypedToolSchemaValidationCode.WRONG_TYPE -> "wrong_type_$path"
+            TypedToolSchemaValidationCode.NON_CANONICAL_NUMBER ->
+                "non_canonical_number_$path"
             TypedToolSchemaValidationCode.ENUM_MISMATCH -> "enum_mismatch_$path"
             TypedToolSchemaValidationCode.TOO_FEW_ITEMS -> "too_few_items_$path"
             TypedToolSchemaValidationCode.TOO_MANY_ITEMS -> "too_many_items_$path"
@@ -266,6 +269,22 @@ object TypedToolSchemaValidator {
      */
     fun validationError(value: JsonElement, schema: JsonObject): String? =
         validationFailure(value, schema)?.stableCode
+
+    /**
+     * Returns a failure when a schema-valid `number` lacks its unique finite-Double encoding.
+     *
+     * Exact promotion authority stores `number` values as finite Doubles. Requiring the exact
+     * `Double.toString()` token makes Council fixtures, persisted sealed authority, and worker
+     * outputs use one representation without numeric coercion during comparison.
+     *
+     * @param value Schema-valid promotion output.
+     * @param schema Compiled output schema.
+     */
+    fun canonicalOutputFailure(
+        value: JsonElement,
+        schema: JsonObject
+    ): TypedToolSchemaValidationFailure? =
+        canonicalOutputFailure(value, schema, "root")
 
     private fun validationFailure(
         value: JsonElement,
@@ -348,6 +367,42 @@ object TypedToolSchemaValidator {
         return null
     }
 
+    private fun canonicalOutputFailure(
+        value: JsonElement,
+        schema: JsonObject,
+        path: String
+    ): TypedToolSchemaValidationFailure? =
+        when ((schema["type"] as? JsonPrimitive)?.contentOrNull) {
+            "number" -> {
+                val lexical = (value as? JsonPrimitive)
+                    ?.takeUnless(JsonPrimitive::isString)
+                    ?.content
+                if (lexical != null && lexical != canonicalNumberToken(lexical)) {
+                    failure(TypedToolSchemaValidationCode.NON_CANONICAL_NUMBER, path)
+                } else {
+                    null
+                }
+            }
+            "array" -> {
+                val items = schema["items"] as? JsonObject ?: return null
+                (value as? JsonArray)?.forEachIndexed { index, item ->
+                    canonicalOutputFailure(item, items, "$path[$index]")?.let { return it }
+                }
+                null
+            }
+            "object" -> {
+                val properties = schema["properties"] as? JsonObject ?: return null
+                val obj = value as? JsonObject ?: return null
+                properties.forEach { (name, definitionElement) ->
+                    val field = obj[name] ?: return@forEach
+                    val definition = definitionElement as? JsonObject ?: return@forEach
+                    canonicalOutputFailure(field, definition, "$path.$name")?.let { return it }
+                }
+                null
+            }
+            else -> null
+        }
+
     private fun failure(
         code: TypedToolSchemaValidationCode,
         path: String,
@@ -361,4 +416,8 @@ object TypedToolSchemaValidator {
         minimumItemCount = minimumItemCount,
         maximumItemCount = maximumItemCount
     )
+
+    private fun canonicalNumberToken(lexical: String): String {
+        return lexical.toDouble().toString()
+    }
 }

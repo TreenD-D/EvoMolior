@@ -97,7 +97,7 @@ internal object CodexAuthCommand {
         args: Array<String>,
         processRunner: CodexAuthProcessRunner = DefaultCodexAuthProcessRunner,
         out: Appendable = System.out,
-        authPath: Path = Path.of(System.getProperty("user.home"), ".codex", "auth.json"),
+        authPath: Path = defaultAuthPath(),
         oauthRunner: OpenAIBrowserOAuthRunner = DefaultOpenAIBrowserOAuthRunner
     ): Int {
         val options = parse(args)
@@ -106,6 +106,13 @@ internal object CodexAuthCommand {
         }
         return runStatus(options, processRunner, out, authPath)
     }
+
+    /** Resolves authentication under the same explicit home as the Codex subprocess. */
+    internal fun defaultAuthPath(
+        codexHome: String? = System.getenv("CODEX_HOME"),
+        userHome: String = System.getProperty("user.home"),
+    ): Path = (codexHome?.takeIf(String::isNotBlank)?.let(Path::of)
+        ?: Path.of(userHome, ".codex")).resolve("auth.json")
 
     private fun runStatus(
         options: CodexAuthOptions,

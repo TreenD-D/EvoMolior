@@ -9,14 +9,21 @@ class SourceAccessPolicyTest {
     @Test
     fun `initialAllowedHosts combines prompt links artifact links and qwen subject inference`() {
         val hosts = SourceAccessPolicy.initialAllowedHosts(
-            objective = "Use Qwen DashScope docs and https://qwencloud-hackathon.devpost.com/resources",
+            objective = "Use Qwen DashScope docs and https://reference.example.com/resources",
             artifactHosts = setOf("example.org")
         )
 
         assertTrue("example.org" in hosts)
-        assertTrue("qwencloud-hackathon.devpost.com" in hosts)
+        assertTrue("reference.example.com" in hosts)
         assertTrue("dashscope.aliyuncs.com" in hosts)
         assertTrue("help.aliyun.com" in hosts)
+    }
+
+    @Test
+    fun `event objectives do not implicitly grant access to event platforms`() {
+        val hosts = SourceAccessPolicy.initialAllowedHosts("Prepare a hackathon project brief")
+
+        assertTrue(hosts.isEmpty())
     }
 
     @Test

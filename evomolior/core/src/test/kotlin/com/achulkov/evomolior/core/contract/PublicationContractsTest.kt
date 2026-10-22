@@ -63,6 +63,51 @@ class PublicationContractsTest {
         )
     }
 
+    @Test
+    fun `recovery and startup publication histories are separate strict hash chains`() {
+        val recoveryFirst = recoveryEvent(
+            RecoveryPublicationState.WORK_CYCLE_CLOSED_WITHOUT_ACCEPTANCE,
+            0,
+            null,
+        )
+        val recoverySecond = recoveryEvent(
+            RecoveryPublicationState.RECOVERY_SOURCE_SET_SEALED,
+            1,
+            recoveryFirst.eventHash,
+        )
+        val startupFirst = startupEvent(
+            StartupDiagnosticState.ADMISSION_OR_COUNCIL_FAILURE,
+            0,
+            null,
+        )
+        val startupSecond = startupEvent(
+            StartupDiagnosticState.REJECTION_AUTHORITY_FROZEN,
+            1,
+            startupFirst.eventHash,
+        )
+
+        assertTrue(RecoveryPublicationStatePolicy.allows(null, recoveryFirst))
+        assertTrue(RecoveryPublicationStatePolicy.allows(recoveryFirst, recoverySecond))
+        assertTrue(StartupDiagnosticStatePolicy.allows(null, startupFirst))
+        assertTrue(StartupDiagnosticStatePolicy.allows(startupFirst, startupSecond))
+        assertFalse(
+            RecoveryPublicationStatePolicy.allows(
+                recoveryFirst,
+                recoverySecond.copy(previousEventHash = startupFirst.eventHash, eventHash = "")
+                    .withComputedHash(),
+            )
+        )
+        assertFalse(
+            StartupDiagnosticStatePolicy.allows(
+                startupFirst,
+                startupSecond.copy(
+                    state = StartupDiagnosticState.DIAGNOSTIC_MANIFEST_HASHED,
+                    eventHash = "",
+                ).withComputedHash(),
+            )
+        )
+    }
+
     private fun event(
         state: PublicationState,
         sequence: Int,
@@ -75,5 +120,33 @@ class PublicationContractsTest {
         previousEventHash = previousHash,
         authorityReferenceIds = setOf("authority-${state.name}"),
         occurredAt = Instant.parse("2026-07-12T10:00:00Z")
+    ).withComputedHash()
+
+    private fun recoveryEvent(
+        state: RecoveryPublicationState,
+        sequence: Int,
+        previousHash: String?,
+    ) = RecoveryPublicationStateEvent(
+        eventId = "recovery-${state.name}",
+        runId = "run-recovery",
+        state = state,
+        sequence = sequence,
+        previousEventHash = previousHash,
+        authorityReferenceIds = setOf("authority-${state.name}"),
+        occurredAt = Instant.parse("2026-07-12T10:00:00Z"),
+    ).withComputedHash()
+
+    private fun startupEvent(
+        state: StartupDiagnosticState,
+        sequence: Int,
+        previousHash: String?,
+    ) = StartupDiagnosticStateEvent(
+        eventId = "startup-${state.name}",
+        runId = "run-startup",
+        state = state,
+        sequence = sequence,
+        previousEventHash = previousHash,
+        authorityReferenceIds = setOf("authority-${state.name}"),
+        occurredAt = Instant.parse("2026-07-12T10:00:00Z"),
     ).withComputedHash()
 }

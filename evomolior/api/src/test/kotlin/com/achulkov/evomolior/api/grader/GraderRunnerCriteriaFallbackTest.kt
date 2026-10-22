@@ -5,6 +5,7 @@ import com.achulkov.evomolior.core.atlas.NodeId
 import com.achulkov.evomolior.core.contract.GraderAutomatedTestDraft
 import com.achulkov.evomolior.core.contract.GraderFailureModeDraft
 import com.achulkov.evomolior.core.contract.GraderMethodologyBindingCatalog
+import com.achulkov.evomolior.core.contract.GraderMethodologyBindingResolution
 import com.achulkov.evomolior.core.contract.GraderMethodologyDraft
 import com.achulkov.evomolior.core.contract.GraderMethodologyWireDraft
 import com.achulkov.evomolior.core.contract.GraderRequirementDraft
@@ -28,6 +29,9 @@ import kotlinx.serialization.json.Json
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class GraderRunnerCriteriaFallbackTest {
@@ -154,7 +158,7 @@ class GraderRunnerCriteriaFallbackTest {
     }
 
     @Test
-    fun `structured repair receives latest Critic rejection reason`() = runTest {
+    fun `structured repair receives latest rejected draft without exact authority`() = runTest {
         val factory = SubstrateDatabaseFactory(
             createTempDirectory("grader-critic-feedback-test").toFile()
         )
@@ -168,27 +172,70 @@ class GraderRunnerCriteriaFallbackTest {
         GraderAuthorityRepository(factory).appendAtlas(
             typedAtlas(runId, workerAtlasHash = workerAtlas.atlasHash)
         )
-        factory.getGrader(runId, graderGroupId).stagingDao().insert(
+        val olderDraft = validTypedDraft()
+        val latestDraft = olderDraft.copy(
+            automatedTests = olderDraft.automatedTests.map {
+                it.copy(
+                    testId = "grader-node",
+                    mappedRequirementIds = setOf("worker-node"),
+                    inputSchemaHash = "grader-node",
+                    expectedOutcomeHash = "worker-node"
+                )
+            },
+            failureModes = olderDraft.failureModes.map {
+                it.copy(modeId = "grader-node")
+            },
+            requirements = olderDraft.requirements.map {
+                it.copy(
+                    requirementId = "worker-node",
+                    criterion = "The criterion for grader-node must preserve worker-node lineage.",
+                    executableTestIds = listOf("grader-node"),
+                    noveltyFingerprint = "worker-node"
+                )
+            }
+        )
+        val graderDb = factory.getGrader(runId, graderGroupId)
+        listOf(
             StagingSubmissionEntity(
-                id = "rejected-methodology",
-                agentId = "grader-builder",
+                id = "older-rejected-methodology",
+                agentId = "grader-builder-old",
                 role = Role.GraderBuilder.name,
                 type = SubmissionType.PLAN_UPDATE.name,
                 content = Json.encodeToString(
                     GraderMethodologyDraft.serializer(),
-                    validTypedDraft()
+                    olderDraft
                 ),
-                budgetSignature = "GRADING_SHEET_DRAFT:grader-builder:1",
+                budgetSignature = "GRADING_SHEET_DRAFT:grader-builder-old:1",
                 status = "rejected",
-                rejectionReason = "Rubric guidance is generic and the final requirement is truncated.",
-                criticAgentId = "critic-grader-0-round-0",
+                rejectionReason = "Older Critic verdict.",
+                criticAgentId = "critic-grader-0-round-0-old",
+                generation = 1,
+                groupId = graderGroupId,
+                runId = runId,
+                submittedAtMs = 3_000L,
+                reviewedAtMs = 1_000L
+            ),
+            StagingSubmissionEntity(
+                id = "latest-rejected-methodology",
+                agentId = "grader-builder-latest",
+                role = Role.GraderBuilder.name,
+                type = SubmissionType.PLAN_UPDATE.name,
+                content = Json.encodeToString(
+                    GraderMethodologyDraft.serializer(),
+                    latestDraft
+                ),
+                budgetSignature = "GRADING_SHEET_DRAFT:grader-builder-latest:1",
+                status = "rejected",
+                rejectionReason =
+                    "Rubric guidance is generic; grader-node and worker-node must remain private.",
+                criticAgentId = "critic-grader-0-round-0-latest",
                 generation = 1,
                 groupId = graderGroupId,
                 runId = runId,
                 submittedAtMs = 1_000L,
                 reviewedAtMs = 2_000L
             )
-        )
+        ).forEach { graderDb.stagingDao().insert(it) }
         val requests =
             mutableListOf<com.achulkov.evomolior.agents.factory.StructuredGraderMethodologyRequest>()
         val runner = GraderRunner(
@@ -213,12 +260,189 @@ class GraderRunnerCriteriaFallbackTest {
             dimensions()
         )
 
-        assertTrue(
-            requests.single().validationError?.contains(
-                "Prior Critic verdict: Rubric guidance is generic and the final requirement is truncated."
-            ) == true
+        val request = requests.single()
+        assertEquals(
+            "Prior Critic rejected the persisted methodology. Repair the supplied redacted prior " +
+                "draft against the sealed objective-specific methodology contract.",
+            request.validationError
         )
+        val projected = assertNotNull(request.priorDraft)
+        val providerRepairPayload = buildString {
+            appendLine(request.validationError)
+            append(Json.encodeToString(GraderMethodologyWireDraft.serializer(), projected))
+        }
+        assertTrue("grader-node" !in providerRepairPayload, providerRepairPayload)
+        assertTrue("worker-node" !in providerRepairPayload, providerRepairPayload)
+        val row = request.bindingCatalog.nodeBindings.single()
+        assertTrue(row.graderNodeHandle in providerRepairPayload)
+        assertTrue(row.workerBindings.single().workerNodeHandle in providerRepairPayload)
     }
+
+    @Test
+    fun `latest blank Critic verdict keeps its rejected draft as repair authority`() = runTest {
+        val factory = SubstrateDatabaseFactory(
+            createTempDirectory("grader-blank-critic-feedback-test").toFile()
+        )
+        val runId = "run-blank-critic-feedback"
+        val graderGroupId = "grader-0"
+        val workerAtlas = initializeTestWorkerAtlas(
+            factory,
+            runId,
+            setOf(NodeId("worker-node"))
+        )
+        GraderAuthorityRepository(factory).appendAtlas(
+            typedAtlas(runId, workerAtlasHash = workerAtlas.atlasHash)
+        )
+        val olderDraft = validTypedDraft()
+        val latestDraft = olderDraft.copy(
+            requirements = olderDraft.requirements.map {
+                it.copy(criterion = "The latest blank-verdict criterion.")
+            }
+        )
+        val graderDb = factory.getGrader(runId, graderGroupId)
+        listOf(
+            StagingSubmissionEntity(
+                id = "older-rejected-methodology",
+                agentId = "grader-builder-old",
+                role = Role.GraderBuilder.name,
+                type = SubmissionType.PLAN_UPDATE.name,
+                content = Json.encodeToString(
+                    GraderMethodologyDraft.serializer(),
+                    olderDraft
+                ),
+                budgetSignature = "GRADING_SHEET_DRAFT:grader-builder-old:1",
+                status = "rejected",
+                rejectionReason = "Older Critic verdict.",
+                criticAgentId = "critic-old",
+                generation = 1,
+                groupId = graderGroupId,
+                runId = runId,
+                submittedAtMs = 1_000L,
+                reviewedAtMs = 1_000L
+            ),
+            StagingSubmissionEntity(
+                id = "latest-rejected-methodology",
+                agentId = "grader-builder-latest",
+                role = Role.GraderBuilder.name,
+                type = SubmissionType.PLAN_UPDATE.name,
+                content = Json.encodeToString(
+                    GraderMethodologyDraft.serializer(),
+                    latestDraft
+                ),
+                budgetSignature = "GRADING_SHEET_DRAFT:grader-builder-latest:1",
+                status = "rejected",
+                rejectionReason = "",
+                criticAgentId = "critic-latest",
+                generation = 1,
+                groupId = graderGroupId,
+                runId = runId,
+                submittedAtMs = 2_000L,
+                reviewedAtMs = 2_000L
+            )
+        ).forEach { graderDb.stagingDao().insert(it) }
+        val requests =
+            mutableListOf<com.achulkov.evomolior.agents.factory.StructuredGraderMethodologyRequest>()
+        val runner = GraderRunner(
+            openRouterApiKey = "sk-test",
+            substrateFactory = factory,
+            localAgentRunner = { "No replacement methodology was published interactively." },
+            graderAgentTimeoutMs = 1_000L,
+            structuredMethodologyAuthor = { request ->
+                requests += request
+                Json.encodeToString(
+                    GraderMethodologyWireDraft.serializer(),
+                    validWireDraft(request.bindingCatalog)
+                )
+            }
+        )
+
+        runner.runCriteriaPhase(
+            runId,
+            listOf(graderGroupId),
+            0,
+            "Evaluate shelter cooling evidence.",
+            dimensions()
+        )
+
+        val request = requests.single()
+        assertEquals(
+            "Prior Critic rejected the persisted methodology. Repair the supplied redacted prior " +
+                "draft against the sealed objective-specific methodology contract.",
+            request.validationError
+        )
+        val projected = assertNotNull(request.priorDraft)
+        val resolved = assertIs<GraderMethodologyBindingResolution.Resolved>(
+            request.bindingCatalog.resolve(projected)
+        )
+        assertEquals(latestDraft, resolved.draft)
+    }
+
+    @Test
+    fun `structured repair keeps Critic feedback when rejected methodology cannot be projected`() =
+        runTest {
+            val factory = SubstrateDatabaseFactory(
+                createTempDirectory("grader-malformed-critic-feedback-test").toFile()
+            )
+            val runId = "run-malformed-critic-feedback"
+            val graderGroupId = "grader-0"
+            val workerAtlas = initializeTestWorkerAtlas(
+                factory,
+                runId,
+                setOf(NodeId("worker-node"))
+            )
+            GraderAuthorityRepository(factory).appendAtlas(
+                typedAtlas(runId, workerAtlasHash = workerAtlas.atlasHash)
+            )
+            factory.getGrader(runId, graderGroupId).stagingDao().insert(
+                StagingSubmissionEntity(
+                    id = "malformed-rejected-methodology",
+                    agentId = "grader-builder",
+                    role = Role.GraderBuilder.name,
+                    type = SubmissionType.PLAN_UPDATE.name,
+                    content = """{"not":"a methodology"}""",
+                    budgetSignature = "GRADING_SHEET_DRAFT:grader-builder:1",
+                    status = "rejected",
+                    rejectionReason = "The methodology is malformed.",
+                    criticAgentId = "critic-grader-0-round-0",
+                    generation = 1,
+                    groupId = graderGroupId,
+                    runId = runId,
+                    submittedAtMs = 1_000L,
+                    reviewedAtMs = 2_000L
+                )
+            )
+            val requests =
+                mutableListOf<com.achulkov.evomolior.agents.factory.StructuredGraderMethodologyRequest>()
+            val runner = GraderRunner(
+                openRouterApiKey = "sk-test",
+                substrateFactory = factory,
+                localAgentRunner = { "No replacement methodology was published interactively." },
+                graderAgentTimeoutMs = 1_000L,
+                structuredMethodologyAuthor = { request ->
+                    requests += request
+                    Json.encodeToString(
+                        GraderMethodologyWireDraft.serializer(),
+                        validWireDraft(request.bindingCatalog)
+                    )
+                }
+            )
+
+            runner.runCriteriaPhase(
+                runId,
+                listOf(graderGroupId),
+                0,
+                "Evaluate shelter cooling evidence.",
+                dimensions()
+            )
+
+            assertEquals(
+                "Prior Critic rejected a methodology that cannot be safely projected into the " +
+                    "current sealed handle catalog. Author a fresh methodology against the sealed " +
+                    "contracts.",
+                requests.single().validationError
+            )
+            assertNull(requests.single().priorDraft)
+        }
 
     @Test
     fun `structured grader authorship retries validation and publishes model draft in leased scope`() =
@@ -279,6 +503,71 @@ class GraderRunnerCriteriaFallbackTest {
         }
 
     @Test
+    fun `structured grader authorship can repair progressive RE2 syntax failures`() = runTest {
+        val factory = SubstrateDatabaseFactory(
+            createTempDirectory("grader-structured-regex-repair-test").toFile()
+        )
+        val runId = "run-structured-regex-repair"
+        val graderGroupId = "grader-0"
+        val workerAtlas = initializeTestWorkerAtlas(
+            factory,
+            runId,
+            setOf(NodeId("worker-node"))
+        )
+        GraderAuthorityRepository(factory).appendAtlas(
+            typedAtlas(runId, workerAtlasHash = workerAtlas.atlasHash)
+        )
+        val requests =
+            mutableListOf<com.achulkov.evomolior.agents.factory.StructuredGraderMethodologyRequest>()
+        val patterns = listOf(
+            "(?s)(?=.*72)(?=.*deterministic).*",
+            "72[^\\n]{0,2000}(deterministic|reproducible)",
+            "72[\\s\\S]{0,512}(deterministic|reproducible)"
+        )
+        val runner = GraderRunner(
+            openRouterApiKey = "sk-test",
+            substrateFactory = factory,
+            localAgentRunner = { "No interactive methodology publication." },
+            graderAgentTimeoutMs = 1_000L,
+            structuredMethodologyAuthor = { request ->
+                requests += request
+                val draft = validWireDraft(request.bindingCatalog)
+                Json.encodeToString(
+                    GraderMethodologyWireDraft.serializer(),
+                    draft.copy(
+                        automatedTests = draft.automatedTests.map {
+                            it.copy(expectedOutputPattern = patterns[requests.lastIndex])
+                        }
+                    )
+                )
+            }
+        )
+
+        runner.runCriteriaPhase(
+            runId,
+            listOf(graderGroupId),
+            0,
+            "Evaluate shelter cooling evidence.",
+            dimensions()
+        )
+
+        assertEquals(3, requests.size)
+        assertTrue(
+            requests[1].validationError?.contains("no lookaround or backreferences") == true,
+            requests[1].validationError
+        )
+        assertTrue(
+            requests[2].validationError?.contains("upper limit of at most 1000") == true,
+            requests[2].validationError
+        )
+        val drafts = factory.getGrader(runId, graderGroupId).stagingDao()
+            .getAll(runId, graderGroupId)
+            .filter { it.budgetSignature.startsWith("GRADING_SHEET_DRAFT:") }
+        assertEquals(1, drafts.size)
+        assertTrue(drafts.single().content.contains("{0,512}"), drafts.single().content)
+    }
+
+    @Test
     fun `structured grader authorship fails closed after bounded malformed responses`() = runTest {
         val factory = SubstrateDatabaseFactory(
             createTempDirectory("grader-structured-fail-closed-test").toFile()
@@ -313,7 +602,7 @@ class GraderRunnerCriteriaFallbackTest {
             dimensions()
         )
 
-        assertEquals(2, attempts)
+        assertEquals(3, attempts)
         assertTrue(
             factory.getGrader(runId, graderGroupId).stagingDao()
                 .getAll(runId, graderGroupId)

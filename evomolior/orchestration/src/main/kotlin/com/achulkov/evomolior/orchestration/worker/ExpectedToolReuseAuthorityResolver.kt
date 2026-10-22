@@ -37,7 +37,8 @@ class ExpectedToolReuseAuthorityResolver {
     suspend fun resolve(
         database: EvoMoliorDatabase,
         atlas: NodeAtlas,
-        groupId: AtlasGroupId
+        groupId: AtlasGroupId,
+        opportunityCommitments: Map<String, ToolOpportunityCommitment>
     ): ExpectedToolReuseAuthority {
         val repository = ToolInfrastructureRepository(database)
         val resolved = database.toolRegistryDao()
@@ -82,14 +83,17 @@ class ExpectedToolReuseAuthorityResolver {
                 val atlasOpportunity = requireNotNull(atlasNode.toolOpportunity) {
                     "Active tool ${registryEntry.id} references an Atlas node without an opportunity"
                 }
-                val exactCommitment = ToolOpportunityCommitment(
-                    runId = atlas.runId,
-                    atlasHash = atlas.atlasHash,
-                    nodeId = atlasNode.id,
-                    opportunity = atlasOpportunity
-                ).withComputedHash()
+                val exactCommitment = requireNotNull(
+                    opportunityCommitments[atlasOpportunity.opportunityId]
+                ) {
+                    "Active tool ${registryEntry.id} lacks origin-version opportunity authority"
+                }
                 require(
-                    persistedCommitment == exactCommitment &&
+                    exactCommitment.hasValidHash() &&
+                        exactCommitment.runId == atlas.runId &&
+                        exactCommitment.nodeId == atlasNode.id &&
+                        exactCommitment.opportunity == atlasOpportunity &&
+                        persistedCommitment == exactCommitment &&
                         first.opportunityId == atlasOpportunity.opportunityId &&
                         first.originNodeId == atlasNode.id
                 ) {
@@ -112,10 +116,23 @@ class ExpectedToolReuseAuthorityResolver {
                     validationNodeIds = atlas.toolValidationNodeIds(atlasNode.id),
                     expectedNodeIds = atlasOpportunity.expectedReuseNodeIds,
                     completedNodeIds = repository.executions(first.toolVersionId)
-                        .filter {
-                            it.purpose == ToolExecutionPurpose.AGENT_USE &&
-                                it.result == ToolExecutionResult.SUCCEEDED &&
-                                it.opportunityId == first.opportunityId
+                        .filter { execution ->
+                            execution.hasValidHash() &&
+                                execution.runId == atlas.runId &&
+                                execution.toolVersionId == first.toolVersionId &&
+                                execution.groupId == groupId &&
+                                execution.agentId.value != registryEntry.authorAgentId &&
+                                execution.round > registryEntry.generation &&
+                                execution.nodeId in atlasOpportunity.expectedReuseNodeIds &&
+                                history.any { event ->
+                                    event.state ==
+                                        ToolLifecycleState.EXECUTED_BY_LATER_AGENT &&
+                                        event.contextNodeId == execution.nodeId &&
+                                        execution.executionId in event.authorityReferenceIds
+                                } &&
+                                execution.purpose == ToolExecutionPurpose.AGENT_USE &&
+                                execution.result == ToolExecutionResult.SUCCEEDED &&
+                                execution.opportunityId == first.opportunityId
                         }
                         .mapTo(linkedSetOf()) { it.nodeId }
                 )

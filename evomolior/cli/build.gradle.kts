@@ -41,6 +41,9 @@ tasks.withType<Test>().configureEach {
 }
 
 tasks.named<CreateStartScripts>("startScripts").configure {
+    val snapshotScript = layout.projectDirectory.file("src/startScripts/classpath-snapshot.sh")
+    val launchScript = layout.projectDirectory.file("src/startScripts/classpath-launch.sh")
+    inputs.files(snapshotScript, launchScript)
     doLast {
         val marker = """
 set -- \
@@ -48,36 +51,15 @@ set -- \
         com.achulkov.evomolior.cli.EvoMoliorCliMainKt \
         "${'$'}@"
 """.trimIndent()
-        val snapshotBlock = """
-# Snapshot the installed classpath into a private temp directory before launching.
-# This keeps concurrent EvoMolior CLI processes isolated from `installDist` rewrites
-# and from other CLI invocations that may update jars under APP_HOME/lib.
-if [ "${'$'}{EVOMOLIOR_DISABLE_CLASSPATH_SNAPSHOT:-}" != "1" ] && ! "${'$'}cygwin" && ! "${'$'}msys" ; then
-    SNAPSHOT_DIR="${'$'}{TMPDIR:-/tmp}/evomolior-cli-classpath-${'$'}${'$'}-$(date +%s)"
-    mkdir -p "${'$'}SNAPSHOT_DIR/lib" || die "Could not create classpath snapshot directory: ${'$'}SNAPSHOT_DIR"
-    SNAPSHOT_CLASSPATH=""
-    OLD_IFS=${'$'}IFS
-    IFS=:
-    for classpath_entry in ${'$'}CLASSPATH
-    do
-        case ${'$'}classpath_entry in
-            "${'$'}APP_HOME"/lib/*.jar)
-                jar_name=${'$'}{classpath_entry##*/}
-                cp -p "${'$'}classpath_entry" "${'$'}SNAPSHOT_DIR/lib/${'$'}jar_name" || die "Could not snapshot jar: ${'$'}classpath_entry"
-                SNAPSHOT_CLASSPATH="${'$'}{SNAPSHOT_CLASSPATH:+${'$'}SNAPSHOT_CLASSPATH:}${'$'}SNAPSHOT_DIR/lib/${'$'}jar_name"
-                ;;
-            *)
-                SNAPSHOT_CLASSPATH="${'$'}{SNAPSHOT_CLASSPATH:+${'$'}SNAPSHOT_CLASSPATH:}${'$'}classpath_entry"
-                ;;
-        esac
-    done
-    IFS=${'$'}OLD_IFS
-    CLASSPATH=${'$'}SNAPSHOT_CLASSPATH
-    trap 'rm -rf "${'$'}SNAPSHOT_DIR"' EXIT HUP INT TERM
-fi
-
-""".trimIndent()
-        unixScript.writeText(unixScript.readText().replace(marker, snapshotBlock + marker))
+        val execMarker = """exec "${'$'}JAVACMD" "${'$'}@""""
+        val script = unixScript.readText()
+        check(script.split(marker).size == 2 && script.split(execMarker).size == 2) {
+            "Gradle Unix launcher template changed: cannot safely install classpath snapshot lifecycle."
+        }
+        unixScript.writeText(
+            script.replace(marker, snapshotScript.asFile.readText() + "\n" + marker)
+                .replace(execMarker, launchScript.asFile.readText().trimEnd())
+        )
     }
 }
 
@@ -88,9 +70,25 @@ tasks.register("verifyStartScriptClasspathSnapshot") {
     dependsOn(tasks.named<CreateStartScripts>("startScripts"))
     doLast {
         val script = tasks.named<CreateStartScripts>("startScripts").get().unixScript
-        check(script.readText().contains("Snapshot the installed classpath")) {
-            "Generated Unix start script is missing the EvoMolior classpath snapshot block."
+        val text = script.readText()
+        check(text.contains("Snapshot the installed classpath") && text.contains("wait \"${'$'}snapshot_child\"")) {
+            "Generated Unix start script is missing the EvoMolior classpath snapshot lifecycle."
         }
+    }
+}
+
+tasks.register<Exec>("verifyStartScriptClasspathSnapshotLifecycle") {
+    group = "verification"
+    description = "Runs provider-free Unix launcher lifecycle tests (requires Python 3 and a JDK)."
+    notCompatibleWithConfigurationCache(
+        "Launcher lifecycle verification reads the generated launcher selected by the application plugin."
+    )
+    dependsOn(tasks.named<CreateStartScripts>("startScripts"))
+    val launcher = tasks.named<CreateStartScripts>("startScripts").map { it.unixScript }
+    val lifecycleTest = layout.projectDirectory.file("src/test/launcher/test_classpath_snapshot.py")
+    inputs.files(lifecycleTest, layout.projectDirectory.file("src/test/launcher/SnapshotProbe.java"))
+    doFirst {
+        commandLine("python3", lifecycleTest.asFile.absolutePath, "--launcher", launcher.get().absolutePath, "-v")
     }
 }
 
@@ -279,6 +277,10 @@ private data class AcceptanceInputs(
     val codexCliVersion: String,
     val evidence: List<AcceptanceEvidence>,
     val javaVersion: String,
+    val javaHome: Path,
+    val javaExecutableSha256: String,
+    val javaReleaseSha256: String,
+    val javaModulesSha256: String,
     val jvmTmpDir: Path,
     val modelAssignmentsSha256: String,
     val repositoryRoot: String,
@@ -287,8 +289,19 @@ private data class AcceptanceInputs(
     val sourceFiles: List<AcceptanceFile>,
 )
 
-private fun sha256(file: Path): String =
-    MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file)).joinToString("") { "%02x".format(it) }
+private fun sha256(file: Path): String {
+    check(file.isRegularFile()) { "Required hash authority is not a regular file: $file" }
+    val digest = MessageDigest.getInstance("SHA-256")
+    Files.newInputStream(file).use { input ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            digest.update(buffer, 0, read)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
 
 private fun sha256(text: String): String =
     MessageDigest.getInstance("SHA-256").digest(text.toByteArray(StandardCharsets.UTF_8))
@@ -367,6 +380,10 @@ private fun Project.acceptanceInputs(): AcceptanceInputs {
         "Acceptance property -P$ACCEPTANCE_CREATED_AT_UTC_PROPERTY must be an RFC 3339 UTC second " +
             "timestamp, for example 2026-07-19T00:00:00Z."
     }
+    val javaHome = Path.of(System.getProperty("java.home")).toRealPath()
+    val javaExecutable = javaHome.resolve("bin/java")
+    val javaRelease = javaHome.resolve("release")
+    val javaModules = javaHome.resolve("lib/modules")
     return AcceptanceInputs(
         createdAtUtc = createdAtUtc,
         configSha256 = acceptanceSha256Property(ACCEPTANCE_CONFIG_HASH_PROPERTY),
@@ -375,6 +392,10 @@ private fun Project.acceptanceInputs(): AcceptanceInputs {
         codexCliVersion = codexVersion,
         evidence = evidence,
         javaVersion = System.getProperty("java.runtime.version"),
+        javaHome = javaHome,
+        javaExecutableSha256 = sha256(javaExecutable),
+        javaReleaseSha256 = sha256(javaRelease),
+        javaModulesSha256 = sha256(javaModules),
         jvmTmpDir = file(acceptanceProperty(ACCEPTANCE_JVM_TMPDIR_PROPERTY)).toPath()
             .toAbsolutePath()
             .normalize()
@@ -494,6 +515,7 @@ private fun Project.acceptanceSourceFiles(): List<AcceptanceFile> {
     ).forEach(::addFile)
     addTree("build-logic")
     addTree("evomolior")
+    addTree("scripts")
 
     check(candidates.isNotEmpty()) { "Acceptance source inventory is unexpectedly empty." }
     return candidates.asSequence()
@@ -540,6 +562,10 @@ private fun acceptanceManifestCanonicalPayload(
     })
     append(']')
     append(",\"javaVersion\":${json(inputs.javaVersion)}")
+    append(",\"javaHome\":${json(inputs.javaHome.absolutePathString())}")
+    append(",\"javaExecutableSha256\":${json(inputs.javaExecutableSha256)}")
+    append(",\"javaReleaseSha256\":${json(inputs.javaReleaseSha256)}")
+    append(",\"javaModulesSha256\":${json(inputs.javaModulesSha256)}")
     append(",\"acceptanceJvmTmpDir\":${json(inputs.jvmTmpDir.absolutePathString())}")
     append(",\"mainClass\":${json(application.mainClass.get())}")
     append(",\"configurationSha256\":${json(inputs.configSha256)}")
@@ -588,6 +614,10 @@ private fun acceptanceContentId(inputs: AcceptanceInputs, installDirectory: Path
             "configSha256" to inputs.configSha256,
             "createdAtUtc" to inputs.createdAtUtc,
             "gateEvidenceSha256" to sha256(inputs.evidence.joinToString("\n") { "${it.path}:${it.sha256}" }),
+            "javaExecutableSha256" to inputs.javaExecutableSha256,
+            "javaHome" to inputs.javaHome.absolutePathString(),
+            "javaModulesSha256" to inputs.javaModulesSha256,
+            "javaReleaseSha256" to inputs.javaReleaseSha256,
             "javaVersion" to inputs.javaVersion,
             "jvmTmpDir" to inputs.jvmTmpDir.absolutePathString(),
             "launcherSha256" to jsonObject(sourceLaunchers),
@@ -653,9 +683,13 @@ val prepareAcceptanceDistribution = tasks.register("prepareAcceptanceDistributio
     description = "Validates Appendix B acceptance inputs and deterministically prepares its assembly key."
     dependsOn(tasks.named("installDist"))
     doLast {
+        val inputs = acceptanceInputs()
+        check(inputs.sourceClean) {
+            "Refusing to prepare an Appendix B acceptance distribution from a dirty source tree"
+        }
         val installDirectory = layout.buildDirectory.dir("install/evomolior").get().asFile.toPath()
         check(installDirectory.isDirectory()) { "installDist output is missing: $installDirectory" }
-        val contentId = acceptanceContentId(acceptanceInputs(), installDirectory)
+        val contentId = acceptanceContentId(inputs, installDirectory)
         val prepared = layout.buildDirectory.file("acceptance/prepared/$contentId").get().asFile.toPath()
         Files.createDirectories(prepared.parent)
         Files.writeString(prepared, "$contentId\n", StandardCharsets.UTF_8)
@@ -880,6 +914,8 @@ dependencies {
     implementation(project(":engine:agents"))
 
     implementation(libs.napier)
+    // Match the installed CLI's resolved slf4j-api; retain the existing JUL logging route.
+    runtimeOnly("org.slf4j:slf4j-jdk14:2.0.17")
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.ktor.server.core)

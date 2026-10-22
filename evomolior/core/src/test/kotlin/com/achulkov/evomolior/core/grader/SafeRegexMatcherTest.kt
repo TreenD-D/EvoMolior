@@ -20,4 +20,11 @@ class SafeRegexMatcherTest {
         assertFalse(SafeRegexMatcher.isValid("value(?=unsafe)"))
         assertNotNull(SafeRegexMatcher.validationError("value(?=unsafe)"))
     }
+
+    @Test
+    fun `RE2 repetition bounds stop at one thousand`() {
+        assertTrue(SafeRegexMatcher.isValid("value[\\s\\S]{0,1000}result"))
+        assertFalse(SafeRegexMatcher.isValid("value[\\s\\S]{0,1001}result"))
+        assertFalse(SafeRegexMatcher.isValid("value[\\s\\S]{0,2000}result"))
+    }
 }

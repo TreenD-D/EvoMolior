@@ -1,0 +1,27 @@
+{
+  "primary": {
+    "id": "arc2-inference-novelty",
+    "promptFile": "RUN_PROMPT.md",
+    "fast": false,
+    "rounds": 6,
+    "groupCount": 4,
+    "maxAgentsPerGroup": 5,
+    "roundDurationMinutes": 0,
+    "budgetOverride": 12000,
+    "finalOutputKind": "HTML_ARTICLE",
+    "finalOutput": {
+      "relativePath": "arc2-inference-novelty-report.html",
+      "mediaType": "text/html",
+      "description": "Standalone evidence-grounded ARC-AGI-2 inference, novelty, and Kaggle research report",
+      "kind": "HTML_ARTICLE",
+      "validation": {
+        "requireInteractiveHtml": true,
+        "researchClaimSupportCoverage": {
+          "minimumCoverage": 0.8,
+          "usedInFinalAnswerOnly": true
+        }
+      }
+    }
+  },
+  "stages": []
+}

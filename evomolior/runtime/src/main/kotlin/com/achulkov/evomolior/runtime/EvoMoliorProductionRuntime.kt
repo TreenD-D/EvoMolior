@@ -3,6 +3,10 @@
 package com.achulkov.evomolior.runtime
 
 import com.achulkov.evomolior.agents.factory.CouncilRunner
+import com.achulkov.evomolior.agents.runner.expectedAgentStopReason
+import com.achulkov.evomolior.core.council.CouncilFeasibilityReport
+import com.achulkov.evomolior.substrate.db.entity.MetaArchiveEntryEntity
+import kotlinx.serialization.json.Json
 import com.achulkov.evomolior.agents.factory.EvoMoliorAgentFactory
 import com.achulkov.evomolior.agents.factory.GraderAgentContext
 import com.achulkov.evomolior.agents.factory.ProviderCallCostRecorder
@@ -14,6 +18,7 @@ import com.achulkov.evomolior.agents.factory.countProductiveAgentActions
 import com.achulkov.evomolior.agents.factory.requireProductiveAgentOutcome
 import com.achulkov.evomolior.agents.factory.requiresGenericNoActionRecovery
 import com.achulkov.evomolior.agents.factory.requiresRuntimeSourceAcquisition
+import com.achulkov.evomolior.agents.tools.ToolAuthoringRuntime
 import com.achulkov.evomolior.competition.coordinator.GroupCoordinator
 import com.achulkov.evomolior.competition.grader.GraderGroupManager
 import com.achulkov.evomolior.core.budget.BudgetConfig
@@ -25,13 +30,18 @@ import com.achulkov.evomolior.api.model.RunConfig
 import com.achulkov.evomolior.api.service.AcceptanceRunBoundaryVerifier
 import com.achulkov.evomolior.api.service.CouncilExecutionEnvelopeFactory
 import com.achulkov.evomolior.core.config.LlmBackend
+import com.achulkov.evomolior.core.config.CodexReasoningEffort
+import com.achulkov.evomolior.core.config.CodexRuntimePreset
+import com.achulkov.evomolior.core.model.Role
 import com.achulkov.evomolior.core.config.LlmTimeoutPolicy
 import com.achulkov.evomolior.core.config.ModelSelectionConfig
 import com.achulkov.evomolior.core.contract.BlockingAgentAbortException
 import com.achulkov.evomolior.core.contract.CostLedgerPolicy
 import com.achulkov.evomolior.core.contract.StartingField
 import com.achulkov.evomolior.core.atlas.NodeId
-import com.achulkov.evomolior.core.atlas.ToolOpportunityCommitment
+import com.achulkov.evomolior.core.atlas.AtlasHashing
+import com.achulkov.evomolior.core.atlas.ToolOpportunityBindingCapability
+import com.achulkov.evomolior.core.atlas.ToolOpportunityCommitmentAuthority
 import com.achulkov.evomolior.core.model.GroupProfile
 import com.achulkov.evomolior.core.model.GroupProfileType
 import com.achulkov.evomolior.orchestration.council.GenesisCouncil
@@ -39,8 +49,14 @@ import com.achulkov.evomolior.orchestration.lifecycle.LifecycleManager
 import com.achulkov.evomolior.orchestration.lifecycle.ToolSubmissionValidationResult
 import com.achulkov.evomolior.orchestration.lifecycle.ToolSubmissionValidator
 import com.achulkov.evomolior.orchestration.metaplanner.MetaPlannerRunner
+import com.achulkov.evomolior.orchestration.tooltransport.ToolCandidateWireCompiler
+import com.achulkov.evomolior.orchestration.tooltransport.ToolContractWorkspaceCompiler
+import com.achulkov.evomolior.orchestration.tooltransport.ToolContractWorkspaceMaterializer
+import com.achulkov.evomolior.orchestration.tooltransport.ToolOpportunityBindingCatalogCompiler
+import com.achulkov.evomolior.orchestration.tooltransport.ToolOpportunityLeaseAuthority
 import com.achulkov.evomolior.api.service.EvoMoliorRunService
 import com.achulkov.evomolior.api.service.RunArchiveService
+import com.achulkov.evomolior.api.service.ToolTransportAttemptStore
 import com.achulkov.evomolior.sandbox.shuru.ShuruVmManager
 import com.achulkov.evomolior.sandbox.toolsandbox.ToolSubSandbox
 import com.achulkov.evomolior.substrate.SubstrateDatabaseFactory
@@ -48,10 +64,14 @@ import com.achulkov.evomolior.substrate.atlas.AtlasTransactionRepository
 import com.achulkov.evomolior.substrate.cost.CostLedgerRepository
 import com.achulkov.evomolior.substrate.db.EvoMoliorDatabase
 import com.achulkov.evomolior.substrate.db.entity.StagingSubmissionEntity
+import com.achulkov.evomolior.substrate.repair.ToolRepairPersistenceRepository
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.io.path.createTempDirectory
 
 private const val OPENROUTER_PROVIDER_502_NEEDLE = "Provider returned error (code: 502)"
@@ -59,6 +79,18 @@ private const val OPENROUTER_GENERIC_502_NEEDLE = "(code: 502)"
 private const val OPENROUTER_PROVIDER_PARSE_NEEDLE = "JsonLiteral is not a JsonObject"
 private const val OPENROUTER_PROVIDER_TOOL_PARSE_NEEDLE = "toolCallPartsOrNull"
 private const val OPENROUTER_ALIBABA_INVALID_PARAMETER_NEEDLE = "InternalError.Algo.InvalidParameter"
+private const val MAX_TOOL_REPAIR_ATTEMPTS = 3
+
+internal fun shouldSkipGeneratedToolRepair(
+    priorRunAttempts: Int,
+    visibleDiagnosticCount: Int,
+    hasSealedApproach: Boolean,
+): Boolean =
+    priorRunAttempts >= MAX_TOOL_REPAIR_ATTEMPTS ||
+        (
+            priorRunAttempts > 0 &&
+                (visibleDiagnosticCount == 0 || !hasSealedApproach)
+            )
 
 /**
  * Container for the production EvoMolior engine wiring used by both the desktop UI and CLI.
@@ -90,7 +122,9 @@ private fun resolveUtilityModelForBackend(
     LlmBackend.QWEN_CLOUD -> requestedModelId
         .takeIf { it in QWEN_CLOUD_TEXT_MODEL_IDS }
         ?: qwenFallbackModelId
-    LlmBackend.CODEX_CHATGPT -> ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL
+    LlmBackend.CODEX_CHATGPT -> requestedModelId
+        .takeIf { it in CodexRuntimePreset.ALL_MODEL_IDS }
+        ?: ModelSelectionConfig.CODEX_CHATGPT_GPT56_LUNA_MODEL
 }
 
 /**
@@ -142,16 +176,20 @@ internal fun resolveCouncilCodexExecutionTimeout(
 internal fun createProductionInProcessAgentFactory(
     openRouterApiKey: String,
     llmBackend: LlmBackend,
+    codexReasoningEffort: CodexReasoningEffort = CodexReasoningEffort.HIGH,
     database: EvoMoliorDatabase,
     workspaceDir: File,
     budgetConfig: BudgetConfig,
     toolsMountHostPath: String,
     costLedgerRepository: CostLedgerRepository,
     taskToolCapabilityPolicy: TaskToolCapabilityPolicy,
-    toolSubmissionPreflight: suspend (StagingSubmissionEntity) -> String?
+    toolSubmissionPreflight: suspend (StagingSubmissionEntity) -> String?,
+    codexRuntimePreset: CodexRuntimePreset? = null,
 ): EvoMoliorAgentFactory = EvoMoliorAgentFactory(
     openRouterApiKey = openRouterApiKey,
     llmBackend = llmBackend,
+    codexReasoningEffort = codexReasoningEffort,
+    codexRuntimePreset = codexRuntimePreset,
     db = database,
     toolSubSandbox = ToolSubSandbox(workspaceDir),
     budgetConfig = budgetConfig,
@@ -160,6 +198,172 @@ internal fun createProductionInProcessAgentFactory(
     taskToolCapabilityPolicy = taskToolCapabilityPolicy,
     toolSubmissionPreflight = toolSubmissionPreflight
 )
+
+private suspend fun createProductionToolAuthoringRuntime(
+    bootContext: com.achulkov.evomolior.core.contract.AgentBootContext,
+    database: EvoMoliorDatabase,
+    workspaceDir: File,
+    atlasTransactionRepository: AtlasTransactionRepository,
+    toolTransportAttemptStore: ToolTransportAttemptStore,
+    runRepairRepository: ToolRepairPersistenceRepository,
+): ToolAuthoringRuntime? {
+    val view = bootContext.workerView ?: return null
+    val skeleton = view.assignedToolSkeleton ?: return null
+    val assignedNode = requireNotNull(view.assignedNode) {
+        "Generated tool workspace requires an assigned Atlas node"
+    }
+    val opportunity = requireNotNull(assignedNode.toolOpportunity) {
+        "Generated tool workspace requires an assigned tool opportunity"
+    }
+    val lease = requireNotNull(bootContext.assignedLease) {
+        "Generated tool workspace requires an active Atlas lease"
+    }
+    require(
+        lease.nodeId == assignedNode.nodeId &&
+            bootContext.runId == view.runId &&
+            bootContext.groupId == view.groupId.value &&
+            bootContext.generation == view.round
+    ) { "Generated tool workspace authority does not match the worker lifecycle" }
+    val atlas = requireNotNull(
+        atlasTransactionRepository.currentAtlas(bootContext.runId)
+    ) { "Generated tool workspace requires current Atlas authority" }
+    val history = atlasTransactionRepository.versionHistory(
+        bootContext.runId,
+        atlas.atlasId
+    )
+    require(history.lastOrNull() == atlas) {
+        "Generated tool workspace requires complete Atlas history"
+    }
+    val commitment = requireNotNull(
+        ToolOpportunityCommitmentAuthority.resolve(history)
+            .byOpportunityId[opportunity.opportunityId]
+    ) { "Generated tool workspace lacks origin-version opportunity authority" }
+    val capability = ToolOpportunityBindingCapability(
+        runId = bootContext.runId,
+        groupId = bootContext.groupId,
+        round = bootContext.generation,
+        workerViewHash = view.viewHash
+    )
+    val catalog = ToolOpportunityBindingCatalogCompiler.compile(
+        view = view,
+        lease = ToolOpportunityLeaseAuthority(
+            leaseId = lease.leaseId,
+            nodeId = lease.nodeId.value,
+            capability = capability
+        ),
+        commitment = commitment
+    )
+    val workspace = ToolContractWorkspaceCompiler.compile(
+        catalog = catalog,
+        capability = capability,
+        commitment = commitment,
+        skeleton = skeleton,
+        publicTests = emptyList()
+    )
+    val repairRepository = ToolRepairPersistenceRepository(database)
+    val priorRunAttempts = runRepairRepository.attempts(opportunity.opportunityId)
+    if (
+        shouldSkipGeneratedToolRepair(
+            priorRunAttempts = priorRunAttempts.size,
+            visibleDiagnosticCount = view.assignedToolRepairDiagnostics.size,
+            hasSealedApproach = view.assignedToolRepairApproach != null,
+        )
+    ) {
+        Napier.w(
+            "Skipping generated tool authoring because repair authority is unavailable or exhausted " +
+                "(run=${bootContext.runId}, group=${bootContext.groupId}, opportunity=${opportunity.opportunityId}, " +
+                "attempts=${priorRunAttempts.size}, diagnostics=${view.assignedToolRepairDiagnostics.size}, " +
+                "sealedApproach=${view.assignedToolRepairApproach != null})"
+        )
+        return null
+    }
+    val visibleById = repairRepository.visibleDiagnostics(
+        runId = bootContext.runId,
+        groupId = bootContext.groupId,
+        opportunityId = opportunity.opportunityId,
+        round = bootContext.generation
+    ).associateBy { it.diagnosticId }
+    val workerVisibleIds = view.assignedToolRepairDiagnostics
+        .map { it.diagnosticId }
+        .toSet()
+    require(workerVisibleIds.all(visibleById::containsKey)) {
+        "Worker tool-repair projection lacks durable diagnostic authority"
+    }
+    val visibleDiagnostics = workerVisibleIds
+        .map(visibleById::getValue)
+        .sortedBy { it.diagnosticId }
+    require(
+        priorRunAttempts.isEmpty() ||
+            (
+                visibleDiagnostics.isNotEmpty() &&
+                    view.assignedToolRepairApproach != null
+                )
+    ) {
+        "Generated tool repair requires run-global sealed approach authority"
+    }
+    val workspaceRoot = workspaceDir.toPath()
+        .toAbsolutePath()
+        .normalize()
+        .resolve("tool-authoring")
+        .resolve(AtlasHashing.hashText(bootContext.agentId).take(24))
+        .resolve(AtlasHashing.hashText(lease.leaseId).take(24))
+        .resolve("workspace")
+    requireSafeToolWorkspaceRoot(workspaceDir.toPath(), workspaceRoot)
+    require(Files.notExists(workspaceRoot)) {
+        "Generated tool workspace already exists for this worker lifecycle"
+    }
+    ToolContractWorkspaceMaterializer.materialize(workspace, workspaceRoot)
+    val compiler = ToolCandidateWireCompiler(
+        catalog = catalog,
+        capability = capability,
+        workspace = workspace,
+        commitment = commitment,
+        workspaceRoot = workspaceRoot,
+        visibleRepairDiagnostics = visibleDiagnostics,
+        repairApproachVector = view.assignedToolRepairApproach
+    )
+    val transportAttemptSequence = AtomicLong(0L)
+    return ToolAuthoringRuntime(
+        workspace = workspace,
+        workspaceRoot = workspaceRoot,
+        compileCandidate = { draft ->
+            compiler.compile(draft).also { compilation ->
+                toolTransportAttemptStore.append(
+                    runId = bootContext.runId,
+                    groupId = bootContext.groupId,
+                    agentId = bootContext.agentId,
+                    round = bootContext.generation,
+                    compilation = compilation,
+                    attemptId = "tool-wire-attempt-" + AtlasHashing.hashText(
+                        listOf(
+                            bootContext.runId,
+                            bootContext.groupId,
+                            bootContext.agentId,
+                            bootContext.generation,
+                            workspace.workspaceHash,
+                            transportAttemptSequence.getAndIncrement(),
+                        ).joinToString("|")
+                    ).take(32),
+                )
+            }
+        }
+    )
+}
+
+private fun requireSafeToolWorkspaceRoot(base: Path, target: Path) {
+    val normalizedBase = base.toAbsolutePath().normalize()
+    val normalizedTarget = target.toAbsolutePath().normalize()
+    require(normalizedTarget.startsWith(normalizedBase)) {
+        "Generated tool workspace escapes the configured group workspace"
+    }
+    var current = normalizedBase
+    normalizedBase.relativize(normalizedTarget).forEach { segment ->
+        current = current.resolve(segment)
+        require(!Files.isSymbolicLink(current)) {
+            "Generated tool workspace must not traverse symbolic links"
+        }
+    }
+}
 
 /**
  * Runs one neutral Genesis Council stage and freezes its exact comparative runtime payload.
@@ -219,6 +423,7 @@ suspend fun generateComparativeRuntimeInputs(
  * Builds the production EvoMolior runtime used by the desktop UI and the console CLI.
  *
  * @param dataRootDir Root directory for durable engine state.
+ * @param codexRuntimePreset Optional operator-owned Codex role distribution.
  * @param acceptanceRunBoundaryVerifier Synchronous immutable-input verifier for non-normal
  * acceptance authority boundaries.
  * @return The fully wired runtime components.
@@ -232,30 +437,35 @@ fun createProductionRuntime(
     leakTransformModelId: String = ModelSelectionConfig.DEFAULT_LEAK_TRANSFORM_MODEL,
     comparativeRuntimeInputs: ComparativeRuntimeInputs? = null,
     acceptanceRunBoundaryVerifier: AcceptanceRunBoundaryVerifier =
-        AcceptanceRunBoundaryVerifier.NONE
+        AcceptanceRunBoundaryVerifier.NONE,
+    codexRuntimePreset: CodexRuntimePreset? = null,
 ): EvoMoliorProductionRuntime {
+    require(codexRuntimePreset == null || llmBackend == LlmBackend.CODEX_CHATGPT) {
+        "Codex presets require the Codex backend"
+    }
     val substrateFactory = SubstrateDatabaseFactory(dataRootDir)
     val atlasTransactionRepository = AtlasTransactionRepository(substrateFactory)
     val shuruVmManager = ShuruVmManager()
     val archiveService = RunArchiveService(substrateFactory)
+    val toolTransportAttemptStore = ToolTransportAttemptStore(substrateFactory)
     val resolvedCouncilModelId = resolveUtilityModelForBackend(
         llmBackend = llmBackend,
-        requestedModelId = councilModelId,
+        requestedModelId = codexRuntimePreset?.defaultModel(Role.CouncilSynthesis) ?: councilModelId,
         qwenFallbackModelId = ModelSelectionConfig.QWEN_CLOUD_QWEN_PLUS_MODEL
     )
     val resolvedGraderModelId = resolveUtilityModelForBackend(
         llmBackend = llmBackend,
-        requestedModelId = graderModelId,
+        requestedModelId = codexRuntimePreset?.defaultModel(Role.GraderResearcher) ?: graderModelId,
         qwenFallbackModelId = ModelSelectionConfig.QWEN_CLOUD_QWEN_PLUS_MODEL
     )
     val resolvedCriticPipelineModelId = resolveUtilityModelForBackend(
         llmBackend = llmBackend,
-        requestedModelId = criticPipelineModelId,
+        requestedModelId = codexRuntimePreset?.defaultModel(Role.Critic) ?: criticPipelineModelId,
         qwenFallbackModelId = ModelSelectionConfig.QWEN_CLOUD_QWEN_PLUS_MODEL
     )
     val resolvedLeakTransformModelId = resolveUtilityModelForBackend(
         llmBackend = llmBackend,
-        requestedModelId = leakTransformModelId,
+        requestedModelId = codexRuntimePreset?.defaultModel(Role.Connector) ?: leakTransformModelId,
         qwenFallbackModelId = ModelSelectionConfig.QWEN_CLOUD_DEEPSEEK_FLASH_MODEL
     )
     fun createLifecycleManager(
@@ -265,7 +475,9 @@ fun createProductionRuntime(
         agentJarPath: String,
         groupProfile: GroupProfile,
         activeBackend: LlmBackend,
-        cumulativeCostCap: Double?
+        codexReasoningEffort: CodexReasoningEffort,
+        cumulativeCostCap: Double?,
+        activeCodexPreset: CodexRuntimePreset?,
     ): LifecycleManager {
             Napier.i("EvoMoliorRuntime: creating LifecycleManager for runId=$runId groupId=$groupId profile=${groupProfile.profileType}")
 
@@ -287,12 +499,24 @@ fun createProductionRuntime(
                     if (nodeId == null || atlas == null || opportunity == null) {
                         null
                     } else {
-                        ToolOpportunityCommitment(
-                            runId = runId,
-                            atlasHash = atlas.atlasHash,
-                            nodeId = nodeId,
-                            opportunity = opportunity
-                        ).withComputedHash()
+                        val history = atlasTransactionRepository.versionHistory(
+                            runId,
+                            atlas.atlasId
+                        )
+                        require(history.lastOrNull() == atlas) {
+                            "Tool submission preflight lacks complete current Atlas history"
+                        }
+                        requireNotNull(
+                            ToolOpportunityCommitmentAuthority.resolve(history)
+                                .byOpportunityId[opportunity.opportunityId]
+                        ).also { commitment ->
+                            require(
+                                commitment.nodeId == nodeId &&
+                                    commitment.opportunity == opportunity
+                            ) {
+                                "Tool submission preflight authority does not match its Atlas node"
+                            }
+                        }
                     }
                 }
             )
@@ -300,6 +524,8 @@ fun createProductionRuntime(
             val agentFactory = createProductionInProcessAgentFactory(
                 openRouterApiKey = openRouterApiKey,
                 llmBackend = activeBackend,
+                codexReasoningEffort = codexReasoningEffort,
+                codexRuntimePreset = activeCodexPreset,
                 database = groupDb,
                 workspaceDir = workspaceDir,
                 budgetConfig = budgetConfig,
@@ -328,6 +554,7 @@ fun createProductionRuntime(
                 agentJarPath = agentJarPath,
                 openRouterApiKey = openRouterApiKey,
                 llmBackend = activeBackend,
+                codexRuntimePreset = activeCodexPreset,
                 groupProfile = groupProfile,
                 localAgentRunner = { bootContext, onBudgetLedger ->
                     val agentId = bootContext.agentId
@@ -343,9 +570,22 @@ fun createProductionRuntime(
 
                     val deathNoteProtocol = com.achulkov.evomolior.agents.runner.DeathNoteProtocol(bootContext, groupDb.stagingDao())
                     val startMs = System.currentTimeMillis()
-
-                    val agentContext = try {
-                        agentFactory.create(bootContext, deathNoteProtocol = deathNoteProtocol)
+                    val (toolAuthoringRuntime, agentContext) = try {
+                        val toolAuthoringRuntime = createProductionToolAuthoringRuntime(
+                            bootContext = bootContext,
+                            database = groupDb,
+                            workspaceDir = workspaceDir,
+                            atlasTransactionRepository = atlasTransactionRepository,
+                            toolTransportAttemptStore = toolTransportAttemptStore,
+                            runRepairRepository = ToolRepairPersistenceRepository(
+                                substrateFactory.getAtlas(runId)
+                            ),
+                        )
+                        toolAuthoringRuntime to agentFactory.create(
+                                bootContext = bootContext,
+                                deathNoteProtocol = deathNoteProtocol,
+                                toolAuthoringRuntime = toolAuthoringRuntime
+                            )
                     } catch (e: Exception) {
                         val durationMs = System.currentTimeMillis() - startMs
                         Napier.e(
@@ -414,7 +654,8 @@ fun createProductionRuntime(
                             val recoveryContext = agentFactory.create(
                                 bootContext = bootContext,
                                 existingBudgetLedger = agentContext.budgetLedger,
-                                deathNoteProtocol = deathNoteProtocol
+                                deathNoteProtocol = deathNoteProtocol,
+                                toolAuthoringRuntime = toolAuthoringRuntime
                             )
                             finalResult = runWithOpenRouterProviderRetryLocal("AgentRunner[$agentId]/no-action-recovery") {
                                 recoveryContext.agent.run(noActionRecoveryPrompt)
@@ -434,7 +675,8 @@ fun createProductionRuntime(
                                 val writeOnlyContext = agentFactory.create(
                                     bootContext = bootContext,
                                     existingBudgetLedger = agentContext.budgetLedger,
-                                    deathNoteProtocol = deathNoteProtocol
+                                    deathNoteProtocol = deathNoteProtocol,
+                                    toolAuthoringRuntime = toolAuthoringRuntime
                                 )
                                 finalResult = runWithOpenRouterProviderRetryLocal("AgentRunner[$agentId]/write-only-recovery") {
                                     writeOnlyContext.agent.run(
@@ -514,10 +756,16 @@ fun createProductionRuntime(
                         throw e
                     } catch (e: Exception) {
                         val durationMs = System.currentTimeMillis() - startMs
-                        Napier.e(
-                            "EvoMolior [$groupId]: agent $agentId (${role.name}) RUN FAILED after ${durationMs}ms [${e::class.simpleName}]: ${e.message}",
-                            e
-                        )
+                        val expectedStop = expectedAgentStopReason(e)
+                        if (expectedStop != null) {
+                            Napier.i("EvoMolior [$groupId]: writer $agentId controlled stop " +
+                                "after ${durationMs}ms ($expectedStop); settlement still required")
+                        } else {
+                            Napier.e(
+                                "EvoMolior [$groupId]: agent $agentId (${role.name}) RUN FAILED after ${durationMs}ms [${e::class.simpleName}]: ${e.message}",
+                                e
+                            )
+                        }
                         if (!deathNoteProtocol.isWritten) {
                             agentFactory.writeEmergencyDeathNote(
                                 bootContext = bootContext,
@@ -543,7 +791,9 @@ fun createProductionRuntime(
                 agentJarPath,
                 groupProfile,
                 llmBackend,
-                null
+                CodexReasoningEffort.HIGH,
+                null,
+                codexRuntimePreset,
             )
         },
         lifecycleManagerProviderWithExecutionEnvelope = {
@@ -562,7 +812,9 @@ fun createProductionRuntime(
                 agentJarPath,
                 groupProfile,
                 activeBackend,
-                envelope?.providerCostCapUsd
+                envelope?.codexReasoningEffort ?: CodexReasoningEffort.HIGH,
+                envelope?.providerCostCapUsd,
+                envelope?.codexRuntimePreset ?: codexRuntimePreset,
             )
         },
         groupCoordinatorProvider = { groupIds, dimensions ->
@@ -579,6 +831,23 @@ fun createProductionRuntime(
                 privacyTransformModelId = resolvedLeakTransformModelId
             )
         },
+        groupCoordinatorProviderWithReasoning = {
+                groupIds,
+                dimensions,
+                openRouterApiKey,
+                codexReasoningEffort ->
+            Napier.i("EvoMoliorRuntime: creating keyed GroupCoordinator for groups=$groupIds")
+            GroupCoordinator(
+                groupIds = groupIds,
+                dimensions = dimensions,
+                openRouterApiKey = openRouterApiKey,
+                llmBackend = llmBackend,
+                codexReasoningEffort = codexRuntimePreset
+                    ?.reasoningEffort(Role.Connector, codexReasoningEffort)
+                    ?: codexReasoningEffort,
+                privacyTransformModelId = resolvedLeakTransformModelId
+            )
+        },
         graderGroupManagerProvider = { dimensions ->
             Napier.i("EvoMoliorRuntime: creating GraderGroupManager with ${dimensions.size} dimensions")
             GraderGroupManager(dimensions = dimensions)
@@ -586,6 +855,8 @@ fun createProductionRuntime(
         substrateFactory = substrateFactory,
         shuruVmManager = shuruVmManager,
         archiveService = archiveService,
+        toolTransportClosureMeasurementProvider =
+            toolTransportAttemptStore::measurements,
         acceptanceRunBoundaryVerifier = acceptanceRunBoundaryVerifier,
         comparativeRuntimeInputs = comparativeRuntimeInputs,
         criticModelOverride = resolvedCriticPipelineModelId,
@@ -604,6 +875,7 @@ fun createProductionRuntime(
             val criteriaRunner = com.achulkov.evomolior.api.grader.GraderRunner(
                 openRouterApiKey = openRouterApiKey,
                 llmBackend = llmBackend,
+                codexReasoningEffort = engineService.codexReasoningEffort(runId),
                 substrateFactory = substrateFactory,
                 localAgentRunner = ::runGraderCriteriaAgent,
                 graderAgentTimeoutMs = GRADER_CRITERIA_AGENT_TIMEOUT_MS,
@@ -640,6 +912,7 @@ fun createProductionRuntime(
             val judgingRunner = com.achulkov.evomolior.api.grader.GraderRunner(
                 openRouterApiKey = openRouterApiKey,
                 llmBackend = llmBackend,
+                codexReasoningEffort = engineService.codexReasoningEffort(runId),
                 substrateFactory = substrateFactory,
                 localAgentRunner = ::runGraderJudgeAgent,
                 graderBudgetMultiplier = engineService.adversarialDiscriminatorBudgetMultiplier(runId),
@@ -689,6 +962,7 @@ fun createProductionRuntime(
             val noveltyRunner = com.achulkov.evomolior.api.grader.GraderRunner(
                 openRouterApiKey = openRouterApiKey,
                 llmBackend = llmBackend,
+                codexReasoningEffort = engineService.codexReasoningEffort(runId),
                 substrateFactory = substrateFactory,
                 localAgentRunner = ::runGraderJudgeAgent,
                 graderBudgetMultiplier =
@@ -754,15 +1028,35 @@ fun createProductionRuntime(
                 }
             )
 
-            Napier.i("GenesisCouncil: running council agents (this may take 1–3 minutes)")
-            onProgress?.invoke("Genesis Council running 8 specialist agents in sequence…")
+            Napier.i("GenesisCouncil: running bounded specialist and synthesis work")
+            onProgress?.invoke("Genesis Council running specialists, then synthesis and bounded repairs…")
 
-            council.runCompiled(
+            var feasibility: CouncilFeasibilityReport? = null
+            val compiled = council.runCompiled(
                 runId = runId,
                 agentRunner = runner.agentRunner(),
                 inputArtifacts = inputArtifacts,
-                onProgress = onProgress
+                onProgress = onProgress,
+                onFeasibility = { feasibility = it },
             )
+            feasibility?.let { report ->
+                substrateFactory.get(runId, "__meta_archive__").metaArchiveDao().insert(
+                    MetaArchiveEntryEntity(
+                        id = "council-feasibility-$runId",
+                        runId = runId,
+                        entryType = "COUNCIL_FEASIBILITY_V1",
+                        groupId = null,
+                        label = "Council necessary scheduling bounds — ${report.status}",
+                        contentJson = Json.encodeToString(CouncilFeasibilityReport.serializer(), report),
+                        runObjective = objective,
+                        finalScore = null,
+                        isFromWinner = false,
+                        generation = 0,
+                        archivedAtMs = System.currentTimeMillis(),
+                    )
+                )
+            }
+            compiled
         }
     )
 

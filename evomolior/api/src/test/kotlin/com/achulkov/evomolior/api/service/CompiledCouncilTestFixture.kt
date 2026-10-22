@@ -73,6 +73,7 @@ internal fun compiledCouncilTestFixture(
     },
     topologyOrder: List<String> = workerGroupKeys,
     topologyKind: GroupTopologyKind = GroupTopologyKind.RING,
+    outputTransform: (CouncilRoleOutputBundle) -> CouncilRoleOutputBundle = { it },
     generalTests: List<CompiledCouncilGeneralTestFixture> = listOf(
         CompiledCouncilGeneralTestFixture(
             testId = "delivery-test",
@@ -82,8 +83,8 @@ internal fun compiledCouncilTestFixture(
             expectedText = "receiver-delivery-accepted"
         )
     )
-): StartingFieldCompileResult.Valid = assertIs(
-    compiledCouncilFixtureResult(
+): StartingFieldCompileResult.Valid {
+    val result = compiledCouncilFixtureResult(
         runId = runId,
         objective = objective,
         envelope = envelope,
@@ -92,9 +93,17 @@ internal fun compiledCouncilTestFixture(
         workerProfiles = workerProfiles,
         topologyOrder = topologyOrder,
         topologyKind = topologyKind,
+        outputTransform = outputTransform,
         generalTests = generalTests
     )
-)
+    return assertIs<StartingFieldCompileResult.Valid>(
+        result,
+        (result as? StartingFieldCompileResult.Invalid)
+            ?.errors
+            ?.joinToString(" | ") { "${it.code}:${it.path}:${it.message}" }
+            .orEmpty()
+    )
+}
 
 internal fun compiledCouncilFixtureResult(
     runId: String,
@@ -110,6 +119,7 @@ internal fun compiledCouncilFixtureResult(
     },
     topologyOrder: List<String> = workerGroupKeys,
     topologyKind: GroupTopologyKind = GroupTopologyKind.RING,
+    outputTransform: (CouncilRoleOutputBundle) -> CouncilRoleOutputBundle = { it },
     generalTests: List<CompiledCouncilGeneralTestFixture>
 ): StartingFieldCompileResult {
     require(generalTests.isNotEmpty())
@@ -305,7 +315,7 @@ internal fun compiledCouncilFixtureResult(
         runId = runId,
         rawObjective = objective,
         envelope = envelope,
-        outputs = output,
+        outputs = outputTransform(output),
         inputArtifacts = inputArtifacts
     )
 }

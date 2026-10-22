@@ -1,6 +1,8 @@
 package com.achulkov.evomolior.core.council
 
 import com.achulkov.evomolior.core.contract.StartingField
+import com.achulkov.evomolior.core.atlas.ReceiverContract
+import com.achulkov.evomolior.core.deliverable.ReceiverDeliverableBlueprintCompiler
 import com.achulkov.evomolior.core.grader.GraderAtlas
 import com.achulkov.evomolior.core.atlas.NodeAtlas
 import java.security.MessageDigest
@@ -209,7 +211,7 @@ object CouncilFieldSealing {
     const val CANONICALIZATION_VERSION = "evomolior-canonical-json-v1"
 
     /** Current field seal schema version. */
-    const val SEAL_SCHEMA_VERSION = "3"
+    const val SEAL_SCHEMA_VERSION = "4"
 
     /**
      * Creates a seal for one compiled worker/grader field pair.
@@ -218,6 +220,7 @@ object CouncilFieldSealing {
      * @param graderField Grader field before or after attaching a seal.
      * @param atlas Authoritative compiled Atlas.
      * @param graderAtlas Authoritative compiled Grader Atlas.
+     * @param receiverContract Exact receiver authority used to compile the deliverable blueprint.
      * @param envelope Exact execution envelope supplied to the Council.
      * @param report Typed compiler consistency report.
      * @return Reproducible seal commitment.
@@ -227,6 +230,7 @@ object CouncilFieldSealing {
         graderField: StartingField,
         atlas: NodeAtlas,
         graderAtlas: GraderAtlas,
+        receiverContract: ReceiverContract,
         envelope: ExecutionEnvelope,
         report: FieldConsistencyReport
     ): StartingFieldSeal = StartingFieldSeal(
@@ -235,6 +239,8 @@ object CouncilFieldSealing {
         graderFieldHash = CouncilContractHashing.hashStartingField(graderField),
         atlasHash = atlas.atlasHash,
         graderAtlasHash = graderAtlas.atlasHash,
+        deliverableBlueprintHash =
+            ReceiverDeliverableBlueprintCompiler.compile(receiverContract).blueprintHash,
         envelopeHash = CouncilContractHashing.hashExecutionEnvelope(envelope),
         consistencyReportHash = CouncilContractHashing.hashConsistencyReport(report)
     )
@@ -247,6 +253,7 @@ object CouncilFieldSealing {
      * @param graderField Persisted grader field.
      * @param atlas Persisted authoritative Atlas.
      * @param graderAtlas Persisted authoritative Grader Atlas.
+     * @param receiverContract Persisted exact receiver authority.
      * @param envelope Persisted execution envelope.
      * @param report Persisted typed consistency report.
      * @return `true` only when the version contract and every commitment match.
@@ -257,6 +264,7 @@ object CouncilFieldSealing {
         graderField: StartingField,
         atlas: NodeAtlas,
         graderAtlas: GraderAtlas,
+        receiverContract: ReceiverContract,
         envelope: ExecutionEnvelope,
         report: FieldConsistencyReport
     ): Boolean =
@@ -275,6 +283,15 @@ object CouncilFieldSealing {
             CouncilContractHashing.constantTimeEquals(
                 seal.graderAtlasHash,
                 graderAtlas.atlasHash
+            ) &&
+            CouncilContractHashing.constantTimeEquals(
+                atlas.receiverContractHash,
+                com.achulkov.evomolior.core.atlas.AtlasHashing
+                    .hashReceiverContract(receiverContract)
+            ) &&
+            CouncilContractHashing.constantTimeEquals(
+                seal.deliverableBlueprintHash,
+                ReceiverDeliverableBlueprintCompiler.compile(receiverContract).blueprintHash
             ) &&
             CouncilContractHashing.constantTimeEquals(
                 seal.envelopeHash,
